@@ -1,0 +1,44 @@
+import { useState } from "react";
+import type { Movie } from "../lib/types";
+import { cn } from "../lib/format";
+
+export function PosterCard({
+  movie,
+  onOpen,
+  delay = 0,
+}: {
+  movie: Movie;
+  onOpen: (movie: Movie) => void;
+  delay?: number;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(movie)}
+      className="poster-card group relative w-[clamp(150px,16vw,210px)] shrink-0 snap-start overflow-hidden rounded-[6px] bg-surface text-left"
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      <div className="aspect-[2/3] w-full bg-white/5">
+        {movie.posterUrl ? (
+          <img
+            src={movie.posterUrl}
+            alt={movie.name}
+            loading="lazy"
+            onLoad={() => setLoaded(true)}
+            className={cn("h-full w-full object-cover", loaded && "img-fade")}
+          />
+        ) : (
+          <div className="grid h-full place-items-center px-3 text-center text-sm text-muted">
+            {movie.name}
+          </div>
+        )}
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent p-2.5 pt-10 opacity-0 transition-opacity duration-180 group-hover:opacity-100">
+        <p className="line-clamp-2 text-[13px] font-medium text-white">{movie.name}</p>
+        {movie.year ? <p className="text-[11px] text-white/70">{movie.year}</p> : null}
+      </div>
+    </button>
+  );
+}

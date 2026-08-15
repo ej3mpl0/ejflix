@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Env and secrets — never commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.jks
+*.keystore
+tauri.key
+tauri.key.pub
+*.sig
+
+# Session / tokens if someone copies AppData into the repo
+session.json
+**/session.json
+*.local
+*.local.json
+
+# Frontend build
+dist/
+dist-ssr/
+*.tsbuildinfo
+
+# Installers and release drops
+release/
+*.msi
+*.nsis.zip
+*.exe
+!scripts/**
+
+# Rust / Tauri build
+target/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/WixTools/
+*.pdb
+*.ilk
+
+# Bundled mpv (download locally with npm run prepare-mpv)
+src-tauri/resources/*.exe
+src-tauri/resources/*.dll
+src-tauri/resources/mpv.exe
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Cursor local state (keep committed project skills in .agents/)
+.cursor/
