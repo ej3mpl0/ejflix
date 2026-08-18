@@ -93,6 +93,14 @@ pub struct Movie {
     pub subtitle_labels: Vec<String>,
     pub directors: Vec<String>,
     pub cast: Vec<String>,
+    pub kind: String,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub season_id: Option<String>,
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
+    pub child_count: Option<i32>,
+    pub played: bool,
     #[serde(skip_serializing)]
     pub stream_url: String,
     pub media_source_id: Option<String>,
@@ -112,8 +120,11 @@ pub struct HomeData {
     pub featured: Option<Movie>,
     pub resume: Vec<Movie>,
     pub latest: Vec<Movie>,
+    pub latest_series: Vec<Movie>,
+    pub next_up: Vec<Movie>,
     pub genres: Vec<GenreRow>,
     pub all: Vec<Movie>,
+    pub series: Vec<Movie>,
 }
 
 #[derive(Clone)]
@@ -304,17 +315,28 @@ impl JellyfinClient {
         let session = self.require_session().await?;
         let fields = item_fields();
         let resume_path = format!(
-            "/Users/{}/Items/Resume?IncludeItemTypes=Movie&Limit=16&Fields={fields}",
+            "/Users/{}/Items/Resume?IncludeItemTypes=Movie,Episode&Limit=16&Fields={fields}",
             session.user_id
         );
         let all_path = format!(
             "/Users/{}/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=80&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
             session.user_id
         );
-        let (resume, latest, all, genres) = tokio::try_join!(
+        let series_path = format!(
+            "/Users/{}/Items?IncludeItemTypes=Series&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=80&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
+            session.user_id
+        );
+        let next_up_path = format!(
+            "/Shows/NextUp?UserId={}&Limit=16&Fields={fields}&EnableImageTypes=Primary,Backdrop,Thumb,Logo",
+            session.user_id
+        );
+        let (resume, latest, latest_series, all, series, next_up, genres) = tokio::try_join!(
             self.items_query(&resume_path),
-            self.latest_movies(&session, fields),
+            self.latest_items(&session, fields, "Movie", 18),
+            self.latest_items(&session, fields, "Series", 18),
             self.items_query(&all_path),
+            self.items_query(&series_path),
+            self.items_query(&next_up_path),
             self.genre_rows(&session, fields),
         )?;
 
@@ -322,16 +344,23 @@ impl JellyfinClient {
             .iter()
             .find(|m| m.backdrop_url.is_some())
             .cloned()
+            .or_else(|| latest_series.iter().find(|m| m.backdrop_url.is_some()).cloned())
             .or_else(|| all.iter().find(|m| m.backdrop_url.is_some()).cloned())
+            .or_else(|| series.iter().find(|m| m.backdrop_url.is_some()).cloned())
             .or_else(|| latest.first().cloned())
-            .or_else(|| all.first().cloned());
+            .or_else(|| latest_series.first().cloned())
+            .or_else(|| all.first().cloned())
+            .or_else(|| series.first().cloned());
 
         Ok(HomeData {
             featured,
             resume,
             latest,
+            latest_series,
+            next_up,
             genres,
             all,
+            series,
         })
     }
 
@@ -348,7 +377,7 @@ impl JellyfinClient {
             ))
             .await?;
         if !res.status().is_success() {
-            return Err("No se encontró la película".into());
+            return Err("No se encontró el título".into());
         }
         let value: Value = res.json().await.map_err(|e| e.to_string())?;
         self.map_item(&session, &value)
@@ -400,10 +429,92 @@ impl JellyfinClient {
         }
         let fields = item_fields();
         self.items_query(&format!(
-            "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie&Recursive=true&Limit=48&Fields={fields}",
+            "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie,Series,Episode&Recursive=true&Limit=48&Fields={fields}",
             session.user_id
         ))
         .await
+    }
+
+    pub async fn get_seasons(&self, series_id: &str) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(series_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Shows/{series_id}/Seasons?UserId={}&Fields={fields}&EnableImages=true",
+            session.user_id
+        ))
+        .await
+    }
+
+    pub async fn get_episodes(&self, series_id: &str, season_id: Option<&str>) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(series_id) {
+            return Err("Ítem no válido".into());
+        }
+        if let Some(season_id) = season_id {
+            if !valid_item_id(season_id) {
+                return Err("Ítem no válido".into());
+            }
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let season = season_id
+            .map(|id| format!("&SeasonId={id}"))
+            .unwrap_or_default();
+        self.items_query(&format!(
+            "/Shows/{series_id}/Episodes?UserId={}&Fields={fields}&EnableImageTypes=Primary,Backdrop,Thumb{season}",
+            session.user_id
+        ))
+        .await
+    }
+
+    pub async fn resolve_playable(&self, id: &str) -> Result<Movie, String> {
+        let item = self.get_item(id).await?;
+        match item.kind.as_str() {
+            "Movie" | "Episode" => Ok(item),
+            "Series" => self.playable_for_series(&item.id).await,
+            "Season" => {
+                let series_id = item
+                    .series_id
+                    .clone()
+                    .ok_or_else(|| "Temporada sin serie".to_string())?;
+                let episodes = self.get_episodes(&series_id, Some(&item.id)).await?;
+                episodes
+                    .iter()
+                    .find(|ep| !ep.played)
+                    .cloned()
+                    .or_else(|| episodes.into_iter().next())
+                    .ok_or_else(|| "Esta temporada no tiene capítulos".to_string())
+            }
+            _ => Err("Este título no se puede reproducir".into()),
+        }
+    }
+
+    async fn playable_for_series(&self, series_id: &str) -> Result<Movie, String> {
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let next = self
+            .items_query(&format!(
+                "/Shows/NextUp?UserId={}&SeriesId={series_id}&Limit=1&Fields={fields}&EnableImageTypes=Primary,Backdrop,Thumb",
+                session.user_id
+            ))
+            .await
+            .unwrap_or_default();
+        if let Some(ep) = next.into_iter().next() {
+            return Ok(ep);
+        }
+        let seasons = self.get_seasons(series_id).await?;
+        for season in seasons {
+            let episodes = self.get_episodes(series_id, Some(&season.id)).await?;
+            if let Some(ep) = episodes.iter().find(|ep| !ep.played).cloned() {
+                return Ok(ep);
+            }
+            if let Some(ep) = episodes.into_iter().next() {
+                return Ok(ep);
+            }
+        }
+        Err("Esta serie no tiene capítulos".into())
     }
 
     pub async fn report_start(
@@ -468,15 +579,21 @@ impl JellyfinClient {
         self.post_json("/Sessions/Playing/Stopped", &body).await
     }
 
-    async fn latest_movies(&self, session: &Session, fields: &str) -> Result<Vec<Movie>, String> {
+    async fn latest_items(
+        &self,
+        session: &Session,
+        fields: &str,
+        item_type: &str,
+        limit: u32,
+    ) -> Result<Vec<Movie>, String> {
         let res = self
             .get(&format!(
-                "/Users/{}/Items/Latest?IncludeItemTypes=Movie&Limit=18&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
+                "/Users/{}/Items/Latest?IncludeItemTypes={item_type}&Limit={limit}&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
                 session.user_id
             ))
             .await?;
         if !res.status().is_success() {
-            return Err(format!("Jellyfin Latest: {}", res.status()));
+            return Err(format!("Jellyfin Latest {item_type}: {}", res.status()));
         }
         let value: Value = res.json().await.map_err(|e| e.to_string())?;
         let items = if value.is_array() {
@@ -494,7 +611,7 @@ impl JellyfinClient {
     async fn genre_rows(&self, session: &Session, fields: &str) -> Result<Vec<GenreRow>, String> {
         let res = self
             .get(&format!(
-                "/Genres?IncludeItemTypes=Movie&UserId={}&Recursive=true&SortBy=SortName",
+                "/Genres?IncludeItemTypes=Movie,Series&UserId={}&Recursive=true&SortBy=SortName",
                 session.user_id
             ))
             .await?;
@@ -519,7 +636,7 @@ impl JellyfinClient {
         for (id, name) in genres {
             let items = self
                 .items_query(&format!(
-                    "/Users/{}/Items?GenreIds={id}&IncludeItemTypes=Movie&Recursive=true&Limit=18&SortBy=CommunityRating,SortName&SortOrder=Descending&Fields={fields}",
+                    "/Users/{}/Items?GenreIds={id}&IncludeItemTypes=Movie,Series&Recursive=true&Limit=18&SortBy=CommunityRating,SortName&SortOrder=Descending&Fields={fields}",
                     session.user_id
                 ))
                 .await
@@ -611,9 +728,21 @@ impl JellyfinClient {
                 400,
                 image_tags.get("Primary").and_then(|v| v.as_str()),
             ),
-            backdrop_url: backdrop_tags.first().and_then(|tag| {
-                image_url(session, &id, "Backdrop", 1920, tag.as_str())
-            }),
+            backdrop_url: backdrop_tags
+                .first()
+                .and_then(|tag| image_url(session, &id, "Backdrop", 1920, tag.as_str()))
+                .or_else(|| {
+                    let parent_id = value
+                        .get("ParentBackdropItemId")
+                        .and_then(|v| v.as_str())
+                        .or_else(|| value.get("SeriesId").and_then(|v| v.as_str()))?;
+                    let tag = value
+                        .get("ParentBackdropImageTags")
+                        .and_then(|v| v.as_array())
+                        .and_then(|arr| arr.first())
+                        .and_then(|v| v.as_str());
+                    image_url(session, parent_id, "Backdrop", 1920, tag)
+                }),
             logo_url: image_url(
                 session,
                 &id,
@@ -673,6 +802,65 @@ impl JellyfinClient {
             subtitle_labels,
             directors,
             cast,
+            kind: value
+                .get("Type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Movie")
+                .to_string(),
+            series_id: value
+                .get("SeriesId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            series_name: value
+                .get("SeriesName")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            season_id: value
+                .get("SeasonId")
+                .and_then(|v| v.as_str())
+                .or_else(|| {
+                    let kind = value.get("Type").and_then(|v| v.as_str()).unwrap_or("");
+                    if kind == "Episode" {
+                        value.get("ParentId").and_then(|v| v.as_str())
+                    } else {
+                        None
+                    }
+                })
+                .map(|s| s.to_string()),
+            season_number: {
+                let kind = value.get("Type").and_then(|v| v.as_str()).unwrap_or("");
+                if kind == "Season" {
+                    value
+                        .get("IndexNumber")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n as i32)
+                } else {
+                    value
+                        .get("ParentIndexNumber")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n as i32)
+                }
+            },
+            episode_number: {
+                let kind = value.get("Type").and_then(|v| v.as_str()).unwrap_or("");
+                if kind == "Episode" {
+                    value
+                        .get("IndexNumber")
+                        .and_then(|v| v.as_i64())
+                        .map(|n| n as i32)
+                } else {
+                    None
+                }
+            },
+            child_count: value
+                .get("ChildCount")
+                .and_then(|v| v.as_i64())
+                .or_else(|| value.get("RecursiveItemCount").and_then(|v| v.as_i64()))
+                .map(|n| n as i32),
+            played: user_data
+                .and_then(|u| u.get("Played"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             id,
         })
     }
@@ -708,7 +896,7 @@ impl JellyfinClient {
 }
 
 fn item_fields() -> &'static str {
-    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags"
+    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,ChildCount,RecursiveItemCount,SeriesStatus,SeriesName,ParentIndexNumber,IndexNumber,SeriesId,ParentId,ParentBackdropImageTags,ParentBackdropItemId,SeriesPrimaryImageTag"
 }
 
 fn user_image_url(user_id: &str, tag: Option<&str>) -> String {

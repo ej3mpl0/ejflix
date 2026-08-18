@@ -146,6 +146,25 @@ async fn search_items(state: State<'_, AppState>, query: String) -> Result<Vec<M
     state.jellyfin.search(&query).await
 }
 
+#[tauri::command]
+async fn get_seasons(state: State<'_, AppState>, series_id: String) -> Result<Vec<Movie>, String> {
+    state.jellyfin.get_seasons(&series_id).await
+}
+
+#[tauri::command]
+async fn get_episodes(
+    state: State<'_, AppState>,
+    series_id: String,
+    season_id: Option<String>,
+) -> Result<Vec<Movie>, String> {
+    state.jellyfin.get_episodes(&series_id, season_id.as_deref()).await
+}
+
+#[tauri::command]
+async fn resolve_playable(state: State<'_, AppState>, id: String) -> Result<Movie, String> {
+    state.jellyfin.resolve_playable(&id).await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayArgs {
@@ -620,6 +639,9 @@ pub fn run() {
             get_home,
             get_item,
             search_items,
+            get_seasons,
+            get_episodes,
+            resolve_playable,
             player_start,
             player_stop,
             player_toggle_pause,

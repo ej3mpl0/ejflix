@@ -46,6 +46,14 @@ export type Movie = {
   directors: string[];
   cast: string[];
   mediaSourceId: string | null;
+  kind: string;
+  seriesId: string | null;
+  seriesName: string | null;
+  seasonId: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  childCount: number | null;
+  played: boolean;
 };
 
 export type GenreRow = {
@@ -58,8 +66,11 @@ export type HomeData = {
   featured: Movie | null;
   resume: Movie[];
   latest: Movie[];
+  latestSeries: Movie[];
+  nextUp: Movie[];
   genres: GenreRow[];
   all: Movie[];
+  series: Movie[];
 };
 
 export type PlayerTrack = {
@@ -89,3 +100,5 @@ export type Toast = {
   id: number;
   message: string;
 };
+
+export type CatalogView = "home" | "movies" | "series" | "search";

@@ -20,8 +20,10 @@ The interface is available in **Spanish** and **English**. Use the ES / EN contr
 
 - Connect with the Jellyfin server URL only, then pick a profile
 - Saved server, profiles, and session (the access token is encrypted with Windows DPAPI)
-- Home with hero, continue watching, recently added, and genre rows
-- Movie details, ratings, resume or start over
+- Home with hero, continue watching, next episode, recently added movies and series, and genre rows
+- Movies and series catalogs, with seasons and episodes in the details modal
+- Movie and series details, ratings, resume or start over
+- Play a series from the next unwatched episode
 - Overlay player controls on top of the mpv video window
 - Language selector: Spanish and English
 - Native playback: Direct Play, hardware decode, HDR when Windows HDR is on

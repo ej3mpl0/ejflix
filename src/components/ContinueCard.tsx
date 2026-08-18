@@ -48,8 +48,14 @@ export function ContinueCard({
           <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />
         </div>
       </div>
-      <p className="mt-2 truncate text-sm text-text">{movie.name}</p>
-      <p className="text-[12px] text-dim tabular">{t("remaining", { n: remaining })}</p>
+      <p className="mt-2 truncate text-sm text-text">
+        {movie.kind === "Episode" && movie.seriesName ? movie.seriesName : movie.name}
+      </p>
+      <p className="text-[12px] text-dim tabular">
+        {movie.kind === "Episode" && movie.seasonNumber != null && movie.episodeNumber != null
+          ? `${t("episodeCode", { s: movie.seasonNumber, e: movie.episodeNumber })} · ${movie.name}`
+          : t("remaining", { n: remaining })}
+      </p>
     </div>
   );
 }
