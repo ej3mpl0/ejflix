@@ -54,6 +54,8 @@ export type Movie = {
   episodeNumber: number | null;
   childCount: number | null;
   played: boolean;
+  favorite?: boolean;
+  itemType?: string;
 };
 
 export type GenreRow = {
@@ -101,4 +103,4 @@ export type Toast = {
   message: string;
 };
 
-export type CatalogView = "home" | "movies" | "series" | "search";
+export type CatalogView = "home" | "movies" | "series" | "search" | "mylist";

@@ -142,8 +142,37 @@ async fn get_item(state: State<'_, AppState>, id: String) -> Result<Movie, Strin
 }
 
 #[tauri::command]
-async fn search_items(state: State<'_, AppState>, query: String) -> Result<Vec<Movie>, String> {
-    state.jellyfin.search(&query).await
+async fn search_items(
+    state: State<'_, AppState>,
+    query: String,
+    genre: Option<String>,
+    year: Option<i32>,
+) -> Result<Vec<Movie>, String> {
+    state.jellyfin.search(&query, genre.as_deref(), year).await
+}
+
+#[tauri::command]
+async fn get_favorites(state: State<'_, AppState>) -> Result<Vec<Movie>, String> {
+    state.jellyfin.favorites().await
+}
+
+#[tauri::command]
+async fn set_favorite(
+    state: State<'_, AppState>,
+    item_id: String,
+    favorite: bool,
+) -> Result<bool, String> {
+    state.jellyfin.set_favorite(&item_id, favorite).await
+}
+
+#[tauri::command]
+async fn get_library(
+    state: State<'_, AppState>,
+    genre: Option<String>,
+    year: Option<i32>,
+    sort: Option<String>,
+) -> Result<Vec<Movie>, String> {
+    state.jellyfin.library(genre.as_deref(), year, sort.as_deref()).await
 }
 
 #[tauri::command]
@@ -642,6 +671,9 @@ pub fn run() {
             get_seasons,
             get_episodes,
             resolve_playable,
+            get_favorites,
+            set_favorite,
+            get_library,
             player_start,
             player_stop,
             player_toggle_pause,

@@ -13,7 +13,17 @@ export const api = {
   logoutServer: () => invoke<void>("logout_server"),
   getHome: () => invoke<HomeData>("get_home"),
   getItem: (id: string) => invoke<Movie>("get_item", { id }),
-  searchItems: (query: string) => invoke<Movie[]>("search_items", { query }),
+  searchItems: (query: string, genre?: string | null, year?: number | null) =>
+    invoke<Movie[]>("search_items", { query, genre: genre ?? null, year: year ?? null }),
+  getFavorites: () => invoke<Movie[]>("get_favorites"),
+  setFavorite: (itemId: string, favorite: boolean) =>
+    invoke<boolean>("set_favorite", { itemId, favorite }),
+  getLibrary: (args?: { genre?: string | null; year?: number | null; sort?: string | null }) =>
+    invoke<Movie[]>("get_library", {
+      genre: args?.genre ?? null,
+      year: args?.year ?? null,
+      sort: args?.sort ?? null,
+    }),
   getSeasons: (seriesId: string) => invoke<Movie[]>("get_seasons", { seriesId }),
   getEpisodes: (seriesId: string, seasonId?: string | null) =>
     invoke<Movie[]>("get_episodes", { seriesId, seasonId: seasonId ?? null }),

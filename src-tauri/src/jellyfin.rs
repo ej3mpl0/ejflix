@@ -104,6 +104,8 @@ pub struct Movie {
     #[serde(skip_serializing)]
     pub stream_url: String,
     pub media_source_id: Option<String>,
+    pub favorite: bool,
+    pub item_type: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -417,7 +419,12 @@ impl JellyfinClient {
         Ok((bytes.to_vec(), content_type))
     }
 
-    pub async fn search(&self, query: &str) -> Result<Vec<Movie>, String> {
+    pub async fn search(
+        &self,
+        query: &str,
+        genre: Option<&str>,
+        year: Option<i32>,
+    ) -> Result<Vec<Movie>, String> {
         let session = self.require_session().await?;
         let trimmed = query.trim();
         if trimmed.len() > 200 {
@@ -428,8 +435,24 @@ impl JellyfinClient {
             return Ok(vec![]);
         }
         let fields = item_fields();
-        self.items_query(&format!(
+        let mut path = format!(
             "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie,Series,Episode&Recursive=true&Limit=48&Fields={fields}",
+            session.user_id
+        );
+        if let Some(genre) = genre.map(str::trim).filter(|s| !s.is_empty()) {
+            path.push_str(&format!("&Genres={}", urlencoding_lite(genre)));
+        }
+        if let Some(year) = year.filter(|y| (1900..=2100).contains(y)) {
+            path.push_str(&format!("&Years={year}"));
+        }
+        self.items_query(&path).await
+    }
+
+    pub async fn favorites(&self) -> Result<Vec<Movie>, String> {
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Users/{}/Items?Filters=IsFavorite&IncludeItemTypes=Movie,Series&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=80&Fields={fields}",
             session.user_id
         ))
         .await
@@ -515,6 +538,50 @@ impl JellyfinClient {
             }
         }
         Err("Esta serie no tiene capítulos".into())
+    }
+
+    pub async fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<bool, String> {
+        if !valid_item_id(item_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let path = format!("/Users/{}/FavoriteItems/{item_id}", session.user_id);
+        if favorite {
+            self.post_json(&path, &json!({})).await?;
+        } else {
+            self.delete_path(&path).await?;
+        }
+        Ok(favorite)
+    }
+
+    pub async fn library(
+        &self,
+        genre: Option<&str>,
+        year: Option<i32>,
+        sort: Option<&str>,
+    ) -> Result<Vec<Movie>, String> {
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let sort = match sort.unwrap_or("name") {
+            "year" => "ProductionYear",
+            "rating" => "CommunityRating",
+            "added" => "DateCreated",
+            _ => "SortName",
+        };
+        let mut path = format!(
+            "/Users/{}/Items?IncludeItemTypes=Movie,Series&Recursive=true&SortBy={sort}&SortOrder=Descending&Limit=120&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
+            session.user_id
+        );
+        if sort == "SortName" {
+            path = path.replace("SortOrder=Descending", "SortOrder=Ascending");
+        }
+        if let Some(genre) = genre.map(str::trim).filter(|s| !s.is_empty()) {
+            path.push_str(&format!("&Genres={}", urlencoding_lite(genre)));
+        }
+        if let Some(year) = year.filter(|y| (1900..=2100).contains(y)) {
+            path.push_str(&format!("&Years={year}"));
+        }
+        self.items_query(&path).await
     }
 
     pub async fn report_start(
@@ -862,6 +929,15 @@ impl JellyfinClient {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
             id,
+            favorite: user_data
+                .and_then(|u| u.get("IsFavorite"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            item_type: value
+                .get("Type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Movie")
+                .to_string(),
         })
     }
 
@@ -884,6 +960,23 @@ impl JellyfinClient {
             .post(&url)
             .headers(auth_headers(&session.device_id, Some(&session.token)))
             .json(body)
+            .send()
+            .await
+            .map_err(|e| format!("Error de red: {e}"))?;
+        if res.status().is_success() || res.status().as_u16() == 204 {
+            Ok(())
+        } else {
+            Err(format!("Jellyfin {path}: {}", res.status()))
+        }
+    }
+
+    async fn delete_path(&self, path: &str) -> Result<(), String> {
+        let session = self.require_session().await?;
+        let url = format!("{}{path}", session.server_url);
+        let res = self
+            .client_for(&url)
+            .delete(&url)
+            .headers(auth_headers(&session.device_id, Some(&session.token)))
             .send()
             .await
             .map_err(|e| format!("Error de red: {e}"))?;
