@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Play, RotateCcw, X } from "lucide-react";
+import { Play, RotateCcw, X, Plus, Check } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { formatClock, formatRuntime, ticksToSeconds } from "../lib/format";
@@ -39,13 +39,16 @@ export function MovieModal({
   movie,
   onClose,
   onPlay,
+  onFavorite,
 }: {
   movie: Movie;
   onClose: () => void;
   onPlay: (movie: Movie) => void;
+  onFavorite?: (movie: Movie) => void;
 }) {
   const { t } = useI18n();
   const [detail, setDetail] = useState(movie);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -116,6 +119,29 @@ export function MovieModal({
                   {t("startOver")}
                 </button>
               ) : null}
+              <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    const next = !detail.favorite;
+                    await api.setFavorite(detail.id, next);
+                    const updated = { ...detail, favorite: next };
+                    setDetail(updated);
+                    onFavorite?.(updated);
+                  } catch {
+                    /* toast handled by parent if needed */
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                className="btn-press inline-flex h-11 items-center gap-2 rounded-md bg-[rgba(109,109,110,0.7)] pr-6 pl-5 text-[15px] font-semibold text-white hover:bg-[rgba(109,109,110,0.5)]"
+                aria-label={detail.favorite ? t("removeFromList") : t("addToList")}
+              >
+                {detail.favorite ? <Check size={16} /> : <Plus size={16} />}
+                {detail.favorite ? t("removeFromList") : t("addToList")}
+              </button>
             </div>
           </div>
         </div>

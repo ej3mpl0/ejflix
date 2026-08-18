@@ -46,6 +46,8 @@ export type Movie = {
   directors: string[];
   cast: string[];
   mediaSourceId: string | null;
+  favorite?: boolean;
+  itemType?: string;
 };
 
 export type GenreRow = {
