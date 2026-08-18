@@ -76,10 +76,14 @@ The ES / EN control is on the login, profile, and home screens. The choice is st
 | Key | Action |
 | --- | --- |
 | Space / K | Play / pause |
-| Left / Right | Seek 10 seconds |
+| J / Left | Seek back 10 seconds |
+| L / Right | Seek forward 10 seconds |
+| 0–9 | Jump to 0%–90% |
 | Up / Down | Volume |
 | M | Mute |
 | F | Fullscreen |
+| Double-click | Fullscreen |
+| / | Focus search (home) |
 | Esc | Exit player |
 
 ## Security notes

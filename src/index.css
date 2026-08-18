@@ -169,6 +169,15 @@ p {
   animation: fade-in 500ms var(--ease-out-soft) both;
 }
 
+@keyframes hero-drift {
+  from { transform: scale(1.04); }
+  to { transform: scale(1.1); }
+}
+.hero-still {
+  animation: fade-in 700ms var(--ease-out-soft) both, hero-drift 28s linear forwards;
+  transform-origin: center center;
+}
+
 @keyframes fade-scale {
   from {
     opacity: 0;
@@ -265,6 +274,7 @@ p {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .hero-still,
   .enter,
   .fade-in,
   .img-fade,

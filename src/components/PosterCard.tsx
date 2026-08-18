@@ -42,6 +42,11 @@ export function PosterCard({
           </span>
         ) : null}
       </div>
+      {movie.playedPercentage > 2 ? (
+        <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
+          <div className="h-full bg-accent" style={{ width: `${Math.min(100, movie.playedPercentage)}%` }} />
+        </div>
+      ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent p-2.5 pt-10 opacity-0 transition-opacity duration-180 group-hover:opacity-100">
         <p className="line-clamp-2 text-[13px] font-medium text-white">{movie.name}</p>
         {movie.year ? <p className="text-[11px] text-white/70">{movie.year}</p> : null}

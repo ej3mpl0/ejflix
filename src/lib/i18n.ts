@@ -92,6 +92,10 @@ const es = {
   note2: "Certificados HTTPS estrictos fuera de la red local.",
   note3: "Interfaz en espa\u00f1ol e ingl\u00e9s, con selector de idioma.",
   note4: "Reproducci\u00f3n nativa Direct Play: 4K, HDR y el c\u00f3dec original.",
+  timeLeft: "-{time}",
+  searchSlash: "Pulsa / para buscar",
+  skip10: "10",
+  jumpPercent: "{n}%",
 };
 
 const en: typeof es = {
@@ -186,6 +190,10 @@ const en: typeof es = {
   note2: "Strict HTTPS certificates outside the local network.",
   note3: "Interface in Spanish and English, with a language selector.",
   note4: "Native Direct Play: 4K, HDR, and the original codec.",
+  timeLeft: "-{time}",
+  searchSlash: "Press / to search",
+  skip10: "10",
+  jumpPercent: "{n}%",
 };
 
 export const dictionaries = { es, en };

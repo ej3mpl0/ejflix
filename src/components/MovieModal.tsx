@@ -163,10 +163,11 @@ export function MovieModal({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
+      if (e.key === "Enter") onPlay(detail);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onPlay, detail]);
 
   const resume = detail.playbackPositionTicks > 10_000_000 * 30;
   const playFromStart = () => onPlay({ ...detail, playbackPositionTicks: 0 });
