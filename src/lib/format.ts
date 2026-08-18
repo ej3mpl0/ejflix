@@ -33,3 +33,19 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
 export function sessionAvatar(session: { userId: string; avatarUrl?: string | null }): string {
   return session.avatarUrl || `http://jfimg.localhost/Users/${session.userId}/Images/Primary?quality=90`;
 }
+
+export function isSeries(item: { kind?: string } | null | undefined): boolean {
+  return item?.kind === "Series";
+}
+
+export function isEpisode(item: { kind?: string } | null | undefined): boolean {
+  return item?.kind === "Episode";
+}
+
+export function episodeCode(
+  item: { seasonNumber?: number | null; episodeNumber?: number | null },
+  template: (vars: { s: number | string; e: number | string }) => string,
+): string | null {
+  if (item.seasonNumber == null || item.episodeNumber == null) return null;
+  return template({ s: item.seasonNumber, e: item.episodeNumber });
+}

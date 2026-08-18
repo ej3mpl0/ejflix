@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { Movie } from "../lib/types";
 import { cn } from "../lib/format";
+import { useI18n } from "../lib/locale-context";
 
 export function PosterCard({
   movie,
@@ -11,6 +12,7 @@ export function PosterCard({
   onOpen: (movie: Movie) => void;
   delay?: number;
 }) {
+  const { t } = useI18n();
   const [loaded, setLoaded] = useState(false);
 
   return (
@@ -34,6 +36,11 @@ export function PosterCard({
             {movie.name}
           </div>
         )}
+        {movie.kind === "Series" ? (
+          <span className="absolute top-2 left-2 rounded bg-black/70 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white/90">
+            {t("series").toUpperCase()}
+          </span>
+        ) : null}
       </div>
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent p-2.5 pt-10 opacity-0 transition-opacity duration-180 group-hover:opacity-100">
         <p className="line-clamp-2 text-[13px] font-medium text-white">{movie.name}</p>

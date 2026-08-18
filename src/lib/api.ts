@@ -14,6 +14,10 @@ export const api = {
   getHome: () => invoke<HomeData>("get_home"),
   getItem: (id: string) => invoke<Movie>("get_item", { id }),
   searchItems: (query: string) => invoke<Movie[]>("search_items", { query }),
+  getSeasons: (seriesId: string) => invoke<Movie[]>("get_seasons", { seriesId }),
+  getEpisodes: (seriesId: string, seasonId?: string | null) =>
+    invoke<Movie[]>("get_episodes", { seriesId, seasonId: seasonId ?? null }),
+  resolvePlayable: (id: string) => invoke<Movie>("resolve_playable", { id }),
   playerStart: (args: {
     itemId: string;
     title: string;

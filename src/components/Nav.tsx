@@ -21,8 +21,8 @@ export function Nav({
 }: {
   userName: string;
   avatarUrl?: string | null;
-  view: "home" | "movies" | "search";
-  onView: (view: "home" | "movies") => void;
+  view: "home" | "movies" | "series" | "search";
+  onView: (view: "home" | "movies" | "series") => void;
   query: string;
   onQuery: (value: string) => void;
   scrolled: boolean;
@@ -76,6 +76,13 @@ export function Nav({
             onClick={() => onView("movies")}
           >
             {t("movies")}
+          </button>
+          <button
+            type="button"
+            className={cn("inline-flex min-h-10 items-center hover:text-white", view === "series" && "font-semibold text-white")}
+            onClick={() => onView("series")}
+          >
+            {t("series")}
           </button>
         </nav>
       </div>

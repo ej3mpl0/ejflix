@@ -6,7 +6,7 @@ import { PosterCard } from "../components/PosterCard";
 import { MovieModal } from "../components/MovieModal";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { api } from "../lib/api";
-import type { HomeData, Movie, Session } from "../lib/types";
+import type { CatalogView, HomeData, Movie, Session } from "../lib/types";
 import { sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 
@@ -27,7 +27,7 @@ export function Home({
   const [data, setData] = useState<HomeData | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<"home" | "movies" | "search">("home");
+  const [view, setView] = useState<CatalogView>("home");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Movie[]>([]);
   const [selected, setSelected] = useState<Movie | null>(null);
@@ -65,6 +65,23 @@ export function Home({
   }, [query, onToast]);
 
   const movies = useMemo(() => data?.all ?? [], [data]);
+  const series = useMemo(() => data?.series ?? [], [data]);
+
+  const playItem = async (item: Movie) => {
+    try {
+      if (item.kind === "Series" || item.kind === "Season") {
+        onPlay(await api.resolvePlayable(item.id));
+      } else {
+        onPlay(item);
+      }
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const openItem = (item: Movie) => {
+    setSelected(item);
+  };
 
   return (
     <div className="h-full bg-base text-text">
@@ -111,7 +128,7 @@ export function Home({
             <h2 className="mb-6 text-[20px] font-semibold">{t("resultsFor", { query })}</h2>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
               {results.map((movie, i) => (
-                <PosterCard key={movie.id} movie={movie} onOpen={setSelected} delay={i * 30} />
+                <PosterCard key={movie.id} movie={movie} onOpen={openItem} delay={i * 30} />
               ))}
             </div>
             {!results.length ? <p className="text-muted">{t("noResults")}</p> : null}
@@ -121,14 +138,24 @@ export function Home({
             <h2 className="mb-6 text-[20px] font-semibold">{t("allMovies")}</h2>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
               {movies.map((movie, i) => (
-                <PosterCard key={movie.id} movie={movie} onOpen={setSelected} delay={i * 20} />
+                <PosterCard key={movie.id} movie={movie} onOpen={openItem} delay={i * 20} />
               ))}
             </div>
+          </div>
+        ) : view === "series" ? (
+          <div className="px-12 pt-24 pb-16">
+            <h2 className="mb-6 text-[20px] font-semibold">{t("allSeries")}</h2>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
+              {series.map((item, i) => (
+                <PosterCard key={item.id} movie={item} onOpen={openItem} delay={i * 20} />
+              ))}
+            </div>
+            {!series.length ? <p className="text-muted">{t("noResults")}</p> : null}
           </div>
         ) : (
           <>
             {data?.featured ? (
-              <HeroBanner movie={data.featured} onPlay={onPlay} onMore={setSelected} />
+              <HeroBanner movie={data.featured} onPlay={(item) => void playItem(item)} onMore={openItem} />
             ) : (
               <div className="h-24" />
             )}
@@ -138,16 +165,33 @@ export function Home({
                   title={t("continueWatching")}
                   items={data.resume}
                   variant="continue"
-                  onOpen={setSelected}
-                  onPlay={onPlay}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
+                />
+              ) : null}
+              {data?.nextUp.length ? (
+                <PosterRow
+                  title={t("nextUp")}
+                  items={data.nextUp}
+                  variant="continue"
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
                 />
               ) : null}
               {data?.latest.length ? (
                 <PosterRow
                   title={t("recentlyAdded")}
                   items={data.latest}
-                  onOpen={setSelected}
-                  onPlay={onPlay}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
+                />
+              ) : null}
+              {data?.latestSeries.length ? (
+                <PosterRow
+                  title={t("recentlyAddedSeries")}
+                  items={data.latestSeries}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
                 />
               ) : null}
               {data?.genres.map((row) => (
@@ -155,16 +199,24 @@ export function Home({
                   key={row.id}
                   title={row.name}
                   items={row.items}
-                  onOpen={setSelected}
-                  onPlay={onPlay}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
                 />
               ))}
               {data?.all.length ? (
                 <PosterRow
                   title={t("allMovies")}
                   items={data.all}
-                  onOpen={setSelected}
-                  onPlay={onPlay}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
+                />
+              ) : null}
+              {data?.series.length ? (
+                <PosterRow
+                  title={t("allSeries")}
+                  items={data.series}
+                  onOpen={openItem}
+                  onPlay={(item) => void playItem(item)}
                 />
               ) : null}
             </div>
@@ -172,7 +224,12 @@ export function Home({
         )}
       </div>
       {selected ? (
-        <MovieModal movie={selected} onClose={() => setSelected(null)} onPlay={onPlay} />
+        <MovieModal
+          movie={selected}
+          onClose={() => setSelected(null)}
+          onPlay={(item) => void playItem(item)}
+          onOpen={openItem}
+        />
       ) : null}
     </div>
   );

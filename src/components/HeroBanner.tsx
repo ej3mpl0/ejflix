@@ -44,7 +44,12 @@ export function HeroBanner({
         )}
         <div className="enter enter-d1 mb-3 flex flex-wrap items-center gap-2 text-[13px] text-muted">
           {movie.year ? <span>{movie.year}</span> : null}
-          {movie.runtimeTicks ? (
+          {movie.kind === "Series" && movie.childCount ? (
+            <>
+              <span>•</span>
+              <span>{t("seasonsCount", { n: movie.childCount })}</span>
+            </>
+          ) : movie.runtimeTicks ? (
             <>
               <span>•</span>
               <span>{formatRuntime(movie.runtimeTicks)}</span>
