@@ -40,6 +40,25 @@ export function Nav({
   }, [open]);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      const typing = tag === "INPUT" || tag === "TEXTAREA";
+      if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setOpen(true);
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+      if (e.key === "Escape" && (open || query)) {
+        onQuery("");
+        setOpen(false);
+        inputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, query, onQuery]);
+
+  useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (!menuRef.current?.contains(e.target as Node)) setMenu(false);
     };

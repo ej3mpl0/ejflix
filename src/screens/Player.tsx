@@ -37,9 +37,13 @@ export function Player({
   const [fullscreen, setFullscreen] = useState(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [flash, setFlash] = useState<"play" | "pause" | null>(null);
+  const [seekHud, setSeekHud] = useState<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
   const hideTimer = useRef<number>(0);
   const volTimer = useRef<number>(0);
+  const seekTimer = useRef<number>(0);
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const overUi = useRef(false);
   const overlay = mode === "overlay";
 
@@ -69,6 +73,32 @@ export function Player({
   onErrorRef.current = onError;
   onExitRef.current = onExit;
   tRef.current = t;
+
+  const seekRel = async (delta: number) => {
+    setSeekHud(delta);
+    window.clearTimeout(seekTimer.current);
+    seekTimer.current = window.setTimeout(() => setSeekHud(null), 500);
+    await api.playerSeek(delta, true);
+  };
+
+  const togglePause = async () => {
+    setFlash(state.paused ? "play" : "pause");
+    window.setTimeout(() => setFlash(null), 400);
+    await api.playerTogglePause();
+  };
+
+  const changeVolume = async (value: number) => {
+    const next = await api.playerSetVolume(value);
+    setVolHud(next);
+    window.clearTimeout(volTimer.current);
+    volTimer.current = window.setTimeout(() => setVolHud(null), 1200);
+  };
+
+  const toggleFullscreen = async () => {
+    const next = !fullscreen;
+    await api.playerSetFullscreen(next);
+    setFullscreen(next);
+  };
 
   useEffect(() => {
     bump();
@@ -119,10 +149,13 @@ export function Player({
       if (e.key === " " || e.key === "k" || e.key === "K") {
         e.preventDefault();
         void togglePause();
-      } else if (e.key === "ArrowLeft") {
-        void api.playerSeek(-10, true);
-      } else if (e.key === "ArrowRight") {
-        void api.playerSeek(10, true);
+      } else if (e.key === "ArrowLeft" || e.key === "j" || e.key === "J") {
+        void seekRel(-10);
+      } else if (e.key === "ArrowRight" || e.key === "l" || e.key === "L") {
+        void seekRel(10);
+      } else if (e.key >= "0" && e.key <= "9") {
+        const dur = stateRef.current.duration;
+        if (dur > 0) void api.playerSeek((Number(e.key) / 10) * dur, false);
       } else if (e.key === "ArrowUp") {
         void changeVolume(state.volume + 5);
       } else if (e.key === "ArrowDown") {
@@ -151,31 +184,16 @@ export function Player({
     };
   }, [overlay, state.volume, state.mute, fullscreen, onExit]);
 
-  const togglePause = async () => {
-    setFlash(state.paused ? "play" : "pause");
-    window.setTimeout(() => setFlash(null), 400);
-    await api.playerTogglePause();
-  };
-
-  const changeVolume = async (value: number) => {
-    const next = await api.playerSetVolume(value);
-    setVolHud(next);
-    window.clearTimeout(volTimer.current);
-    volTimer.current = window.setTimeout(() => setVolHud(null), 1200);
-  };
-
-  const toggleFullscreen = async () => {
-    const next = !fullscreen;
-    await api.playerSetFullscreen(next);
-    setFullscreen(next);
-  };
-
   if (!overlay) {
     return <div className="h-full w-full bg-base" />;
   }
 
   return (
-    <div className="relative h-full w-full bg-transparent" onMouseMove={bump}>
+    <div
+      className="relative h-full w-full bg-transparent"
+      onMouseMove={bump}
+      onDoubleClick={() => void toggleFullscreen()}
+    >
       {state.buffering ? (
         <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
           <div className="h-14 w-14 rounded-full border-2 border-white/15 border-t-accent animate-spin" />
@@ -193,6 +211,13 @@ export function Player({
           {Math.round(volHud)}%
         </div>
       ) : null}
+      {seekHud != null ? (
+        <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center">
+          <div className="flash-icon rounded-full bg-black/45 px-5 py-2 text-lg font-semibold tabular text-white">
+            {seekHud > 0 ? "+" : ""}{seekHud}s
+          </div>
+        </div>
+      ) : null}
       <PlayerControls
         movie={movie}
         state={state}
@@ -202,7 +227,7 @@ export function Player({
         onHoverTime={setHoverTime}
         onBack={onExit}
         onTogglePause={() => void togglePause()}
-        onSeek={(delta) => void api.playerSeek(delta, true)}
+        onSeek={(delta) => void seekRel(delta)}
         onSeekTo={(seconds) => void api.playerSeek(seconds, false)}
         onVolume={(value) => void changeVolume(value)}
         onMute={() => void api.playerSetMute(!state.mute)}

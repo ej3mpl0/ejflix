@@ -1,6 +1,6 @@
 import { Info, Play, RotateCcw } from "lucide-react";
 import type { Movie } from "../lib/types";
-import { formatRuntime } from "../lib/format";
+import { formatRuntime, remainingMinutes } from "../lib/format";
 import { QualityBadges } from "./QualityBadge";
 import { useI18n } from "../lib/locale-context";
 
@@ -22,7 +22,7 @@ export function HeroBanner({
         <img
           src={movie.backdropUrl}
           alt=""
-          className="fade-in absolute inset-0 h-full w-full object-cover"
+          className="hero-still fade-in absolute inset-0 h-full w-full object-cover"
         />
       ) : (
         <div className="absolute inset-0 bg-surface" />
@@ -72,6 +72,19 @@ export function HeroBanner({
           ) : null}
           <QualityBadges badges={movie.badges} />
         </div>
+        {resume && movie.runtimeTicks ? (
+          <div className="enter enter-d1 mb-4 max-w-sm">
+            <div className="mb-1.5 h-[3px] overflow-hidden rounded-full bg-white/20">
+              <div
+                className="h-full bg-accent"
+                style={{ width: `${Math.min(100, movie.playedPercentage || 0)}%` }}
+              />
+            </div>
+            <p className="text-[12px] text-white/60 tabular">
+              {t("remaining", { n: remainingMinutes(movie.runtimeTicks, movie.playbackPositionTicks) })}
+            </p>
+          </div>
+        ) : null}
         {movie.overview ? (
           <p className="enter enter-d2 mb-6 line-clamp-3 text-[15px] leading-[1.6] text-[#D4D4D8]">
             {movie.overview}

@@ -52,6 +52,7 @@ export function PlayerControls({
 }) {
   const { t } = useI18n();
   const [tracksOpen, setTracksOpen] = useState(false);
+  const [remain, setRemain] = useState(false);
   const progress = state.duration > 0 ? (state.time / state.duration) * 100 : 0;
 
   const tooltip = useMemo(() => {
@@ -165,9 +166,16 @@ export function PlayerControls({
               onVolume={onVolume}
               onMute={onMute}
             />
-            <span className="ml-2 text-[13px] text-white/90 tabular">
-              {formatClock(state.time)} / {formatClock(state.duration)}
-            </span>
+            <button
+              type="button"
+              className="ml-2 text-[13px] text-white/90 tabular"
+              onClick={() => setRemain((v) => !v)}
+              title={t("timeLeft")}
+            >
+              {remain
+                ? t("timeLeft", { time: formatClock(Math.max(0, state.duration - state.time)) })
+                : `${formatClock(state.time)} / ${formatClock(state.duration)}`}
+            </button>
             <div className="ml-auto flex items-center gap-1">
               <div className="relative">
                 <button
