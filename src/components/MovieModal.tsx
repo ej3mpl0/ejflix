@@ -264,6 +264,28 @@ export function MovieModal({
                 {detail.favorite ? <Check size={16} /> : <Plus size={16} />}
                 {detail.favorite ? t("removeFromList") : t("addToList")}
               </button>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  try {
+                    const next = !detail.played;
+                    await api.setPlayed(detail.id, next);
+                    const updated = { ...detail, played: next, playedPercentage: next ? 100 : 0 };
+                    setDetail(updated);
+                    onFavorite?.(updated);
+                  } catch {
+                    /* parent toasts if needed */
+                  } finally {
+                    setSaving(false);
+                  }
+                }}
+                className="btn-press inline-flex h-11 items-center gap-2 rounded-md bg-[rgba(109,109,110,0.45)] px-5 text-[15px] font-semibold text-white hover:bg-[rgba(109,109,110,0.35)]"
+              >
+                <Check size={16} />
+                {detail.played ? t("markUnplayed") : t("markPlayed")}
+              </button>
             </div>
           </div>
         </div>

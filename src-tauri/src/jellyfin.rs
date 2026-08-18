@@ -101,6 +101,7 @@ pub struct Movie {
     pub episode_number: Option<i32>,
     pub child_count: Option<i32>,
     pub played: bool,
+    pub unplayed_item_count: Option<i32>,
     #[serde(skip_serializing)]
     pub stream_url: String,
     pub media_source_id: Option<String>,
@@ -490,6 +491,68 @@ impl JellyfinClient {
             session.user_id
         ))
         .await
+    }
+
+    pub async fn next_episode(&self, episode_id: &str) -> Result<Option<Movie>, String> {
+        if !valid_item_id(episode_id) {
+            return Err("Ítem no válido".into());
+        }
+        let current = self.get_item(episode_id).await?;
+        if current.kind != "Episode" {
+            return Ok(None);
+        }
+        let series_id = current
+            .series_id
+            .clone()
+            .ok_or_else(|| "Capítulo sin serie".to_string())?;
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let adjacent = self
+            .items_query(&format!(
+                "/Shows/{series_id}/Episodes?UserId={}&AdjacentTo={episode_id}&Fields={fields}&EnableImageTypes=Primary,Backdrop,Thumb",
+                session.user_id
+            ))
+            .await
+            .unwrap_or_default();
+        let next = adjacent.into_iter().find(|ep| {
+            ep.id != current.id
+                && match (current.season_number, current.episode_number, ep.season_number, ep.episode_number) {
+                    (Some(cs), Some(ce), Some(s), Some(e)) => (s, e) > (cs, ce),
+                    _ => true,
+                }
+        });
+        if next.is_some() {
+            return Ok(next);
+        }
+        let seasons = self.get_seasons(&series_id).await?;
+        let mut after = false;
+        for season in seasons {
+            let episodes = self.get_episodes(&series_id, Some(&season.id)).await?;
+            for ep in episodes {
+                if ep.id == current.id {
+                    after = true;
+                    continue;
+                }
+                if after {
+                    return Ok(Some(ep));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub async fn set_played(&self, item_id: &str, played: bool) -> Result<bool, String> {
+        if !valid_item_id(item_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let path = format!("/Users/{}/PlayedItems/{item_id}", session.user_id);
+        if played {
+            self.post_json(&path, &json!({})).await?;
+        } else {
+            self.delete_path(&path).await?;
+        }
+        Ok(played)
     }
 
     pub async fn resolve_playable(&self, id: &str) -> Result<Movie, String> {
@@ -928,6 +991,10 @@ impl JellyfinClient {
                 .and_then(|u| u.get("Played"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            unplayed_item_count: user_data
+                .and_then(|u| u.get("UnplayedItemCount"))
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32),
             id,
             favorite: user_data
                 .and_then(|u| u.get("IsFavorite"))
@@ -989,7 +1056,7 @@ impl JellyfinClient {
 }
 
 fn item_fields() -> &'static str {
-    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,ChildCount,RecursiveItemCount,SeriesStatus,SeriesName,ParentIndexNumber,IndexNumber,SeriesId,ParentId,ParentBackdropImageTags,ParentBackdropItemId,SeriesPrimaryImageTag"
+    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,ChildCount,RecursiveItemCount,SeriesStatus,UserData,SeriesName,ParentIndexNumber,IndexNumber,SeriesId,ParentId,ParentBackdropImageTags,ParentBackdropItemId,SeriesPrimaryImageTag"
 }
 
 fn user_image_url(user_id: &str, tag: Option<&str>) -> String {

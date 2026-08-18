@@ -54,6 +54,7 @@ export type Movie = {
   episodeNumber: number | null;
   childCount: number | null;
   played: boolean;
+  unplayedItemCount?: number | null;
   favorite?: boolean;
   itemType?: string;
 };

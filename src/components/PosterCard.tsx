@@ -41,6 +41,11 @@ export function PosterCard({
             {t("series").toUpperCase()}
           </span>
         ) : null}
+        {movie.kind === "Series" && movie.unplayedItemCount != null && movie.unplayedItemCount > 0 ? (
+          <span className="absolute top-2 right-2 rounded bg-accent px-1.5 py-0.5 text-[10px] font-semibold tabular text-white">
+            {movie.unplayedItemCount}
+          </span>
+        ) : null}
       </div>
       {movie.playedPercentage > 2 ? (
         <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
@@ -49,7 +54,11 @@ export function PosterCard({
       ) : null}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent p-2.5 pt-10 opacity-0 transition-opacity duration-180 group-hover:opacity-100">
         <p className="line-clamp-2 text-[13px] font-medium text-white">{movie.name}</p>
-        {movie.year ? <p className="text-[11px] text-white/70">{movie.year}</p> : null}
+        {movie.kind === "Series" && movie.unplayedItemCount != null && movie.unplayedItemCount > 0 ? (
+          <p className="text-[11px] text-white/70">{t("episodesLeft", { n: movie.unplayedItemCount })}</p>
+        ) : movie.year ? (
+          <p className="text-[11px] text-white/70">{movie.year}</p>
+        ) : null}
       </div>
     </button>
   );

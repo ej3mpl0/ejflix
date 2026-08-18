@@ -194,6 +194,16 @@ async fn resolve_playable(state: State<'_, AppState>, id: String) -> Result<Movi
     state.jellyfin.resolve_playable(&id).await
 }
 
+#[tauri::command]
+async fn next_episode(state: State<'_, AppState>, id: String) -> Result<Option<Movie>, String> {
+    state.jellyfin.next_episode(&id).await
+}
+
+#[tauri::command]
+async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<bool, String> {
+    state.jellyfin.set_played(&item_id, played).await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayArgs {
@@ -671,6 +681,8 @@ pub fn run() {
             get_seasons,
             get_episodes,
             resolve_playable,
+            next_episode,
+            set_played,
             get_favorites,
             set_favorite,
             get_library,

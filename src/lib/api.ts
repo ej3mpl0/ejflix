@@ -28,6 +28,9 @@ export const api = {
   getEpisodes: (seriesId: string, seasonId?: string | null) =>
     invoke<Movie[]>("get_episodes", { seriesId, seasonId: seasonId ?? null }),
   resolvePlayable: (id: string) => invoke<Movie>("resolve_playable", { id }),
+  nextEpisode: (id: string) => invoke<Movie | null>("next_episode", { id }),
+  setPlayed: (itemId: string, played: boolean) =>
+    invoke<boolean>("set_played", { itemId, played }),
   playerStart: (args: {
     itemId: string;
     title: string;

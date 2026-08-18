@@ -89,7 +89,22 @@ export default function App() {
           onChangeServer={() => void logoutServer()}
         />
       ) : playing && session ? (
-        <Player movie={playing} mode="engine" onExit={() => setPlaying(null)} onError={toast} />
+        <Player
+          movie={playing}
+          mode="engine"
+          onExit={() => setPlaying(null)}
+          onError={toast}
+          onEnded={() => {
+            if (playing.kind !== "Episode") {
+              setPlaying(null);
+              return;
+            }
+            void api
+              .nextEpisode(playing.id)
+              .then((next) => setPlaying(next ?? null))
+              .catch(() => setPlaying(null));
+          }}
+        />
       ) : session ? (
         <Home
           session={session}

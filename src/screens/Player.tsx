@@ -25,11 +25,13 @@ export function Player({
   mode = "engine",
   onExit,
   onError,
+  onEnded,
 }: {
   movie: Movie;
   mode?: "engine" | "overlay";
   onExit: () => void;
   onError: (message: string) => void;
+  onEnded?: () => void;
 }) {
   const { t } = useI18n();
   const [state, setState] = useState<PlayerState>(emptyState);
@@ -46,6 +48,9 @@ export function Player({
   stateRef.current = state;
   const overUi = useRef(false);
   const overlay = mode === "overlay";
+  const endedRef = useRef(false);
+  const onEndedRef = useRef(onEnded);
+  onEndedRef.current = onEnded;
 
   const bump = () => {
     setVisible(true);
@@ -139,8 +144,15 @@ export function Player({
   }, [movie, overlay]);
 
   useEffect(() => {
-    if (state.eof) onExit();
-  }, [state.eof, onExit]);
+    endedRef.current = false;
+  }, [movie.id]);
+
+  useEffect(() => {
+    if (!state.eof || overlay || endedRef.current) return;
+    endedRef.current = true;
+    if (onEndedRef.current) onEndedRef.current();
+    else onExit();
+  }, [state.eof, overlay, onExit]);
 
   useEffect(() => {
     if (!overlay) return;
