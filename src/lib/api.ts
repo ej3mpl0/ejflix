@@ -1,6 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { HomeData, Movie, PlayerState, PublicInfo, PublicUser, SavedServer, Session } from "./types";
+import type {
+  HomeData,
+  Library,
+  Movie,
+  PlayerState,
+  PublicInfo,
+  PublicUser,
+  SavedServer,
+  Session,
+} from "./types";
 
 export const api = {
   probeServer: (url: string) => invoke<PublicInfo>("probe_server", { url }),
@@ -11,8 +20,15 @@ export const api = {
   listPublicUsers: (url: string) => invoke<PublicUser[]>("list_public_users", { url }),
   logout: () => invoke<void>("logout"),
   logoutServer: () => invoke<void>("logout_server"),
-  getHome: () => invoke<HomeData>("get_home"),
+  getLibraries: () => invoke<Library[]>("get_libraries"),
+  getHome: (library?: Library | null) => invoke<HomeData>("get_home", { library: library ?? null }),
   getItem: (id: string) => invoke<Movie>("get_item", { id }),
+  getSeasons: (seriesId: string) => invoke<Movie[]>("get_seasons", { seriesId }),
+  getEpisodes: (seriesId: string, seasonId: string) =>
+    invoke<Movie[]>("get_episodes", { seriesId, seasonId }),
+  getNextEpisode: (seriesId: string, episodeId: string) =>
+    invoke<Movie | null>("get_next_episode", { seriesId, episodeId }),
+  getSeriesNextUp: (seriesId: string) => invoke<Movie | null>("get_series_next_up", { seriesId }),
   searchItems: (query: string) => invoke<Movie[]>("search_items", { query }),
   playerStart: (args: {
     itemId: string;
@@ -20,10 +36,12 @@ export const api = {
     startSeconds?: number;
     mediaSourceId?: string | null;
   }) => invoke<PlayerState>("player_start", { args }),
-  playerStop: () => invoke<void>("player_stop"),
+  /** `switching`: another item starts right away (keeps fullscreen and the overlay). */
+  playerStop: (switching = false) => invoke<void>("player_stop", { switching }),
   playerTogglePause: () => invoke<void>("player_toggle_pause"),
-  playerSeek: (seconds: number, relative: boolean) =>
-    invoke<void>("player_seek", { seconds, relative }),
+  playerSeek: (seconds: number, relative: boolean, fast = false) =>
+    invoke<void>("player_seek", { seconds, relative, fast }),
+  playerSetSpeed: (speed: number) => invoke<number>("player_set_speed", { speed }),
   playerSetVolume: (volume: number) => invoke<number>("player_set_volume", { volume }),
   playerSetMute: (mute: boolean) => invoke<void>("player_set_mute", { mute }),
   playerSetTrack: (kind: string, id: number) =>
@@ -38,6 +56,10 @@ export const api = {
   openPlayer: (movie: Movie) => emit("player://open", movie),
   onPlayerOpen: (handler: (movie: Movie) => void): Promise<UnlistenFn> =>
     listen<Movie>("player://open", (event) => handler(event.payload)),
+  /** Overlay → main: play this item next (next episode). */
+  playNext: (movie: Movie) => emit("player://next", movie),
+  onPlayerNext: (handler: (movie: Movie) => void): Promise<UnlistenFn> =>
+    listen<Movie>("player://next", (event) => handler(event.payload)),
   exitPlayer: () => emit("player://exit"),
   onPlayerExit: (handler: () => void): Promise<UnlistenFn> =>
     listen("player://exit", () => handler()),

@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 const CLIENT_NAME: &str = "ejFlix";
-const CLIENT_VERSION: &str = "0.1.11";
+const CLIENT_VERSION: &str = "0.1.13";
 const DEVICE_NAME: &str = "Windows";
 pub const IMAGE_SCHEME: &str = "jfimg";
 const IMAGE_ORIGIN: &str = "http://jfimg.localhost";
@@ -72,8 +72,62 @@ pub struct PublicUser {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TrickplayLevel {
+    pub width: u32,
+    pub height: u32,
+    pub tile_width: u32,
+    pub tile_height: u32,
+    pub thumbnail_count: u32,
+    pub interval: u32,
+    pub bandwidth: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrickplayInfo {
+    pub media_source_id: String,
+    pub levels: Vec<TrickplayLevel>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Chapter {
+    pub index: u32,
+    pub start_seconds: f64,
+    pub name: Option<String>,
+    pub image_tag: Option<String>,
+}
+
+/// A user view (library) on the server, e.g. "Películas" or "Series".
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Library {
+    pub id: String,
+    pub name: String,
+    /// Jellyfin `CollectionType`: "movies", "tvshows", "mixed" or None (plain folder).
+    pub collection_type: Option<String>,
+}
+
+impl Library {
+    pub fn is_tv(&self) -> bool {
+        self.collection_type.as_deref() == Some("tvshows")
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Movie {
     pub id: String,
+    /// Jellyfin item type: "Movie", "Series", "Season" or "Episode".
+    pub kind: String,
+    pub series_id: Option<String>,
+    pub series_name: Option<String>,
+    pub season_id: Option<String>,
+    /// Season number (episodes: `ParentIndexNumber`; seasons: `IndexNumber`).
+    pub season_number: Option<i32>,
+    pub episode_number: Option<i32>,
+    /// 16:9 still of an episode (its own Primary image), if it has one.
+    pub thumb_url: Option<String>,
     pub name: String,
     pub overview: Option<String>,
     pub year: Option<i32>,
@@ -96,6 +150,10 @@ pub struct Movie {
     #[serde(skip_serializing)]
     pub stream_url: String,
     pub media_source_id: Option<String>,
+    /// ISO-8601 date the item was added to the library (`DateCreated`).
+    pub date_created: Option<String>,
+    pub trickplay: Option<TrickplayInfo>,
+    pub chapters: Vec<Chapter>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -111,6 +169,8 @@ pub struct GenreRow {
 pub struct HomeData {
     pub featured: Option<Movie>,
     pub resume: Vec<Movie>,
+    /// Next episodes to watch (TV libraries only).
+    pub next_up: Vec<Movie>,
     pub latest: Vec<Movie>,
     pub genres: Vec<GenreRow>,
     pub all: Vec<Movie>,
@@ -300,39 +360,177 @@ impl JellyfinClient {
         Ok(session)
     }
 
-    pub async fn home(&self) -> Result<HomeData, String> {
+    /// Libraries (user views) that ejFlix can browse: movies, TV shows, mixed or plain folders.
+    pub async fn libraries(&self) -> Result<Vec<Library>, String> {
+        let session = self.require_session().await?;
+        let res = self
+            .get(&format!("/Users/{}/Views", session.user_id))
+            .await?;
+        if !res.status().is_success() {
+            return Err(format!("Jellyfin Views: {}", res.status()));
+        }
+        let value: Value = res.json().await.map_err(|e| e.to_string())?;
+        let libraries = value
+            .get("Items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|view| {
+                let id = view.get("Id")?.as_str()?.to_string();
+                if !valid_item_id(&id) {
+                    return None;
+                }
+                let name = view.get("Name")?.as_str()?.to_string();
+                let collection_type = view
+                    .get("CollectionType")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                match collection_type.as_deref() {
+                    Some("movies") | Some("tvshows") | Some("mixed") | None => Some(Library {
+                        id,
+                        name,
+                        collection_type,
+                    }),
+                    _ => None,
+                }
+            })
+            .collect();
+        Ok(libraries)
+    }
+
+    /// Home feed. Without a library it covers every movie the user can see; with one it
+    /// is scoped to that library (`ParentId`), showing series instead of movies for TV.
+    pub async fn home(&self, library: Option<&Library>) -> Result<HomeData, String> {
         let session = self.require_session().await?;
         let fields = item_fields();
+        let tv = library.is_some_and(|l| l.is_tv());
+        let parent = library
+            .map(|l| format!("&ParentId={}", l.id))
+            .unwrap_or_default();
+        let main_type = if tv { "Series" } else { "Movie" };
+        let resume_type = if tv { "Episode" } else { "Movie" };
         let resume_path = format!(
-            "/Users/{}/Items/Resume?IncludeItemTypes=Movie&Limit=16&Fields={fields}",
+            "/Users/{}/Items/Resume?IncludeItemTypes={resume_type}&Limit=16&Fields={fields}{parent}",
             session.user_id
         );
         let all_path = format!(
-            "/Users/{}/Items?IncludeItemTypes=Movie&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=80&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
+            "/Users/{}/Items?IncludeItemTypes={main_type}&Recursive=true&SortBy=SortName&SortOrder=Ascending&Limit=80&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo{parent}",
             session.user_id
         );
-        let (resume, latest, all, genres) = tokio::try_join!(
+        let next_up_path = format!(
+            "/Shows/NextUp?UserId={}&Limit=18&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo,Thumb{parent}",
+            session.user_id
+        );
+        let next_up = async {
+            if tv {
+                self.items_query(&next_up_path).await
+            } else {
+                Ok(Vec::new())
+            }
+        };
+        let (resume, next_up, latest, all, genres) = tokio::try_join!(
             self.items_query(&resume_path),
-            self.latest_movies(&session, fields),
+            next_up,
+            self.latest_items(&session, fields, main_type, &parent),
             self.items_query(&all_path),
-            self.genre_rows(&session, fields),
+            self.genre_rows(&session, fields, main_type, &parent),
         )?;
 
-        let featured = latest
+        // Hero: one of the newest movies with a backdrop, rotated per app launch so the
+        // banner is not always the same title. Stable within a session, so the background
+        // refresh after playback does not swap it.
+        let candidates: Vec<&Movie> = latest
             .iter()
-            .find(|m| m.backdrop_url.is_some())
-            .cloned()
-            .or_else(|| all.iter().find(|m| m.backdrop_url.is_some()).cloned())
-            .or_else(|| latest.first().cloned())
-            .or_else(|| all.first().cloned());
+            .filter(|m| m.backdrop_url.is_some())
+            .take(10)
+            .collect();
+        let featured = if candidates.is_empty() {
+            all.iter()
+                .find(|m| m.backdrop_url.is_some())
+                .cloned()
+                .or_else(|| latest.first().cloned())
+                .or_else(|| all.first().cloned())
+        } else {
+            Some(candidates[(launch_seed() % candidates.len() as u64) as usize].clone())
+        };
 
         Ok(HomeData {
             featured,
             resume,
+            next_up,
             latest,
             genres,
             all,
         })
+    }
+
+    pub async fn seasons(&self, series_id: &str) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(series_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Shows/{series_id}/Seasons?UserId={}&Fields={fields}",
+            session.user_id
+        ))
+        .await
+    }
+
+    pub async fn episodes(&self, series_id: &str, season_id: &str) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(series_id) || !valid_item_id(season_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Shows/{series_id}/Episodes?SeasonId={season_id}&UserId={}&Fields={fields}",
+            session.user_id
+        ))
+        .await
+    }
+
+    /// Episode that follows `episode_id` in series order (crosses seasons), if any.
+    pub async fn next_episode(&self, series_id: &str, episode_id: &str) -> Result<Option<Movie>, String> {
+        if !valid_item_id(series_id) || !valid_item_id(episode_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let items = self
+            .items_query(&format!(
+                "/Shows/{series_id}/Episodes?UserId={}&StartItemId={episode_id}&Limit=2&Fields={fields}",
+                session.user_id
+            ))
+            .await?;
+        Ok(items.into_iter().find(|m| m.id != episode_id))
+    }
+
+    /// Episode to play when pressing Play on a series: Jellyfin's "next up" (first
+    /// unwatched after the last watched), else the first episode of the show.
+    pub async fn series_next_up(&self, series_id: &str) -> Result<Option<Movie>, String> {
+        if !valid_item_id(series_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let next_up = self
+            .items_query(&format!(
+                "/Shows/NextUp?UserId={}&SeriesId={series_id}&Limit=1&Fields={fields}",
+                session.user_id
+            ))
+            .await
+            .unwrap_or_default();
+        if let Some(episode) = next_up.into_iter().next() {
+            return Ok(Some(episode));
+        }
+        let first = self
+            .items_query(&format!(
+                "/Shows/{series_id}/Episodes?UserId={}&Limit=1&Fields={fields}",
+                session.user_id
+            ))
+            .await?;
+        Ok(first.into_iter().next())
     }
 
     pub async fn get_item(&self, id: &str) -> Result<Movie, String> {
@@ -340,7 +538,7 @@ impl JellyfinClient {
             return Err("Ítem no válido".into());
         }
         let session = self.require_session().await?;
-        let fields = item_fields();
+        let fields = detail_fields();
         let res = self
             .get(&format!(
                 "/Users/{}/Items/{id}?Fields={fields}",
@@ -400,7 +598,7 @@ impl JellyfinClient {
         }
         let fields = item_fields();
         self.items_query(&format!(
-            "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie&Recursive=true&Limit=48&Fields={fields}",
+            "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie,Series&Recursive=true&Limit=48&Fields={fields}",
             session.user_id
         ))
         .await
@@ -468,33 +666,39 @@ impl JellyfinClient {
         self.post_json("/Sessions/Playing/Stopped", &body).await
     }
 
-    async fn latest_movies(&self, session: &Session, fields: &str) -> Result<Vec<Movie>, String> {
-        let res = self
-            .get(&format!(
-                "/Users/{}/Items/Latest?IncludeItemTypes=Movie&Limit=18&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
-                session.user_id
-            ))
-            .await?;
-        if !res.status().is_success() {
-            return Err(format!("Jellyfin Latest: {}", res.status()));
-        }
-        let value: Value = res.json().await.map_err(|e| e.to_string())?;
-        let items = if value.is_array() {
-            value.as_array().cloned().unwrap_or_default()
+    /// Newest additions ordered by date added. Uses `/Items` instead of `/Items/Latest`:
+    /// the Latest endpoint hides played items by default (a per-user server setting) and
+    /// groups results, so the row barely changed and did not reflect what was really added.
+    /// Series sort by the date their newest episode arrived.
+    async fn latest_items(
+        &self,
+        session: &Session,
+        fields: &str,
+        item_type: &str,
+        parent: &str,
+    ) -> Result<Vec<Movie>, String> {
+        let sort = if item_type == "Series" {
+            "DateLastContentAdded,DateCreated,SortName"
         } else {
-            value
-                .get("Items")
-                .and_then(|v| v.as_array())
-                .cloned()
-                .unwrap_or_default()
+            "DateCreated,SortName"
         };
-        items.iter().map(|v| self.map_item(&session, v)).collect()
+        self.items_query(&format!(
+            "/Users/{}/Items?IncludeItemTypes={item_type}&Recursive=true&SortBy={sort}&SortOrder=Descending&Limit=18&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo{parent}",
+            session.user_id
+        ))
+        .await
     }
 
-    async fn genre_rows(&self, session: &Session, fields: &str) -> Result<Vec<GenreRow>, String> {
+    async fn genre_rows(
+        &self,
+        session: &Session,
+        fields: &str,
+        item_type: &str,
+        parent: &str,
+    ) -> Result<Vec<GenreRow>, String> {
         let res = self
             .get(&format!(
-                "/Genres?IncludeItemTypes=Movie&UserId={}&Recursive=true&SortBy=SortName",
+                "/Genres?IncludeItemTypes={item_type}&UserId={}&Recursive=true&SortBy=SortName{parent}",
                 session.user_id
             ))
             .await?;
@@ -519,7 +723,7 @@ impl JellyfinClient {
         for (id, name) in genres {
             let items = self
                 .items_query(&format!(
-                    "/Users/{}/Items?GenreIds={id}&IncludeItemTypes=Movie&Recursive=true&Limit=18&SortBy=CommunityRating,SortName&SortOrder=Descending&Fields={fields}",
+                    "/Users/{}/Items?GenreIds={id}&IncludeItemTypes={item_type}&Recursive=true&Limit=18&SortBy=CommunityRating,SortName&SortOrder=Descending&Fields={fields}{parent}",
                     session.user_id
                 ))
                 .await
@@ -602,25 +806,66 @@ impl JellyfinClient {
             .collect();
 
         let (badges, video_label, audio_label, subtitle_labels) = quality_from_streams(&streams);
+        let trickplay = parse_trickplay(value.get("Trickplay"), media_source_id.as_deref());
+        let chapters = parse_chapters(value.get("Chapters"));
+
+        let kind = value
+            .get("Type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Movie")
+            .to_string();
+        let is_episode = kind == "Episode";
+        let text = |name: &str| value.get(name).and_then(|v| v.as_str()).map(|s| s.to_string());
+        let number = |name: &str| value.get(name).and_then(|v| v.as_i64()).map(|n| n as i32);
+        let series_id = text("SeriesId");
+        let primary_tag = image_tags.get("Primary").and_then(|v| v.as_str());
+        // Episodes: the series poster stands in as "poster"; their own Primary is a 16:9 still.
+        let poster_url = match (is_episode, &series_id, text("SeriesPrimaryImageTag")) {
+            (true, Some(sid), Some(tag)) => image_url(session, sid, "Primary", 400, Some(&tag)),
+            (true, _, _) => None,
+            _ => image_url(session, &id, "Primary", 400, primary_tag),
+        };
+        let thumb_url = if is_episode && primary_tag.is_some() {
+            image_url(session, &id, "Primary", 640, primary_tag)
+        } else {
+            None
+        };
+        let backdrop_url = backdrop_tags
+            .first()
+            .and_then(|tag| image_url(session, &id, "Backdrop", 1920, tag.as_str()))
+            .or_else(|| {
+                let parent_id = text("ParentBackdropItemId")?;
+                let tags = value.get("ParentBackdropImageTags")?.as_array()?;
+                let tag = tags.first()?.as_str()?;
+                image_url(session, &parent_id, "Backdrop", 1920, Some(tag))
+            });
+        let logo_url = image_url(session, &id, "Logo", 600, image_tags.get("Logo").and_then(|v| v.as_str()))
+            .or_else(|| {
+                let parent_id = text("ParentLogoItemId")?;
+                let tag = text("ParentLogoImageTag")?;
+                image_url(session, &parent_id, "Logo", 600, Some(&tag))
+            });
 
         Ok(Movie {
-            poster_url: image_url(
-                session,
-                &id,
-                "Primary",
-                400,
-                image_tags.get("Primary").and_then(|v| v.as_str()),
-            ),
-            backdrop_url: backdrop_tags.first().and_then(|tag| {
-                image_url(session, &id, "Backdrop", 1920, tag.as_str())
-            }),
-            logo_url: image_url(
-                session,
-                &id,
-                "Logo",
-                600,
-                image_tags.get("Logo").and_then(|v| v.as_str()),
-            ),
+            trickplay,
+            chapters,
+            series_name: text("SeriesName"),
+            season_id: text("SeasonId"),
+            season_number: if is_episode {
+                number("ParentIndexNumber")
+            } else if kind == "Season" {
+                number("IndexNumber")
+            } else {
+                None
+            },
+            episode_number: if is_episode { number("IndexNumber") } else { None },
+            series_id,
+            kind,
+            thumb_url,
+            date_created: text("DateCreated"),
+            poster_url,
+            backdrop_url,
+            logo_url,
             stream_url: format!(
                 "{}/Videos/{id}/stream.{container}?static=true",
                 session.server_url
@@ -707,8 +952,93 @@ impl JellyfinClient {
     }
 }
 
+/// Pseudo-random value fixed for the lifetime of the process (hero rotation).
+fn launch_seed() -> u64 {
+    static SEED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *SEED.get_or_init(|| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0);
+        nanos ^ (std::process::id() as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
+    })
+}
+
 fn item_fields() -> &'static str {
-    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags"
+    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,DateCreated"
+}
+
+/// Fields for a single item: adds trickplay tiles and chapters (used by the player timeline).
+fn detail_fields() -> String {
+    format!("{},Trickplay,Chapters", item_fields())
+}
+
+fn parse_trickplay(value: Option<&Value>, media_source_id: Option<&str>) -> Option<TrickplayInfo> {
+    let map = value?.as_object()?;
+    if map.is_empty() {
+        return None;
+    }
+    let (key, levels) = media_source_id
+        .and_then(|id| map.get(id).map(|v| (id.to_string(), v)))
+        .or_else(|| map.iter().next().map(|(k, v)| (k.clone(), v)))?;
+    let levels = levels.as_object()?;
+    let num = |v: &Value, name: &str| v.get(name).and_then(|n| n.as_u64()).unwrap_or(0) as u32;
+    let mut parsed: Vec<TrickplayLevel> = levels
+        .values()
+        .filter_map(|level| {
+            let info = TrickplayLevel {
+                width: num(level, "Width"),
+                height: num(level, "Height"),
+                tile_width: num(level, "TileWidth"),
+                tile_height: num(level, "TileHeight"),
+                thumbnail_count: num(level, "ThumbnailCount"),
+                interval: num(level, "Interval"),
+                bandwidth: num(level, "Bandwidth"),
+            };
+            let valid = info.width > 0
+                && info.height > 0
+                && info.tile_width > 0
+                && info.tile_height > 0
+                && info.thumbnail_count > 0
+                && info.interval > 0;
+            valid.then_some(info)
+        })
+        .collect();
+    if parsed.is_empty() {
+        return None;
+    }
+    parsed.sort_by_key(|l| l.width);
+    Some(TrickplayInfo {
+        media_source_id: key,
+        levels: parsed,
+    })
+}
+
+fn parse_chapters(value: Option<&Value>) -> Vec<Chapter> {
+    let Some(list) = value.and_then(|v| v.as_array()) else {
+        return vec![];
+    };
+    list.iter()
+        .enumerate()
+        .map(|(index, chapter)| Chapter {
+            index: index as u32,
+            start_seconds: chapter
+                .get("StartPositionTicks")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0)
+                / 10_000_000.0,
+            name: chapter
+                .get("Name")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            image_tag: chapter
+                .get("ImageTag")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+        })
+        .collect()
 }
 
 fn user_image_url(user_id: &str, tag: Option<&str>) -> String {
@@ -823,9 +1153,23 @@ pub fn allowed_image_path(path: &str) -> bool {
             true
         }
         ["Items", id, "Images", "Backdrop", "0"] if valid_item_id(id) => true,
+        ["Items", id, "Images", "Chapter", index] if valid_item_id(id) && is_small_number(index) => {
+            true
+        }
+        ["Videos", id, "Trickplay", width, file]
+            if valid_item_id(id)
+                && is_small_number(width)
+                && file.strip_suffix(".jpg").is_some_and(is_small_number) =>
+        {
+            true
+        }
         ["Users", id, "Images", "Primary"] if valid_item_id(id) => true,
         _ => false,
     }
+}
+
+fn is_small_number(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 6 && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 pub fn sanitize_image_query(query: Option<&str>) -> String {
@@ -834,7 +1178,7 @@ pub fn sanitize_image_query(query: Option<&str>) -> String {
         let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
         if matches!(
             key,
-            "maxWidth" | "maxHeight" | "quality" | "tag" | "fillWidth" | "fillHeight"
+            "maxWidth" | "maxHeight" | "quality" | "tag" | "fillWidth" | "fillHeight" | "mediaSourceId"
         ) && value
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')

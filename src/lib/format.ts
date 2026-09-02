@@ -2,6 +2,15 @@ export function ticksToSeconds(ticks: number): number {
   return ticks / 10_000_000;
 }
 
+/** True when `iso` (Jellyfin `DateCreated`) is within the last `days` days. */
+export function isRecentlyAdded(iso: string | null | undefined, days = 14): boolean {
+  if (!iso) return false;
+  const added = Date.parse(iso);
+  if (!Number.isFinite(added)) return false;
+  const age = Date.now() - added;
+  return age >= 0 && age <= days * 86_400_000;
+}
+
 export function formatRuntime(ticks: number | null | undefined): string {
   if (!ticks) return "";
   const minutes = Math.round(ticks / 10_000_000 / 60);
@@ -24,6 +33,19 @@ export function formatClock(seconds: number): string {
   const s = total % 60;
   const pad = (n: number) => n.toString().padStart(2, "0");
   return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+/** "T1:E3" style label from the locale pattern (e.g. "T{s}:E{e}"); empty when unknown. */
+export function episodeCode(
+  movie: { seasonNumber: number | null; episodeNumber: number | null },
+  pattern: string,
+): string {
+  if (movie.seasonNumber == null && movie.episodeNumber == null) return "";
+  return pattern
+    .split("{s}")
+    .join(String(movie.seasonNumber ?? 1))
+    .split("{e}")
+    .join(String(movie.episodeNumber ?? 1));
 }
 
 export function cn(...parts: Array<string | false | null | undefined>): string {

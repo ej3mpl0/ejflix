@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { PosterCard } from "./PosterCard";
@@ -22,6 +22,23 @@ export function PosterRow({
   const { t } = useI18n();
   const scroller = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState(false);
+  const [edges, setEdges] = useState({ start: true, end: false });
+
+  const measure = () => {
+    const el = scroller.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setEdges({ start: el.scrollLeft <= 2, end: el.scrollLeft >= max - 2 });
+  };
+
+  useEffect(() => {
+    measure();
+    const el = scroller.current;
+    if (!el) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [items.length]);
 
   if (!items.length) return null;
 
@@ -41,13 +58,17 @@ export function PosterRow({
       <div className="relative">
         <div
           ref={scroller}
-          className="no-scrollbar row-mask flex snap-x snap-mandatory gap-2 overflow-x-auto pb-2"
+          onScroll={measure}
+          className={cn(
+            "no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pt-1 pb-2",
+            !edges.end && "row-mask",
+          )}
         >
           {items.map((movie, i) =>
             variant === "continue" ? (
               <ContinueCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} />
             ) : (
-              <PosterCard key={movie.id} movie={movie} onOpen={onOpen} delay={i * 30} />
+              <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} delay={i * 30} />
             ),
           )}
         </div>
@@ -55,9 +76,10 @@ export function PosterRow({
           type="button"
           aria-label={t("previous")}
           onClick={() => scrollBy(-1)}
+          tabIndex={edges.start ? -1 : 0}
           className={cn(
-            "absolute top-0 left-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-r from-base/90 to-transparent text-white/80 transition-opacity",
-            hover ? "opacity-100" : "opacity-0",
+            "absolute top-0 left-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-r from-base/90 to-transparent text-white/80 transition-opacity duration-200 hover:text-white",
+            hover && !edges.start ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
           <ChevronLeft size={32} />
@@ -66,9 +88,10 @@ export function PosterRow({
           type="button"
           aria-label={t("next")}
           onClick={() => scrollBy(1)}
+          tabIndex={edges.end ? -1 : 0}
           className={cn(
-            "absolute top-0 right-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-l from-base/90 to-transparent text-white/80 transition-opacity",
-            hover ? "opacity-100" : "opacity-0",
+            "absolute top-0 right-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-l from-base/90 to-transparent text-white/80 transition-opacity duration-200 hover:text-white",
+            hover && !edges.end ? "opacity-100" : "pointer-events-none opacity-0",
           )}
         >
           <ChevronRight size={32} />

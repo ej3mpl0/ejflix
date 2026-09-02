@@ -23,6 +23,7 @@ export function OverlayApp() {
 
   return (
     <Player
+      key={movie.id}
       movie={movie}
       mode="overlay"
       onExit={() => void api.exitPlayer()}

@@ -20,11 +20,19 @@ The interface is available in **Spanish** and **English**. Use the ES / EN contr
 
 - Connect with the Jellyfin server URL only, then pick a profile
 - Saved server, profiles, and session (the access token is encrypted with Windows DPAPI)
-- Home with hero, continue watching, recently added, and genre rows
+- Home with a rotating hero, continue watching, recently added (by date added, with a "New" tag for the last 14 days), and genre rows
+- Add any of your Jellyfin libraries as a tab with the "+" in the header (movies and TV shows), saved per profile
+- TV shows: seasons and episode list, "next up", and a next-episode button with autoplay at the end
 - Movie details, ratings, resume or start over
 - Overlay player controls on top of the mpv video window
+- Netflix-style timeline: scene previews on hover (Jellyfin trickplay or chapter images), drag to scrub, buffered indicator, chapter markers
+- Playback speed (0.5x to 2x), remaining-time toggle, loading screen with the movie backdrop
 - Language selector: Spanish and English
 - Native playback: Direct Play, hardware decode, HDR when Windows HDR is on
+
+Scene previews need trickplay images generated on the Jellyfin server (Jellyfin 10.9+): enable "Trickplay image extraction" in the library settings (Dashboard → Libraries → your library), review Dashboard → Playback → Trickplay, then run the "Generate Trickplay Images" scheduled task once. Without them the player falls back to chapter images, then to a plain time tooltip with the chapter name from the file.
+
+"Recently added" follows Jellyfin's `DateCreated`. If your library uses the file creation date as "date added", set the library's "Date added behavior for new content" to "Use date scanned into the library" so new imports show up first.
 
 ## Requirements
 
@@ -74,11 +82,17 @@ The ES / EN control is on the login, profile, and home screens. The choice is st
 | Key | Action |
 | --- | --- |
 | Space / K | Play / pause |
-| Left / Right | Seek 10 seconds |
-| Up / Down | Volume |
+| Left / Right, J / L | Seek 10 seconds |
+| 0–9 | Jump to 0%–90% |
+| Home / End | Jump to the start / near the end |
+| Up / Down, mouse wheel | Volume |
 | M | Mute |
-| F | Fullscreen |
-| Esc | Exit player |
+| < / > | Playback speed down / up |
+| N | Next episode |
+| F, double-click | Fullscreen |
+| Click on the video | Play / pause |
+| Click on the time | Toggle elapsed / remaining |
+| Esc | Close menu → leave fullscreen → exit player |
 
 ## Security notes
 

@@ -6,7 +6,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use jellyfin::{
-    HomeData, JellyfinClient, Movie, PublicInfo, PublicUser, SavedServer, Session, SessionView,
+    HomeData, JellyfinClient, Library, Movie, PublicInfo, PublicUser, SavedServer, Session,
+    SessionView,
 };
 use player::{PlaybackContext, Player, PlayerState};
 use serde::Deserialize;
@@ -132,8 +133,52 @@ async fn list_public_users(
 }
 
 #[tauri::command]
-async fn get_home(state: State<'_, AppState>) -> Result<HomeData, String> {
-    state.jellyfin.home().await
+async fn get_libraries(state: State<'_, AppState>) -> Result<Vec<Library>, String> {
+    state.jellyfin.libraries().await
+}
+
+#[tauri::command]
+async fn get_home(
+    state: State<'_, AppState>,
+    library: Option<Library>,
+) -> Result<HomeData, String> {
+    if let Some(lib) = &library {
+        if !jellyfin::valid_item_id(&lib.id) {
+            return Err("Biblioteca no válida".into());
+        }
+    }
+    state.jellyfin.home(library.as_ref()).await
+}
+
+#[tauri::command]
+async fn get_seasons(state: State<'_, AppState>, series_id: String) -> Result<Vec<Movie>, String> {
+    state.jellyfin.seasons(&series_id).await
+}
+
+#[tauri::command]
+async fn get_episodes(
+    state: State<'_, AppState>,
+    series_id: String,
+    season_id: String,
+) -> Result<Vec<Movie>, String> {
+    state.jellyfin.episodes(&series_id, &season_id).await
+}
+
+#[tauri::command]
+async fn get_next_episode(
+    state: State<'_, AppState>,
+    series_id: String,
+    episode_id: String,
+) -> Result<Option<Movie>, String> {
+    state.jellyfin.next_episode(&series_id, &episode_id).await
+}
+
+#[tauri::command]
+async fn get_series_next_up(
+    state: State<'_, AppState>,
+    series_id: String,
+) -> Result<Option<Movie>, String> {
+    state.jellyfin.series_next_up(&series_id).await
 }
 
 #[tauri::command]
@@ -201,8 +246,14 @@ async fn player_start(
     Ok(state.player.snapshot().await)
 }
 
+/// Stops playback. With `switching` (next episode) the window stays as it is:
+/// fullscreen and the overlay are kept for the item that starts right after.
 #[tauri::command]
-async fn player_stop(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+async fn player_stop(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    switching: Option<bool>,
+) -> Result<(), String> {
     if let Some((ctx, ticks)) = state.player.stop().await? {
         let _ = state
             .jellyfin
@@ -214,22 +265,47 @@ async fn player_stop(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
             )
             .await;
     }
+    if switching.unwrap_or(false) {
+        return Ok(());
+    }
     hide_player_overlay(&app);
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.set_fullscreen(false);
+        set_main_fullscreen(&window, false)?;
         let _ = window.set_background_color(Some(tauri::window::Color(11, 11, 14, 255)));
     }
     let _ = app.emit("player://close", ());
     Ok(())
 }
 
+/// Borderless fullscreen for the undecorated main window.
+///
+/// On Windows 11 an undecorated window *with shadow* keeps a 1px top inset (and
+/// side frame insets) even in fullscreen, which shows up as a thin light line at
+/// the top of the screen and shifts the client area under the overlay. Dropping
+/// the shadow while fullscreen removes those insets; it is restored on exit.
+fn set_main_fullscreen(window: &tauri::WebviewWindow, fullscreen: bool) -> Result<(), String> {
+    if fullscreen {
+        let _ = window.set_shadow(false);
+        window.set_fullscreen(true).map_err(|e| e.to_string())?;
+    } else {
+        window.set_fullscreen(false).map_err(|e| e.to_string())?;
+        let _ = window.set_shadow(true);
+    }
+    Ok(())
+}
+
 #[tauri::command]
 async fn player_set_fullscreen(app: tauri::AppHandle, fullscreen: bool) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
-        window.set_fullscreen(fullscreen).map_err(|e| e.to_string())?;
+        set_main_fullscreen(&window, fullscreen)?;
     }
     sync_player_overlay(&app);
     Ok(())
+}
+
+#[tauri::command]
+async fn player_set_speed(state: State<'_, AppState>, speed: f64) -> Result<f64, String> {
+    state.player.set_speed(speed).await
 }
 
 #[tauri::command]
@@ -238,8 +314,13 @@ async fn player_toggle_pause(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn player_seek(state: State<'_, AppState>, seconds: f64, relative: bool) -> Result<(), String> {
-    state.player.seek(seconds, relative).await
+async fn player_seek(
+    state: State<'_, AppState>,
+    seconds: f64,
+    relative: bool,
+    fast: Option<bool>,
+) -> Result<(), String> {
+    state.player.seek(seconds, relative, fast.unwrap_or(false)).await
 }
 
 #[tauri::command]
@@ -508,10 +589,13 @@ pub(crate) fn sync_player_overlay(app: &tauri::AppHandle) {
     let Some(overlay) = app.get_webview_window("player-overlay") else {
         return;
     };
-    if let Ok(pos) = main.outer_position() {
+    // Match the *client* rect of the main window: that is where the mpv child
+    // window lives, so the controls line up with the video even when the
+    // undecorated frame adds hidden insets.
+    if let Ok(pos) = main.inner_position() {
         let _ = overlay.set_position(pos);
     }
-    if let Ok(size) = main.outer_size() {
+    if let Ok(size) = main.inner_size() {
         let _ = overlay.set_size(size);
     }
 }
@@ -558,12 +642,18 @@ async fn proxy_jellyfin_image(
         return deny(404);
     }
     let query = jellyfin::sanitize_image_query(uri.query());
+    // Trickplay tiles never change for a given item; cache them for a day.
+    let cache = if uri.path().contains("/Trickplay/") {
+        "private, max-age=86400"
+    } else {
+        "private, max-age=3600"
+    };
     let state = app.state::<AppState>();
     match state.jellyfin.fetch_local_image(uri.path(), &query).await {
         Ok((bytes, content_type)) => tauri::http::Response::builder()
             .status(200)
             .header("content-type", content_type)
-            .header("cache-control", "private, max-age=3600")
+            .header("cache-control", cache)
             .body(bytes)
             .unwrap_or_else(|_| deny(500)),
         Err(_) => deny(404),
@@ -617,8 +707,13 @@ pub fn run() {
             logout_server,
             saved_server,
             list_public_users,
+            get_libraries,
             get_home,
             get_item,
+            get_seasons,
+            get_episodes,
+            get_next_episode,
+            get_series_next_up,
             search_items,
             player_start,
             player_stop,
@@ -629,6 +724,7 @@ pub fn run() {
             player_set_track,
             player_state,
             player_set_fullscreen,
+            player_set_speed,
             update_info,
             dismiss_update,
             locale_get,

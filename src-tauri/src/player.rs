@@ -135,6 +135,9 @@ pub struct PlayerState {
     pub aid: i64,
     pub sid: i64,
     pub title: String,
+    /// Absolute position (seconds) up to which the demuxer has cached data.
+    pub cache_time: f64,
+    pub speed: f64,
 }
 
 impl Default for PlayerState {
@@ -151,6 +154,8 @@ impl Default for PlayerState {
             aid: 0,
             sid: 0,
             title: String::new(),
+            cache_time: 0.0,
+            speed: 1.0,
         }
     }
 }
@@ -257,7 +262,10 @@ impl Player {
                 raise_video_in_main(parent, video);
                 crate::sync_player_overlay(&app);
                 let overlay = crate::overlay_hwnd(&app);
-                if foreground_is_ours(parent) || foreground_is_ours(overlay) {
+                // The overlay WebView handles its own keydown events; only poll the
+                // keys when the main window (mpv side) owns the focus, otherwise every
+                // Space/Esc would be delivered twice.
+                if !foreground_is_ours(overlay) && foreground_is_ours(parent) {
                     let esc_down = unsafe { GetAsyncKeyState(VK_ESCAPE) } as u16 & 0x8000 != 0;
                     if esc_down && !esc {
                         let _ = app.emit("player://hotkey", "escape");
@@ -298,6 +306,9 @@ impl Player {
                 title: title.to_string(),
                 volume: state.volume,
                 mute: state.mute,
+                // Until mpv reports time-pos, treat the resume point as the current
+                // time so an immediate stop does not report position 0 to Jellyfin.
+                time: start_seconds.max(0.0),
                 ..PlayerState::default()
             };
             state.title = title.to_string();
@@ -310,17 +321,26 @@ impl Player {
                 false,
             )
             .await;
+        // Resume position: `loadfile` returns before the file is actually loaded, so a
+        // `seek` sent right after it is dropped by mpv ("no file loaded"). The `start`
+        // option is applied by mpv itself when the next file loads, which is reliable.
+        let start = if start_seconds > 1.0 {
+            format!("{start_seconds:.3}")
+        } else {
+            "none".to_string()
+        };
+        let _ = self
+            .command(json!(["set_property", "start", start]), false)
+            .await;
+        let _ = self
+            .command(json!(["set_property", "speed", 1.0]), false)
+            .await;
         self.command(json!(["loadfile", url, "replace"]), false)
             .await?;
         self.raise_video();
         self.start_overlay_guard(app);
         if let Some(window) = app.get_webview_window("main") {
             let _ = window.set_focus();
-        }
-        if start_seconds > 1.0 {
-            let _ = self
-                .command(json!(["seek", start_seconds, "absolute"]), false)
-                .await;
         }
         let _ = self.command(json!(["set_property", "pause", false]), false).await;
         self.running.store(true, Ordering::SeqCst);
@@ -343,10 +363,24 @@ impl Player {
         Ok(())
     }
 
-    pub async fn seek(&self, seconds: f64, relative: bool) -> Result<(), String> {
-        let mode = if relative { "relative" } else { "absolute" };
+    /// `fast` uses a keyframe seek (cheap, used while scrubbing); otherwise the
+    /// seek is exact thanks to `--hr-seek=yes`.
+    pub async fn seek(&self, seconds: f64, relative: bool, fast: bool) -> Result<(), String> {
+        let mode = match (relative, fast) {
+            (true, _) => "relative",
+            (false, false) => "absolute",
+            (false, true) => "absolute+keyframes",
+        };
         self.command(json!(["seek", seconds, mode]), false).await?;
         Ok(())
+    }
+
+    pub async fn set_speed(&self, speed: f64) -> Result<f64, String> {
+        let speed = if speed.is_finite() { speed.clamp(0.25, 4.0) } else { 1.0 };
+        self.command(json!(["set_property", "speed", speed]), false)
+            .await?;
+        self.state.write().await.speed = speed;
+        Ok(speed)
     }
 
     pub async fn set_volume(&self, volume: f64) -> Result<f64, String> {
@@ -469,6 +503,8 @@ impl Player {
             "track-list",
             "aid",
             "sid",
+            "demuxer-cache-time",
+            "speed",
         ];
         for (i, name) in observes.iter().enumerate() {
             let _ = self
@@ -615,6 +651,8 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
         "paused-for-cache" => state.buffering = data.and_then(|v| v.as_bool()).unwrap_or(false),
         "aid" => state.aid = parse_track_id(data),
         "sid" => state.sid = parse_track_id(data),
+        "demuxer-cache-time" => state.cache_time = data.and_then(|v| v.as_f64()).unwrap_or(0.0),
+        "speed" => state.speed = data.and_then(|v| v.as_f64()).unwrap_or(state.speed),
         "track-list" => {
             if let Some(list) = data.and_then(|v| v.as_array()) {
                 state.tracks = list

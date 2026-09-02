@@ -286,3 +286,47 @@ p {
     filter: none;
   }
 }
+
+/* Player: timeline preview box, splash fade, hero motion */
+.preview-box {
+  overflow: hidden;
+  border-radius: 6px;
+  background: #000;
+  box-shadow:
+    0 8px 24px rgb(0 0 0 / 0.6),
+    0 0 0 1px rgb(255 255 255 / 0.2);
+}
+
+@keyframes fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+.splash-out {
+  animation: fade-out 450ms ease-out both;
+}
+
+@keyframes ken-burns {
+  from {
+    transform: scale(1.06);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.ken-burns {
+  transform-origin: 50% 35%;
+  animation: ken-burns 22s var(--ease-out-soft) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splash-out,
+  .ken-burns {
+    animation: none !important;
+  }
+}

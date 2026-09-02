@@ -24,8 +24,49 @@ export type PublicUser = {
   avatarUrl: string | null;
 };
 
+export type TrickplayLevel = {
+  width: number;
+  height: number;
+  tileWidth: number;
+  tileHeight: number;
+  thumbnailCount: number;
+  interval: number;
+  bandwidth: number;
+};
+
+export type TrickplayInfo = {
+  mediaSourceId: string;
+  levels: TrickplayLevel[];
+};
+
+export type Chapter = {
+  index: number;
+  startSeconds: number;
+  name: string | null;
+  imageTag: string | null;
+};
+
+/** A Jellyfin user view (library). */
+export type Library = {
+  id: string;
+  name: string;
+  /** "movies", "tvshows", "mixed" or null for a plain folder. */
+  collectionType: string | null;
+};
+
+export type ItemKind = "Movie" | "Series" | "Season" | "Episode";
+
 export type Movie = {
   id: string;
+  /** Jellyfin item type; anything unknown is treated like a movie. */
+  kind: ItemKind | string;
+  seriesId: string | null;
+  seriesName: string | null;
+  seasonId: string | null;
+  seasonNumber: number | null;
+  episodeNumber: number | null;
+  /** 16:9 still for episodes. */
+  thumbUrl: string | null;
   name: string;
   overview: string | null;
   year: number | null;
@@ -46,6 +87,10 @@ export type Movie = {
   directors: string[];
   cast: string[];
   mediaSourceId: string | null;
+  /** ISO-8601 date the item was added to the library. */
+  dateCreated: string | null;
+  trickplay: TrickplayInfo | null;
+  chapters: Chapter[];
 };
 
 export type GenreRow = {
@@ -57,6 +102,8 @@ export type GenreRow = {
 export type HomeData = {
   featured: Movie | null;
   resume: Movie[];
+  /** Next episodes to watch (TV libraries only). */
+  nextUp: Movie[];
   latest: Movie[];
   genres: GenreRow[];
   all: Movie[];
@@ -83,6 +130,8 @@ export type PlayerState = {
   aid: number;
   sid: number;
   title: string;
+  cacheTime: number;
+  speed: number;
 };
 
 export type Toast = {

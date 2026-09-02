@@ -1,8 +1,9 @@
 import { Play } from "lucide-react";
 import type { Movie } from "../lib/types";
-import { remainingMinutes } from "../lib/format";
+import { episodeCode, formatRuntime, remainingMinutes } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 
+/** 16:9 card for "Continue watching" and "Next up" (movies and episodes). */
 export function ContinueCard({
   movie,
   onPlay,
@@ -13,43 +14,46 @@ export function ContinueCard({
   onOpen: (movie: Movie) => void;
 }) {
   const { t } = useI18n();
-  const remaining = remainingMinutes(movie.runtimeTicks, movie.playbackPositionTicks);
   const progress = movie.playedPercentage || 0;
+  const started = movie.playbackPositionTicks > 0 && progress > 0;
+  const remaining = remainingMinutes(movie.runtimeTicks, movie.playbackPositionTicks);
+  const isEpisode = movie.kind === "Episode";
+  const code = isEpisode ? episodeCode(movie, t("episodeCode")) : "";
+  const title = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
+  const subtitle = isEpisode ? [code, movie.name].filter(Boolean).join(" · ") : null;
+  const image = movie.thumbUrl || movie.backdropUrl || movie.posterUrl;
+  const label = isEpisode ? `${title} ${subtitle ?? ""}`.trim() : movie.name;
 
   return (
     <div className="group relative w-[clamp(240px,24vw,320px)] shrink-0 snap-start">
       <div className="img-outline relative aspect-video w-full overflow-hidden rounded-md bg-surface">
-        <button
-          type="button"
-          onClick={() => onOpen(movie)}
-          className="absolute inset-0"
-        >
-          {movie.backdropUrl || movie.posterUrl ? (
-            <img
-              src={movie.backdropUrl || movie.posterUrl || ""}
-              alt={movie.name}
-              loading="lazy"
-              className="h-full w-full object-cover"
-            />
+        <button type="button" onClick={() => onOpen(movie)} className="absolute inset-0" aria-label={label}>
+          {image ? (
+            <img src={image} alt="" loading="lazy" className="h-full w-full object-cover" />
           ) : (
-            <div className="grid h-full place-items-center text-sm text-muted">{movie.name}</div>
+            <div className="grid h-full place-items-center px-3 text-center text-sm text-muted">{title}</div>
           )}
         </button>
         <div className="pointer-events-none absolute inset-0 bg-black/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
         <button
           type="button"
-          className="btn-play absolute top-1/2 left-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-black opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+          className="btn-play absolute top-1/2 left-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-black opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
           onClick={() => onPlay(movie)}
-          aria-label={`${t("play")} ${movie.name}`}
+          aria-label={`${t("play")} ${label}`}
         >
           <Play size={20} fill="currentColor" />
         </button>
-        <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
-          <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />
-        </div>
+        {started ? (
+          <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
+            <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />
+          </div>
+        ) : null}
       </div>
-      <p className="mt-2 truncate text-sm text-text">{movie.name}</p>
-      <p className="text-[12px] text-dim tabular">{t("remaining", { n: remaining })}</p>
+      <p className="mt-2 truncate text-sm text-text">{title}</p>
+      {subtitle ? <p className="truncate text-[12px] text-muted">{subtitle}</p> : null}
+      <p className="text-[12px] text-dim tabular">
+        {started ? t("remaining", { n: remaining }) : formatRuntime(movie.runtimeTicks)}
+      </p>
     </div>
   );
 }

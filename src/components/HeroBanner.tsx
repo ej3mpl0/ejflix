@@ -22,7 +22,7 @@ export function HeroBanner({
         <img
           src={movie.backdropUrl}
           alt=""
-          className="fade-in absolute inset-0 h-full w-full object-cover"
+          className="fade-in ken-burns absolute inset-0 h-full w-full object-cover"
         />
       ) : (
         <div className="absolute inset-0 bg-surface" />
