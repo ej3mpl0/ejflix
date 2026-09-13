@@ -162,7 +162,7 @@ export function DiscordSection() {
                 value={clientId}
                 inputMode="numeric"
                 maxLength={32}
-                placeholder="1053747938519679018"
+                placeholder="1280587438863028236"
                 onChange={(e) => setClientId(e.target.value.replace(/\D/g, ""))}
                 onBlur={() => clientId !== prefs.clientId && commit({ clientId })}
                 className={field}

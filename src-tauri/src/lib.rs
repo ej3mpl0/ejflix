@@ -6,6 +6,7 @@ mod profiles;
 mod protect;
 mod segments;
 mod settings;
+mod update;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,11 +36,13 @@ pub struct AppState {
     /// Active local ("online") profile; a Jellyfin session may be linked to it.
     pub local: tokio::sync::RwLock<Option<LocalProfile>>,
     pub discord: Arc<discord::Discord>,
+    pub updater: Arc<update::Updater>,
 }
 
 impl AppState {
     fn new() -> Self {
         Self {
+            updater: Arc::new(update::Updater::new(env!("CARGO_PKG_VERSION").to_string())),
             jellyfin: JellyfinClient::new(),
             player: Arc::new(Player::new()),
             settings_lock: tokio::sync::Mutex::new(()),
@@ -869,6 +872,99 @@ fn dismiss_update(app: tauri::AppHandle) -> Result<(), String> {
     save_last_seen_version(&app, &current)
 }
 
+fn load_update_prefs(app: &tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
+    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let auto = store
+        .get("updateAuto")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let skipped = store
+        .get("updateSkipped")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .filter(|s| !s.is_empty());
+    Ok(update::UpdatePrefs { auto, skipped })
+}
+
+/// Latest release on GitHub compared with this build. `force` bypasses the cache
+/// (manual "check now"); the automatic launch check reuses a recent answer.
+#[tauri::command]
+async fn update_check(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    force: bool,
+) -> Result<update::UpdateCheck, String> {
+    let prefs = load_update_prefs(&app)?;
+    state.updater.check(force, prefs.skipped.as_deref()).await
+}
+
+#[tauri::command]
+fn update_prefs(app: tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
+    load_update_prefs(&app)
+}
+
+#[tauri::command]
+fn update_set_auto(app: tauri::AppHandle, auto: bool) -> Result<update::UpdatePrefs, String> {
+    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    store.set("updateAuto", serde_json::Value::Bool(auto));
+    store.save().map_err(|e| e.to_string())?;
+    load_update_prefs(&app)
+}
+
+/// Remember (or forget, with an empty string) a version the user does not want to see again.
+#[tauri::command]
+fn update_skip(app: tauri::AppHandle, version: String) -> Result<update::UpdatePrefs, String> {
+    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let clean = update::parse_version(&version)
+        .map(|(a, b, c)| format!("{a}.{b}.{c}"))
+        .unwrap_or_default();
+    store.set("updateSkipped", serde_json::Value::String(clean));
+    store.save().map_err(|e| e.to_string())?;
+    load_update_prefs(&app)
+}
+
+#[tauri::command]
+async fn update_download(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<update::Downloaded, String> {
+    state.updater.download(&app).await
+}
+
+/// Stops playback, launches the downloaded installer and quits so it can replace the files.
+#[tauri::command]
+async fn update_install(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let _ = state.player.stop().await;
+    update::Updater::launch_installer(&path)?;
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        app.exit(0);
+    });
+    Ok(())
+}
+
+/// Opens a web page in the default browser. Only GitHub and Discord pages, which are
+/// the ones the UI links to.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    const ALLOWED: [&str; 3] = [
+        "https://github.com/",
+        "https://discord.com/developers/",
+        "https://introdb.app/",
+    ];
+    if !ALLOWED.iter().any(|p| url.starts_with(p)) || url.chars().any(|c| c.is_control() || c == '"') {
+        return Err("Enlace no permitido".into());
+    }
+    std::process::Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", &url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn locale_get(app: tauri::AppHandle) -> Result<String, String> {
     load_locale(&app)
@@ -1519,6 +1615,13 @@ pub fn run() {
             player_set_aspect,
             update_info,
             dismiss_update,
+            update_check,
+            update_prefs,
+            update_set_auto,
+            update_skip,
+            update_download,
+            update_install,
+            open_external,
             locale_get,
             locale_set,
             settings_get,

@@ -7,11 +7,13 @@ import { Player } from "./screens/Player";
 import { ToastStack } from "./components/Toast";
 import { Logo } from "./components/Logo";
 import { UpdateModal } from "./components/UpdateModal";
+import { UpdateAvailableModal } from "./components/UpdateAvailableModal";
 import { ProfileForm } from "./components/ProfileForm";
 import { WindowControls } from "./components/WindowControls";
 import { LanguageSelect } from "./components/LanguageSelect";
 import { SettingsProvider } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
+import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
 import type { Movie, SavedServer, Session, Toast } from "./lib/types";
@@ -20,7 +22,16 @@ import type { Movie, SavedServer, Session, Toast } from "./lib/types";
 type Gate = "welcome" | "login" | "profiles" | "create";
 
 export default function App() {
+  return (
+    <UpdateProvider>
+      <AppInner />
+    </UpdateProvider>
+  );
+}
+
+function AppInner() {
   const { t } = useI18n();
+  const { modalOpen: updateAvailable } = useUpdate();
   const [boot, setBoot] = useState(true);
   const [server, setServer] = useState<SavedServer | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -131,6 +142,8 @@ export default function App() {
           </UserDataProvider>
         </SettingsProvider>
         {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
+        {/* New release on GitHub: never over the "what's new" card nor while watching. */}
+        {updateAvailable && !updateVersion && !playing ? <UpdateAvailableModal /> : null}
         <ToastStack toasts={toasts} />
       </>
     );
@@ -189,6 +202,7 @@ export default function App() {
         />
       )}
       {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
+      {updateAvailable && !updateVersion ? <UpdateAvailableModal /> : null}
       <ToastStack toasts={toasts} />
     </SettingsProvider>
   );

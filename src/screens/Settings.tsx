@@ -2,7 +2,6 @@ import { useState } from "react";
 import type { LocalProfile } from "../lib/types";
 import {
   ArrowLeft,
-  Info,
   Link2,
   MessageCircle,
   LoaderCircle,
@@ -18,6 +17,7 @@ import {
 } from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
 import { DiscordSection } from "../components/settings/DiscordSection";
+import { UpdatesSection } from "../components/settings/UpdatesSection";
 import { hasServer as sessionHasServer, type SavedServer, type Session, type SkipMode, type Countdown } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
@@ -25,7 +25,6 @@ import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { Avatar } from "../components/Avatar";
 import { LanguageSelect } from "../components/LanguageSelect";
-import { ReleaseNotes } from "../components/ReleaseNotes";
 import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
@@ -441,15 +440,7 @@ export function Settings({
                   </div>
                 </SettingsSection>
               )}
-              <SettingsSection title={t("releaseNotes")}>
-                <div className="py-3">
-                  <p className="mb-3 flex items-center gap-1.5 text-[13px] text-dim">
-                    <Info size={13} />
-                    {t("version")} {version ?? "—"}
-                  </p>
-                  <ReleaseNotes />
-                </div>
-              </SettingsSection>
+              <UpdatesSection version={version} />
             </>
           ) : null}
         </div>

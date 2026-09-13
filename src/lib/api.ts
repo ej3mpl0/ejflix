@@ -8,6 +8,9 @@ import type {
   BrowseArgs,
   DiscordStatus,
   HomeData,
+  UpdateCheck,
+  UpdatePrefs,
+  UpdateProgress,
   Library,
   LocalProfile,
   MediaSegment,
@@ -132,6 +135,16 @@ export const api = {
   onPlayerClose: (handler: () => void): Promise<UnlistenFn> =>
     listen("player://close", () => handler()),
   updateInfo: () => invoke<{ current: string; showNotes: boolean }>("update_info"),
+  updateCheck: (force = false) => invoke<UpdateCheck>("update_check", { force }),
+  updatePrefs: () => invoke<UpdatePrefs>("update_prefs"),
+  updateSetAuto: (auto: boolean) => invoke<UpdatePrefs>("update_set_auto", { auto }),
+  /** Empty string clears the skipped version. */
+  updateSkip: (version: string) => invoke<UpdatePrefs>("update_skip", { version }),
+  updateDownload: () => invoke<{ path: string; size: number }>("update_download"),
+  updateInstall: (path: string) => invoke<void>("update_install", { path }),
+  onUpdateProgress: (handler: (progress: UpdateProgress) => void): Promise<UnlistenFn> =>
+    listen<UpdateProgress>("update://progress", (event) => handler(event.payload)),
+  openExternal: (url: string) => invoke<void>("open_external", { url }),
   dismissUpdate: () => invoke<void>("dismiss_update"),
   localeGet: () => invoke<string>("locale_get"),
   localeSet: (locale: string) => invoke<void>("locale_set", { locale }),

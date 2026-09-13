@@ -2,7 +2,7 @@
 
 A lightweight Jellyfin client for Windows 11 that also works without a server. Netflix-style browsing and native Direct Play through mpv: 4K, HDR, and the original codec, without transcoding. Online mode plays Stremio addon sources (AIOStreams, Torrentio with debrid…) straight in mpv.
 
-The interface is available in **Spanish** and **English**. Use the ES / EN control in the title bar.
+The interface is available in **Spanish** and **English** (ES / EN control on the welcome, sign-in and profile screens, and in Settings › Language). Installed copies check GitHub Releases on launch and update themselves in one click.
 
 ![Home](docs/screenshots/home.png)
 
@@ -15,6 +15,16 @@ The interface is available in **Spanish** and **English**. Use the ES / EN contr
 | Home | Player |
 | --- | --- |
 | ![Home](docs/screenshots/home.png) | ![Player](docs/screenshots/player.png) |
+
+<!-- Pending captures for 0.3 (drop the files in docs/screenshots/ and uncomment):
+| Welcome | Discover |
+| --- | --- |
+| ![Welcome](docs/screenshots/welcome.png) | ![Discover](docs/screenshots/discover.png) |
+
+| Details | Settings |
+| --- | --- |
+| ![Details](docs/screenshots/details.png) | ![Settings](docs/screenshots/settings.png) |
+-->
 
 ## Features
 
@@ -53,7 +63,11 @@ Pick "Watch online with addons" on the welcome screen and create a profile. Home
 
 ### Discord Rich Presence
 
-Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. By default it uses a public application id, so Discord labels it with that application's name; create your own application at discord.com/developers/applications, name it ejFlix and paste its Application ID to show that name instead. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
+Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. It ships with ejFlix's own Discord application, so the card reads "ejFlix" and the status line "Watching <title>" (configurable: title, second line or app name); paste another Application ID in Settings › Discord if you want a different name or icon. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
+
+### Updates
+
+On launch (four seconds after boot, and only if "Check for updates on launch" is on in Settings › Account) the app asks the public GitHub API for the latest release of this repository. If the tag is newer than the running version, a dialog shows the release notes and offers "Download and install": the `*-setup.exe` asset is downloaded to `%TEMP%\ejflix-update\` with a progress bar, then launched in passive mode (`/P /R /UPDATE`), which closes ejFlix, installs and reopens it. "Skip this version" silences that release; "Check now" in Settings always asks again. Nothing is sent to GitHub besides the request itself, and no token is involved.
 
 ### Stremio addons (online sources)
 
@@ -114,6 +128,18 @@ npm run tauri build
 The NSIS package is written to `src-tauri/target/release/bundle/nsis/` (or `$CARGO_TARGET_DIR/release/bundle/nsis/`).
 
 Do not commit `mpv.exe`, `release/`, or `session.json`. Those paths are in `.gitignore`.
+
+## Publish a release
+
+Installed copies look for updates at `github.com/ej3mpl0/ejflix/releases/latest`, so a release only needs a `vX.Y.Z` tag and the installer attached. Bump the version in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml` and `CLIENT_VERSION` in `src-tauri/src/jellyfin.rs`, commit, then:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1              # build, copy to release/, gh release create
+powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1 -SkipBuild   # reuse the last build
+powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1 -Notes notes.md
+```
+
+The script needs the GitHub CLI signed in (`gh auth login`). Without `-Notes` the release body is GitHub's generated changelog; the app shows that body as the update notes, so plain markdown with `##` headings and `-` bullets reads best.
 
 ## Language
 

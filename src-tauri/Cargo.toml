@@ -1,6 +1,6 @@
 [package]
 name = "ejflix"
-version = "0.3.0"
+version = "0.3.1"
 description = "Cliente Jellyfin ligero para Windows 11"
 authors = ["ejFlix"]
 edition = "2021"

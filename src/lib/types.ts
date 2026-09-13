@@ -390,6 +390,29 @@ export type Settings = {
 
 export type DiscordHeader = "name" | "details" | "state";
 
+/** Result of asking GitHub for the latest release. */
+export type UpdateCheck = {
+  current: string;
+  latest: string;
+  available: boolean;
+  skipped: boolean;
+  /** Release notes as written on GitHub (markdown). */
+  notes: string;
+  url: string;
+  assetUrl: string | null;
+  assetName: string | null;
+  assetSize: number | null;
+  publishedAt: string | null;
+  checkedAtMs: number;
+};
+
+export type UpdatePrefs = {
+  auto: boolean;
+  skipped: string | null;
+};
+
+export type UpdateProgress = { received: number; total: number };
+
 export type DiscordStatus = { connected: boolean; error: string | null };
 
 export type SettingsPatch = { [K in keyof Settings]?: Partial<Settings[K]> };

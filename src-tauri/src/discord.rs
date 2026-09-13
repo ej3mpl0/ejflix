@@ -14,7 +14,7 @@ use tokio::sync::{Mutex, Notify, RwLock};
 
 /// Public application id used until the user pastes their own (shows the app name that
 /// application was registered with; create one at discord.com/developers to show "ejFlix").
-pub const DEFAULT_CLIENT_ID: &str = "1053747938519679018";
+pub const DEFAULT_CLIENT_ID: &str = "1280587438863028236";
 const TICK: Duration = Duration::from_secs(15);
 const RETRY: Duration = Duration::from_secs(30);
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
