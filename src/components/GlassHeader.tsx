@@ -13,6 +13,7 @@ export type NavView =
   | "home"
   | "myserver"
   | "discover"
+  | "tv"
   | "mylist"
   | "search"
   | "settings"
@@ -31,6 +32,7 @@ export function GlassHeader({
   avatarUrl,
   mode,
   hasServer,
+  hasTv = false,
   view,
   onView,
   libraries,
@@ -48,6 +50,8 @@ export function GlassHeader({
   mode: "jellyfin" | "local";
   /** Server tabs (My server, libraries, My list) only make sense with a server. */
   hasServer: boolean;
+  /** The profile has IPTV lists: show the TV tab. */
+  hasTv?: boolean;
   view: NavView;
   onView: (view: NavView) => void;
   /** Libraries pinned as tabs. */
@@ -96,7 +100,7 @@ export function GlassHeader({
     const observer = new ResizeObserver(measure);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [view, libraries.length, hasServer]);
+  }, [view, libraries.length, hasServer, hasTv]);
 
   useEffect(() => {
     setJellyKey((n) => n + 1);
@@ -169,6 +173,7 @@ export function GlassHeader({
               })
             : null}
           <Tab id="discover" label={t("discover")} />
+          {hasTv ? <Tab id="tv" label={t("tvTab")} /> : null}
           {hasServer ? <Tab id="mylist" label={t("myList")} /> : null}
           {hasServer ? (
             <div className="relative flex items-center" ref={addRef}>

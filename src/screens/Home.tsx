@@ -4,15 +4,24 @@ import { GlassHeader, libraryView, type NavView } from "../components/GlassHeade
 import { Feed } from "../components/Feed";
 import { PosterCard } from "../components/PosterCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
-import { Settings } from "./Settings";
+import { Settings, type SettingsSectionId } from "./Settings";
 import { SearchPage } from "./SearchPage";
 import { Discover } from "./Discover";
+import { LiveTv } from "./LiveTv";
 import { DetailsPage } from "./DetailsPage";
 import { ExternalDetailsPage } from "./ExternalDetailsPage";
 import { StreamPicker } from "../components/StreamPicker";
 import { resumeToMovie } from "../lib/addons";
 import { api } from "../lib/api";
-import { hasServer as sessionHasServer, type HomeData, type Library, type Movie, type SavedServer, type Session } from "../lib/types";
+import {
+  hasServer as sessionHasServer,
+  type HomeData,
+  type IptvSource,
+  type Library,
+  type Movie,
+  type SavedServer,
+  type Session,
+} from "../lib/types";
 import { sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
@@ -66,6 +75,9 @@ export function Home({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<NavView>("home");
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>(undefined);
+  /** IPTV lists of the profile (the TV tab shows up when there is at least one). */
+  const [tvSources, setTvSources] = useState<IptvSource[]>([]);
   const history = useRef<NavView[]>([]);
   /** Details pages stacked over the current tab (a "More like this" click adds one). */
   const [stack, setStack] = useState<DetailsRoute[]>([]);
@@ -156,6 +168,27 @@ export function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadFavorites, hasServer, session.serverUrl]);
 
+  // IPTV: sources with their loaded state, kept fresh while playlists download.
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      api
+        .iptvStatus()
+        .then((status) => {
+          if (alive) setTvSources(status.sources);
+        })
+        .catch(() => {
+          if (alive) setTvSources([]);
+        });
+    };
+    load();
+    const unlisten = api.onIptvChanged(load);
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn());
+    };
+  }, [session.userId]);
+
   const pinned = useMemo(
     () => added.map((id) => libraries.find((lib) => lib.id === id)).filter((lib): lib is Library => Boolean(lib)),
     [added, libraries],
@@ -174,6 +207,11 @@ export function Home({
   useEffect(() => {
     if (!hasServer && (view === "myserver" || view === "mylist" || view.startsWith("lib:"))) setView("home");
   }, [hasServer, view]);
+
+  // The TV tab disappears with the last IPTV list.
+  useEffect(() => {
+    if (view === "tv" && !tvSources.length) setView("home");
+  }, [tvSources.length, view]);
 
   // Background refresh (keeps current data, scroll and view): continue-watching
   // progress changes after every playback, favorites/watched after every toggle.
@@ -209,6 +247,7 @@ export function Home({
 
   const openView = (next: NavView) => {
     setStack([]);
+    if (next !== "settings") setSettingsSection(undefined);
     if (next === view) return;
     history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
     setView(next);
@@ -218,6 +257,16 @@ export function Home({
   const back = () => {
     const previous = history.current.pop() ?? "home";
     setView(previous);
+  };
+
+  /** Settings opened on a given section (e.g. the TV tab's "configure IPTV"). */
+  const openSettings = (section: SettingsSectionId) => {
+    setSettingsSection(section);
+    if (view === "settings") return;
+    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    setStack([]);
+    setView("settings");
+    scroller.current?.scrollTo({ top: 0 });
   };
 
   const openDetails = (movie: Movie) => {
@@ -246,6 +295,10 @@ export function Home({
   useBackNavigation(hasStack || picker || view === "home" ? null : back);
 
   const play = (movie: Movie) => {
+    if (movie.live) {
+      onPlay(movie);
+      return;
+    }
     if (movie.external) {
       if (movie.external.stream) {
         onPlay(movie);
@@ -356,6 +409,7 @@ export function Home({
         avatarUrl={sessionAvatar(session)}
         mode={session.mode}
         hasServer={hasServer}
+        hasTv={tvSources.length > 0}
         view={view}
         onView={openView}
         libraries={pinned}
@@ -386,12 +440,15 @@ export function Home({
             session={session}
             server={server}
             version={version}
+            initialSection={settingsSection}
             onSessionChange={onSessionChange}
             onSwitchProfile={onSwitchProfile}
             onLogout={onLogout}
             onBack={back}
             onToast={onToast}
           />
+        ) : view === "tv" ? (
+          <LiveTv sources={tvSources} refreshToken={refreshToken} onPlay={play} onError={onToast} onSettings={() => openSettings("iptv")} />
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}

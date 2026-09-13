@@ -19,7 +19,8 @@ function externalId(videoId: string): string {
   return `${PREFIX}${videoId}`;
 }
 
-function emptyMovie(id: string, kind: string, name: string): Movie {
+/** Item with every field at its empty value; online titles and channels build on it. */
+export function emptyMovie(id: string, kind: string, name: string): Movie {
   return {
     id,
     kind,

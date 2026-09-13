@@ -174,6 +174,8 @@ pub enum PlaybackSource {
     },
     /// An online stream from a Stremio addon: progress is kept locally.
     Addon { entry: crate::addons::ResumeEntry },
+    /// An IPTV channel: nothing to report, the presence follows the guide.
+    Live { channel_id: String },
 }
 
 #[derive(Clone)]

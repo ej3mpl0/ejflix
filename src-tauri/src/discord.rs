@@ -31,12 +31,15 @@ pub struct PresenceInfo {
     /// "S1:E3 · Episode title" for episodes.
     pub episode: Option<String>,
     pub year: Option<i32>,
-    /// "movie" | "series"
+    /// "movie" | "series" | "live"
     pub kind: String,
     /// Publicly reachable poster (Discord fetches it through its own proxy).
     pub poster_url: Option<String>,
-    /// Server name or "Online".
+    /// Server name, "Online" or the IPTV list name.
     pub source: String,
+    /// Live TV: programme boundaries (unix seconds) shown as the activity time.
+    #[serde(default)]
+    pub live_window: Option<(u64, u64)>,
 }
 
 /// Activity as sent to Discord.
@@ -323,6 +326,8 @@ pub fn fill_template(template: &str, info: &PresenceInfo, locale: &str) -> Strin
     let kind = match (info.kind.as_str(), locale) {
         ("series", "en") => "TV show",
         ("series", _) => "Serie",
+        ("live", "en") => "Live TV",
+        ("live", _) => "TV en directo",
         (_, "en") => "Movie",
         _ => "Película",
     };

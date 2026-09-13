@@ -24,6 +24,29 @@ pub struct Settings {
     pub library: LibraryPrefs,
     pub addons: AddonPrefs,
     pub discord: DiscordPrefs,
+    pub iptv: IptvPrefs,
+}
+
+/// Live TV (IPTV lists).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct IptvPrefs {
+    /// Download the playlists and guides again on launch when older than 12 hours.
+    pub auto_refresh: bool,
+    /// Fetch the XMLTV programme guide (can be large).
+    pub epg: bool,
+    /// Zapping with the mouse wheel over the video (instead of volume).
+    pub wheel_zap: bool,
+}
+
+impl Default for IptvPrefs {
+    fn default() -> Self {
+        Self {
+            auto_refresh: true,
+            epg: true,
+            wheel_zap: false,
+        }
+    }
 }
 
 /// Discord Rich Presence. Templates accept `{title}`, `{episode}`, `{year}`, `{type}`

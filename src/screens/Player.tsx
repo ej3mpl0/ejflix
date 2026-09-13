@@ -8,8 +8,10 @@ import { NextEpisodeCard } from "../components/NextEpisodeCard";
 import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
+import { ChannelsPanel } from "../components/ChannelsPanel";
 import { api } from "../lib/api";
-import type { Movie, PlayerState } from "../lib/types";
+import type { Channel, EpgNow, Movie, PlayerState } from "../lib/types";
+import { channelToMovie } from "../lib/iptv";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
@@ -85,11 +87,13 @@ export function Player({
   const lockedRef = useRef(false);
   lockedRef.current = locked;
   const overlay = mode === "overlay";
+  /** IPTV channel: no timeline, arrows and the wheel (optionally) change channel. */
+  const live = movie.live ?? null;
   const timelineMovie = detail ?? movie;
   const isEpisode = movie.kind === "Episode";
   const code = isEpisode ? episodeCode(movie, t("episodeCode")) : "";
   const heading = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
-  const subheading = isEpisode ? [code, movie.name].filter(Boolean).join(" · ") : "";
+  const subheading = isEpisode ? [code, movie.name].filter(Boolean).join(" · ") : live?.group ?? "";
 
   const showLockHint = () => {
     setLockHint(true);
@@ -129,6 +133,7 @@ export function Player({
   const stateRef = useRef(state);
   const hotkeyRef = useRef<(key: string) => void>(() => undefined);
   const keydownRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  const wheelRef = useRef<(deltaY: number) => void>(() => undefined);
   onErrorRef.current = onError;
   onExitRef.current = onExit;
   tRef.current = t;
@@ -163,6 +168,14 @@ export function Player({
         }
         if (cancelled) return;
         try {
+          if (movie.live) {
+            // IPTV channel: Rust resolves the stream URL (Xtream credentials stay there).
+            const next = await api.iptvPlay(movie.live.channelId);
+            if (cancelled) return;
+            void api.openPlayer(movie);
+            setState(next);
+            return;
+          }
           if (movie.external) {
             // Online title: resolve the stream (chosen in the picker, or auto-picked when
             // chaining episodes), work out the next episode and start by URL.
@@ -279,7 +292,7 @@ export function Player({
 
   // Items coming from list queries lack trickplay/chapters; fetch the detail once.
   useEffect(() => {
-    if (!overlay || movie.external) return;
+    if (!overlay || movie.external || movie.live) return;
     if (movie.trickplay || movie.chapters.length) return;
     let alive = true;
     api
@@ -300,7 +313,7 @@ export function Player({
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (lockedRef.current) return;
-      void changeVolume(stateRef.current.volume + (e.deltaY < 0 ? 5 : -5));
+      wheelRef.current(e.deltaY);
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMove);
@@ -369,8 +382,65 @@ export function Player({
     void api.playNext(nextEpisode);
   };
 
+  // Live TV: channels of the same group for zapping, and the programme on air.
+  const [zapList, setZapList] = useState<Channel[]>([]);
+  const [liveEpg, setLiveEpg] = useState<EpgNow | null>(null);
+  useEffect(() => {
+    if (!overlay || !live) return;
+    let alive = true;
+    api
+      .iptvChannels({ sourceId: live.sourceId, group: live.group, limit: 1000 })
+      .then((page) => {
+        if (alive) setZapList(page.items);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [overlay, live?.sourceId, live?.group]);
+  useEffect(() => {
+    if (!overlay || !live) return;
+    let alive = true;
+    const channelId = live.channelId;
+    const load = () => {
+      api
+        .iptvEpgNow([channelId])
+        .then((map) => {
+          if (alive) setLiveEpg(map[channelId] ?? null);
+        })
+        .catch(() => undefined);
+    };
+    setLiveEpg(null);
+    load();
+    const handle = window.setInterval(load, 30_000);
+    return () => {
+      alive = false;
+      window.clearInterval(handle);
+    };
+  }, [overlay, live?.channelId]);
+
+  const playChannel = (channel: Channel) => {
+    if (!live || nextSent.current || channel.id === live.channelId) return;
+    nextSent.current = true;
+    setPanel(false);
+    void api.playNext(channelToMovie(channel, live.sourceName));
+  };
+
+  /** Previous / next channel of the group (wraps around). */
+  const zap = (dir: 1 | -1) => {
+    if (!live || !zapList.length) return;
+    const index = zapList.findIndex((c) => c.id === live.channelId);
+    const target = zapList[((index < 0 ? 0 : index + dir) + zapList.length) % zapList.length];
+    if (target) playChannel(target);
+  };
+
+  wheelRef.current = (deltaY) => {
+    if (live && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
+    else void changeVolume(stateRef.current.volume + (deltaY < 0 ? 5 : -5));
+  };
+
   // Skip intro / recap / credits and the next-episode card (overlay only).
-  const segments = useSegments(movie, state.duration, overlay);
+  const segments = useSegments(movie, state.duration, overlay && !live);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
   const skipPrompt = useSkipPrompt({
     segments,
@@ -479,12 +549,26 @@ export function Player({
       case "ArrowLeft":
       case "j":
       case "J":
-        seekBy(-10);
+        if (live) zap(-1);
+        else seekBy(-10);
         break;
       case "ArrowRight":
       case "l":
       case "L":
-        seekBy(10);
+        if (live) zap(1);
+        else seekBy(10);
+        break;
+      case "PageUp":
+        if (live) {
+          e.preventDefault();
+          zap(-1);
+        }
+        break;
+      case "PageDown":
+        if (live) {
+          e.preventDefault();
+          zap(1);
+        }
         break;
       case "ArrowUp":
         e.preventDefault();
@@ -531,10 +615,14 @@ export function Player({
         break;
       case "e":
       case "E":
-        if ((isEpisode && movie.seriesId) || movie.mediaSources.length > 1) togglePanel();
+        if (live || (isEpisode && movie.seriesId) || movie.mediaSources.length > 1) togglePanel();
+        break;
+      case "c":
+      case "C":
+        if (live) togglePanel();
         break;
       default:
-        if (/^[0-9]$/.test(e.key) && current.duration > 0) {
+        if (!live && /^[0-9]$/.test(e.key) && current.duration > 0) {
           seekTo((current.duration * Number(e.key)) / 10);
         }
     }
@@ -598,7 +686,7 @@ export function Player({
           {Math.round(volHud)}%
         </div>
       ) : null}
-      {!locked && pauseInfo && !splash && !menu && !panel ? (
+      {!locked && !live && pauseInfo && !splash && !menu && !panel ? (
         <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
       {locked ? null : nextEpisode && nextCard.visible ? (
@@ -629,6 +717,7 @@ export function Player({
           menu={menu}
           remaining={remaining}
           panelOpen={panel}
+          live={live ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null } : null}
           onMenu={setMenu}
           onToggleRemaining={toggleRemaining}
           onBack={onExit}
@@ -650,7 +739,9 @@ export function Player({
           onHoldUi={holdUi}
         />
       )}
-      {panel && !locked ? (
+      {panel && !locked && live ? (
+        <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />
+      ) : panel && !locked ? (
         <EpisodesPanel
           key={movie.id}
           movie={movie}

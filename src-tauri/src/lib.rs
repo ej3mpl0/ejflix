@@ -1,5 +1,7 @@
 mod addons;
 mod discord;
+mod inflate;
+mod iptv;
 mod jellyfin;
 mod player;
 mod profiles;
@@ -17,6 +19,7 @@ use jellyfin::{
 };
 use profiles::{LocalProfile, LocalProfileView, ProfilePatch};
 use addons::{AddonClient, AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ResumeEntry};
+use iptv::{ChannelPage, ChannelQuery, EpgNow, GroupInfo, IptvSourceInput, IptvSourceView, IptvState, Programme, XtreamAccount};
 use player::{PlaybackContext, PlaybackPrefs, PlaybackSource, Player, PlayerState};
 use segments::{MediaSegment, SegmentsCache};
 use serde::Deserialize;
@@ -46,6 +49,7 @@ pub struct AppState {
     pub local: tokio::sync::RwLock<Option<LocalProfile>>,
     pub discord: Arc<discord::Discord>,
     pub updater: Arc<update::Updater>,
+    pub iptv: Arc<IptvState>,
 }
 
 impl AppState {
@@ -59,6 +63,7 @@ impl AppState {
             addons: Arc::new(AddonClient::new()),
             local: tokio::sync::RwLock::new(None),
             discord: discord::Discord::new(),
+            iptv: Arc::new(IptvState::new()),
         }
     }
 }
@@ -85,7 +90,23 @@ async fn refresh_presence(app: &tauri::AppHandle) {
         return;
     }
     let locale = load_locale(app).unwrap_or_default();
-    let info = &ctx.presence;
+    let mut info = ctx.presence.clone();
+    if let PlaybackSource::Live { channel_id } = &ctx.source {
+        // The programme changes while the channel plays: refresh it from the guide.
+        let now = addons::now_ms() / 1000;
+        let epg = state.iptv.epg_now(std::slice::from_ref(channel_id), now).await;
+        match epg.get(channel_id).and_then(|e| e.now.as_ref()) {
+            Some(programme) => {
+                info.episode = Some(programme.title.clone());
+                info.live_window = Some((programme.start, programme.stop));
+            }
+            None => {
+                info.episode = None;
+                info.live_window = None;
+            }
+        }
+    }
+    let info = &info;
     let details = discord::clamp_text(discord::fill_template(&prefs.details, info, &locale));
     let mut state_text = discord::fill_template(&prefs.state, info, &locale);
     if snap.paused {
@@ -102,6 +123,9 @@ async fn refresh_presence(app: &tauri::AppHandle) {
         let start = now.saturating_sub(snap.time.max(0.0) as u64);
         let end = now + (snap.duration - snap.time).max(0.0) as u64;
         Some((start, Some(end)))
+    } else if prefs.show_time && !snap.paused {
+        // Live TV: the programme's own time window when the guide knows it.
+        info.live_window.map(|(start, stop)| (start, Some(stop)))
     } else {
         None
     };
@@ -164,6 +188,7 @@ fn presence_for_item(session: &Session, movie: &Movie, server_name: Option<Strin
             session.server_url
         )),
         source: server_name.unwrap_or_else(|| "Jellyfin".to_string()),
+        live_window: None,
     }
 }
 
@@ -189,6 +214,7 @@ fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
         kind: if entry.kind == "series" { "series".into() } else { "movie".into() },
         poster_url: entry.poster.clone(),
         source: "Online".into(),
+        live_window: None,
     }
 }
 
@@ -393,6 +419,7 @@ async fn local_profile_enter(
     let _ = state.player.stop().await;
     state.jellyfin.set_session(None).await;
     state.segments.clear().await;
+    state.iptv.clear().await;
     profiles::set_active(&app, Some(&profile.id))?;
     *state.local.write().await = Some(profile.clone());
     restore_linked_session(&app, &state, &profile.id).await;
@@ -536,6 +563,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(),
     let was_local = state.local.write().await.take().is_some();
     state.jellyfin.set_session(None).await;
     state.segments.clear().await;
+    state.iptv.clear().await;
     profiles::set_active(&app, None)?;
     if was_local {
         return Ok(());
@@ -764,6 +792,7 @@ async fn player_stop(
                     );
                 }
             }
+            PlaybackSource::Live { .. } => {}
         }
     }
     refresh_presence(&app).await;
@@ -1327,6 +1356,7 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
                         );
                     }
                 }
+                PlaybackSource::Live { .. } => {}
             }
             let _ = app.emit("player://state", snap);
             refresh_presence(&app).await;
@@ -1559,6 +1589,213 @@ async fn get_media_segments_external(
     Ok(state.segments.resolve_external(&imdb, season, episode).await)
 }
 
+// ---- IPTV ----
+
+async fn iptv_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
+    settings_user(app, state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())
+}
+
+async fn iptv_prefs(app: &tauri::AppHandle, uid: &str) -> settings::IptvPrefs {
+    settings::load(app, uid).unwrap_or_default().iptv
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IptvStatus {
+    sources: Vec<IptvSourceView>,
+    loading: bool,
+}
+
+/// Sources of the active profile with their loaded state. Puts cached playlists in
+/// memory and refreshes missing or stale ones in the background.
+#[tauri::command]
+async fn iptv_status(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<IptvStatus, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let sources = iptv::list_sources(&app, &uid);
+    let prefs = iptv_prefs(&app, &uid).await;
+    state.iptv.ensure(&app, &sources, prefs.auto_refresh, prefs.epg).await;
+    Ok(IptvStatus {
+        sources: state.iptv.views(&sources).await,
+        loading: state.iptv.is_loading().await,
+    })
+}
+
+/// Creates or edits a source and downloads it right away.
+#[tauri::command]
+async fn iptv_source_save(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    input: IptvSourceInput,
+) -> Result<IptvSourceView, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let source = iptv::save_source(&app, &uid, input)?;
+    let prefs = iptv_prefs(&app, &uid).await;
+    state.iptv.forget(&app, &source.id).await;
+    if source.enabled {
+        state.iptv.spawn_refresh(&app, source.clone(), prefs.epg).await;
+    } else {
+        let _ = app.emit(iptv::CHANGED_EVENT, ());
+    }
+    let views = state.iptv.views(std::slice::from_ref(&source)).await;
+    views.into_iter().next().ok_or_else(|| "No se pudo guardar la lista".to_string())
+}
+
+/// Imports the content of a playlist file chosen in the UI (there is no file dialog).
+#[tauri::command]
+async fn iptv_source_import(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: Option<String>,
+    name: String,
+    file_name: String,
+    text: String,
+) -> Result<IptvSourceView, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let source = iptv::import_playlist(&app, &uid, id.as_deref(), &name, &file_name, &text)?;
+    let prefs = iptv_prefs(&app, &uid).await;
+    state.iptv.forget(&app, &source.id).await;
+    state.iptv.spawn_refresh(&app, source.clone(), prefs.epg).await;
+    let views = state.iptv.views(std::slice::from_ref(&source)).await;
+    views.into_iter().next().ok_or_else(|| "No se pudo importar la lista".to_string())
+}
+
+#[tauri::command]
+async fn iptv_source_remove(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<(), String> {
+    let uid = iptv_user(&app, &state).await?;
+    iptv::remove_source(&app, &uid, &id)?;
+    state.iptv.forget(&app, &id).await;
+    let _ = app.emit(iptv::CHANGED_EVENT, ());
+    Ok(())
+}
+
+/// Downloads a source again (or every enabled one without `source_id`).
+#[tauri::command]
+async fn iptv_refresh(app: tauri::AppHandle, state: State<'_, AppState>, source_id: Option<String>) -> Result<(), String> {
+    let uid = iptv_user(&app, &state).await?;
+    let prefs = iptv_prefs(&app, &uid).await;
+    for source in iptv::list_sources(&app, &uid) {
+        if !source.enabled || source_id.as_deref().is_some_and(|id| id != source.id) {
+            continue;
+        }
+        state.iptv.spawn_refresh(&app, source, prefs.epg).await;
+    }
+    Ok(())
+}
+
+/// Signs in to an Xtream Codes server without saving anything.
+#[tauri::command]
+async fn iptv_xtream_check(
+    state: State<'_, AppState>,
+    url: String,
+    username: String,
+    password: String,
+    user_agent: Option<String>,
+) -> Result<XtreamAccount, String> {
+    let (base, url_user, url_pass) = iptv::parse_xtream_url(&url)?;
+    let username = if username.trim().is_empty() { url_user.unwrap_or_default() } else { username.trim().to_string() };
+    let password = if password.is_empty() { url_pass.unwrap_or_default() } else { password };
+    if username.is_empty() || password.is_empty() {
+        return Err("Xtream Codes necesita usuario y contraseña".into());
+    }
+    let sealed = protect::protect(password.as_bytes())?;
+    let source = iptv::IptvSource {
+        kind: iptv::SourceKind::Xtream,
+        url: base,
+        username,
+        password: protect::to_hex(&sealed),
+        user_agent: user_agent.unwrap_or_default(),
+        ..iptv::IptvSource::default()
+    };
+    state.iptv.xtream_check(&source).await
+}
+
+#[tauri::command]
+async fn iptv_groups(app: tauri::AppHandle, state: State<'_, AppState>, source_id: Option<String>) -> Result<Vec<GroupInfo>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let sources = iptv::list_sources(&app, &uid);
+    Ok(state.iptv.groups(&sources, source_id.as_deref()).await)
+}
+
+#[tauri::command]
+async fn iptv_channels(app: tauri::AppHandle, state: State<'_, AppState>, query: ChannelQuery) -> Result<ChannelPage, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let sources = iptv::list_sources(&app, &uid);
+    let favorites = iptv::favorites(&app, &uid);
+    let recent = iptv::recent(&app, &uid);
+    Ok(state.iptv.channels(&sources, &query, &favorites, &recent).await)
+}
+
+/// Current and next programme of each channel (only channels with a guide are returned).
+#[tauri::command]
+async fn iptv_epg_now(state: State<'_, AppState>, ids: Vec<String>) -> Result<std::collections::HashMap<String, EpgNow>, String> {
+    let now = addons::now_ms() / 1000;
+    Ok(state.iptv.epg_now(&ids, now).await)
+}
+
+#[tauri::command]
+async fn iptv_epg_channel(state: State<'_, AppState>, id: String) -> Result<Vec<Programme>, String> {
+    let now = addons::now_ms() / 1000;
+    Ok(state.iptv.epg_channel(&id, now).await)
+}
+
+#[tauri::command]
+async fn iptv_favorite(app: tauri::AppHandle, state: State<'_, AppState>, id: String, on: bool) -> Result<Vec<String>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    if iptv::source_of(&id).is_none() {
+        return Err("Canal no válido".into());
+    }
+    iptv::set_favorite(&app, &uid, &id, on)
+}
+
+/// Plays a channel: the stream URL (with the Xtream credentials) is resolved here.
+#[tauri::command]
+async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<PlayerState, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let (channel, _) = state
+        .iptv
+        .find(&id)
+        .await
+        .ok_or_else(|| "Canal no encontrado".to_string())?;
+    let source = iptv::list_sources(&app, &uid)
+        .into_iter()
+        .find(|s| s.id == channel.source_id)
+        .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+    let (url, headers) = iptv::stream_for(&source, &channel)?;
+    let playback = settings::load(&app, &uid).unwrap_or_default().playback;
+    let prefs = PlaybackPrefs {
+        audio_language: playback.audio_language,
+        subtitle_language: playback.subtitle_language,
+        // Live TV always plays at normal speed.
+        remember_speed: false,
+        last_speed: 1.0,
+    };
+    let now = addons::now_ms() / 1000;
+    let epg = state.iptv.epg_now(std::slice::from_ref(&id), now).await;
+    let programme = epg.get(&id).and_then(|e| e.now.clone());
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Live { channel_id: id.clone() },
+        presence: discord::PresenceInfo {
+            title: channel.name.clone(),
+            episode: programme.as_ref().map(|p| p.title.clone()),
+            year: None,
+            kind: "live".into(),
+            poster_url: channel.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            source: source.name.clone(),
+            live_window: programme.as_ref().map(|p| (p.start, p.stop)),
+        },
+    };
+    state
+        .player
+        .start(&app, &url, &headers, &channel.name, 0.0, ctx, prefs)
+        .await?;
+    let _ = iptv::push_recent(&app, &uid, &id);
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(state.player.snapshot().await)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1610,6 +1847,18 @@ pub fn run() {
             addon_streams,
             addon_progress_list,
             addon_progress_remove,
+            iptv_status,
+            iptv_source_save,
+            iptv_source_import,
+            iptv_source_remove,
+            iptv_refresh,
+            iptv_xtream_check,
+            iptv_groups,
+            iptv_channels,
+            iptv_epg_now,
+            iptv_epg_channel,
+            iptv_favorite,
+            iptv_play,
             player_start_url,
             player_start,
             player_stop,

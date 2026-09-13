@@ -31,6 +31,7 @@ function mergePatch(base: Settings, patch: SettingsPatch): Settings {
     library: { ...base.library, ...(patch.library ?? {}) },
     addons: { ...base.addons, ...(patch.addons ?? {}) },
     discord: { ...base.discord, ...(patch.discord ?? {}) },
+    iptv: { ...base.iptv, ...(patch.iptv ?? {}) },
   };
 }
 

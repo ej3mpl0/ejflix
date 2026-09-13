@@ -6,7 +6,16 @@ import type {
   AddonMetaFull,
   AddonStream,
   BrowseArgs,
+  ChannelGroup,
+  ChannelPage,
+  ChannelQuery,
   DiscordStatus,
+  EpgNow,
+  IptvSource,
+  IptvSourceInput,
+  IptvStatus,
+  Programme,
+  XtreamAccount,
   HomeData,
   UpdateCheck,
   UpdatePrefs,
@@ -134,6 +143,25 @@ export const api = {
     listen("player://exit", () => handler()),
   onPlayerClose: (handler: () => void): Promise<UnlistenFn> =>
     listen("player://close", () => handler()),
+  // IPTV (live TV)
+  iptvStatus: () => invoke<IptvStatus>("iptv_status"),
+  iptvSourceSave: (input: IptvSourceInput) => invoke<IptvSource>("iptv_source_save", { input }),
+  /** Imports a playlist picked with a file input (its text travels to Rust). */
+  iptvSourceImport: (args: { id?: string | null; name: string; fileName: string; text: string }) =>
+    invoke<IptvSource>("iptv_source_import", { id: args.id ?? null, name: args.name, fileName: args.fileName, text: args.text }),
+  iptvSourceRemove: (id: string) => invoke<void>("iptv_source_remove", { id }),
+  /** Downloads one source again, or every enabled one without an id. */
+  iptvRefresh: (sourceId?: string | null) => invoke<void>("iptv_refresh", { sourceId: sourceId ?? null }),
+  iptvXtreamCheck: (args: { url: string; username: string; password: string; userAgent?: string }) =>
+    invoke<XtreamAccount>("iptv_xtream_check", { ...args, userAgent: args.userAgent ?? null }),
+  iptvGroups: (sourceId?: string | null) => invoke<ChannelGroup[]>("iptv_groups", { sourceId: sourceId ?? null }),
+  iptvChannels: (query: ChannelQuery) => invoke<ChannelPage>("iptv_channels", { query }),
+  /** Programme on air (and the next one) for the given channel ids. */
+  iptvEpgNow: (ids: string[]) => invoke<Record<string, EpgNow>>("iptv_epg_now", { ids }),
+  iptvEpgChannel: (id: string) => invoke<Programme[]>("iptv_epg_channel", { id }),
+  iptvFavorite: (id: string, on: boolean) => invoke<string[]>("iptv_favorite", { id, on }),
+  iptvPlay: (id: string) => invoke<PlayerState>("iptv_play", { id }),
+  onIptvChanged: (handler: () => void): Promise<UnlistenFn> => listen("iptv://changed", () => handler()),
   updateInfo: () => invoke<{ current: string; showNotes: boolean }>("update_info"),
   updateCheck: (force = false) => invoke<UpdateCheck>("update_check", { force }),
   updatePrefs: () => invoke<UpdatePrefs>("update_prefs"),

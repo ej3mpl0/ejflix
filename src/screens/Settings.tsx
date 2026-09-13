@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { LocalProfile } from "../lib/types";
 import {
   ArrowLeft,
@@ -11,11 +11,13 @@ import {
   Play,
   Puzzle,
   Server,
+  Tv,
   Unlink,
   Users,
   Languages as LanguagesIcon,
 } from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
+import { IptvSection } from "../components/settings/IptvSection";
 import { DiscordSection } from "../components/settings/DiscordSection";
 import { UpdatesSection } from "../components/settings/UpdatesSection";
 import { hasServer as sessionHasServer, type SavedServer, type Session, type SkipMode, type Countdown } from "../lib/types";
@@ -32,7 +34,8 @@ import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 
-type Section = "appearance" | "playback" | "addons" | "discord" | "language" | "account";
+type Section = "appearance" | "playback" | "addons" | "iptv" | "discord" | "language" | "account";
+export type SettingsSectionId = Section;
 
 const field =
   "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
@@ -214,6 +217,7 @@ export function Settings({
   session,
   server,
   version,
+  initialSection,
   onSessionChange,
   onSwitchProfile,
   onLogout,
@@ -223,6 +227,8 @@ export function Settings({
   session: Session;
   server: SavedServer | null;
   version: string | null;
+  /** Section to open first (defaults to Appearance). */
+  initialSection?: SettingsSectionId;
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
@@ -231,8 +237,12 @@ export function Settings({
 }) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
-  const [section, setSection] = useState<Section>("appearance");
+  const [section, setSection] = useState<Section>(initialSection ?? "appearance");
   const { appearance, playback } = settings;
+
+  useEffect(() => {
+    if (initialSection) setSection(initialSection);
+  }, [initialSection]);
 
   const skipOptions: { value: SkipMode; label: string }[] = [
     { value: "ask", label: t("skipAsk") },
@@ -250,6 +260,7 @@ export function Settings({
     { id: "appearance", label: t("appearance"), icon: Palette },
     { id: "playback", label: t("playback"), icon: Play },
     { id: "addons", label: t("addons"), icon: Puzzle },
+    { id: "iptv", label: t("iptv"), icon: Tv },
     { id: "discord", label: t("discord"), icon: MessageCircle },
     { id: "language", label: t("language"), icon: LanguagesIcon },
     { id: "account", label: t("account"), icon: Users },
@@ -396,6 +407,8 @@ export function Settings({
           ) : null}
 
           {section === "addons" ? <AddonsSection onToast={onToast} /> : null}
+
+          {section === "iptv" ? <IptvSection onToast={onToast} /> : null}
 
           {section === "discord" ? <DiscordSection /> : null}
 

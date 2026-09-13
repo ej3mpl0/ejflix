@@ -13,10 +13,12 @@ import {
   RotateCcw,
   RotateCw,
   Subtitles,
+  Tv,
 } from "lucide-react";
-import type { MediaSegment, Movie, PlayerState } from "../lib/types";
+import type { MediaSegment, Movie, PlayerState, Programme } from "../lib/types";
 import { cn, episodeCode, formatClock } from "../lib/format";
 import { aspectLabel } from "../lib/aspect";
+import { formatRange, programmeProgress } from "../lib/iptv";
 import { VolumeSlider } from "./VolumeSlider";
 import { TrackMenu } from "./TrackMenu";
 import { SpeedMenu, formatSpeed } from "./SpeedMenu";
@@ -25,6 +27,9 @@ import { QualityBadges } from "./QualityBadge";
 import { useI18n } from "../lib/locale-context";
 
 export type PlayerMenu = "speed" | "audio" | "sub" | null;
+
+/** What the controls show while an IPTV channel plays. */
+export type LiveInfo = { number: number | null; now: Programme | null; next: Programme | null };
 
 function ControlChip({
   icon,
@@ -69,6 +74,7 @@ export function PlayerControls({
   menu,
   remaining,
   panelOpen,
+  live = null,
   onMenu,
   onToggleRemaining,
   onBack,
@@ -99,6 +105,8 @@ export function PlayerControls({
   menu: PlayerMenu;
   remaining: boolean;
   panelOpen: boolean;
+  /** Set while a live channel plays: no timeline, programme on air instead of the clock. */
+  live?: LiveInfo | null;
   onMenu: (menu: PlayerMenu) => void;
   onToggleRemaining: () => void;
   onBack: () => void;
@@ -119,7 +127,7 @@ export function PlayerControls({
   onReveal: () => void;
   onHoldUi: (hold: boolean) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const [scrub, setScrub] = useState<number | null>(null);
   const overChrome = useRef(false);
   const shownTime = scrub ?? state.time;
@@ -135,7 +143,13 @@ export function PlayerControls({
     ? [episodeCode(movie, t("episodeCode")), movie.name].filter(Boolean).join(" · ")
     : "";
   const hasVersions = movie.mediaSources.length > 1;
-  const showPanelChip = isEpisode || hasVersions;
+  const showPanelChip = isEpisode || hasVersions || live != null;
+  const panelLabel = live ? t("channels") : isEpisode ? t("episodes") : t("versions");
+  const liveLine = live
+    ? live.now
+      ? `${formatRange(live.now, locale)} · ${live.now.title}`
+      : movie.genres[0] ?? ""
+    : "";
 
   return (
     <div
@@ -181,8 +195,16 @@ export function PlayerControls({
           <div className="min-w-0 flex-1">
             <p className="truncate text-[15px] font-medium">{heading}</p>
             <div className="flex min-w-0 items-center gap-2 text-[12px] text-muted">
+              {live ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-[4px] bg-accent px-1.5 py-px text-[9px] font-bold tracking-wide text-on-accent uppercase">
+                  <span className="h-1.5 w-1.5 rounded-full bg-on-accent" />
+                  {t("liveBadge")}
+                </span>
+              ) : null}
+              {live && live.number != null ? <span className="tabular">{live.number}</span> : null}
+              {liveLine ? <span className="truncate">{liveLine}</span> : null}
               {episodeLine ? <span className="truncate">{episodeLine}</span> : null}
-              {!isEpisode && movie.year ? <span>{movie.year}</span> : null}
+              {!isEpisode && !live && movie.year ? <span>{movie.year}</span> : null}
               <QualityBadges badges={movie.badges.slice(0, 3)} className="[&>span]:px-1.5 [&>span]:py-0 [&>span]:text-[9px]" />
             </div>
           </div>
@@ -204,55 +226,84 @@ export function PlayerControls({
                   panelOpen && "bg-white/15 text-white",
                 )}
                 onClick={onPanel}
-                aria-label={isEpisode ? t("episodes") : t("versions")}
-                title={isEpisode ? t("episodes") : t("versions")}
+                aria-label={panelLabel}
+                title={panelLabel}
                 aria-pressed={panelOpen}
               >
-                <ListVideo size={20} />
+                {live ? <Tv size={20} /> : <ListVideo size={20} />}
               </button>
             ) : null}
           </div>
         </div>
 
         <div className="absolute inset-x-0 bottom-0 px-6 pb-4">
-          <Timeline
-            movie={timelineMovie}
-            time={state.time}
-            duration={state.duration}
-            cacheTime={state.cacheTime}
-            segments={segments}
-            onSeekTo={onSeekTo}
-            onScrub={onScrub}
-            onScrubbing={(seconds) => {
-              setScrub(seconds);
-              if (seconds != null) {
-                onHoldUi(true);
-              } else {
-                // Keep holding only if the pointer is still over the controls.
-                onHoldUi(overChrome.current);
-                onReveal();
-              }
-            }}
-          />
+          {live ? (
+            live.now ? (
+              <div className="mb-2 px-1">
+                <div className="flex items-center justify-between gap-4 text-[12px] text-white/80">
+                  <span className="truncate">
+                    <span className="font-semibold text-white">{live.now.title}</span>
+                    <span className="text-white/60"> · {formatRange(live.now, locale)}</span>
+                  </span>
+                  {live.next ? (
+                    <span className="shrink-0 truncate text-white/60">
+                      {t("nextProgramme")}: {live.next.title}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1.5 h-[3px] w-full rounded-full bg-white/15">
+                  <div className="h-full rounded-full bg-accent" style={{ width: `${programmeProgress(live.now)}%` }} />
+                </div>
+              </div>
+            ) : null
+          ) : (
+            <Timeline
+              movie={timelineMovie}
+              time={state.time}
+              duration={state.duration}
+              cacheTime={state.cacheTime}
+              segments={segments}
+              onSeekTo={onSeekTo}
+              onScrub={onScrub}
+              onScrubbing={(seconds) => {
+                setScrub(seconds);
+                if (seconds != null) {
+                  onHoldUi(true);
+                } else {
+                  // Keep holding only if the pointer is still over the controls.
+                  onHoldUi(overChrome.current);
+                  onReveal();
+                }
+              }}
+            />
+          )}
 
           <div className="relative flex h-12 items-center">
             <VolumeSlider volume={state.volume} mute={state.mute} onVolume={onVolume} onMute={onMute} />
-            <button
-              type="button"
-              className="icon-hit ml-2 rounded px-1.5 py-1 text-[13px] text-white/90 tabular hover:bg-white/8"
-              onClick={onToggleRemaining}
-              aria-label={remaining ? t("elapsedTime") : t("remainingTime")}
-              title={remaining ? t("elapsedTime") : t("remainingTime")}
-            >
-              {clock}
-            </button>
+            {live ? (
+              <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-accent uppercase">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                {t("liveBadge")}
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="icon-hit ml-2 rounded px-1.5 py-1 text-[13px] text-white/90 tabular hover:bg-white/8"
+                onClick={onToggleRemaining}
+                aria-label={remaining ? t("elapsedTime") : t("remainingTime")}
+                title={remaining ? t("elapsedTime") : t("remainingTime")}
+              >
+                {clock}
+              </button>
+            )}
 
             <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
               <button
                 type="button"
-                className="icon-hit grid h-10 w-10 place-items-center text-white"
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
                 onClick={() => onSeek(-10)}
                 aria-label={t("seekBack")}
+                tabIndex={live ? -1 : undefined}
               >
                 <RotateCcw size={20} />
               </button>
@@ -277,9 +328,10 @@ export function PlayerControls({
               </button>
               <button
                 type="button"
-                className="icon-hit grid h-10 w-10 place-items-center text-white"
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
                 onClick={() => onSeek(10)}
                 aria-label={t("seekForward")}
+                tabIndex={live ? -1 : undefined}
               >
                 <RotateCw size={20} />
               </button>
@@ -309,25 +361,27 @@ export function PlayerControls({
                 active={state.aspect !== "auto"}
                 onClick={onAspect}
               />
-              <div className="relative">
-                <ControlChip
-                  icon={<Gauge size={16} />}
-                  label={formatSpeed(state.speed)}
-                  ariaLabel={t("playbackSpeed")}
-                  expanded={menu === "speed"}
-                  active={menu === "speed"}
-                  onClick={() => toggleMenu("speed")}
-                />
-                {menu === "speed" ? (
-                  <SpeedMenu
-                    speed={state.speed}
-                    onSelect={(speed) => {
-                      onSpeed(speed);
-                      onMenu(null);
-                    }}
+              {!live ? (
+                <div className="relative">
+                  <ControlChip
+                    icon={<Gauge size={16} />}
+                    label={formatSpeed(state.speed)}
+                    ariaLabel={t("playbackSpeed")}
+                    expanded={menu === "speed"}
+                    active={menu === "speed"}
+                    onClick={() => toggleMenu("speed")}
                   />
-                ) : null}
-              </div>
+                  {menu === "speed" ? (
+                    <SpeedMenu
+                      speed={state.speed}
+                      onSelect={(speed) => {
+                        onSpeed(speed);
+                        onMenu(null);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
               <div className="relative">
                 <ControlChip
                   icon={<Subtitles size={16} />}
@@ -368,8 +422,8 @@ export function PlayerControls({
               </div>
               {showPanelChip ? (
                 <ControlChip
-                  icon={<ListVideo size={16} />}
-                  label={isEpisode ? t("episodes") : t("versions")}
+                  icon={live ? <Tv size={16} /> : <ListVideo size={16} />}
+                  label={panelLabel}
                   active={panelOpen}
                   onClick={onPanel}
                 />

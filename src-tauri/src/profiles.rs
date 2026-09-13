@@ -164,6 +164,9 @@ pub fn delete(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     store.delete(session_key(id));
     store.delete(format!("settings.{id}"));
     store.delete(format!("addonProgress.{id}"));
+    drop(store);
+    crate::iptv::delete_profile_data(app, id);
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     if active_id(app).as_deref() == Some(id) {
         store.delete(ACTIVE_KEY);
     }

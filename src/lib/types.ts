@@ -147,10 +147,24 @@ export type ExternalRef = {
   next?: Movie | null;
 };
 
+/** Identity of an IPTV channel carried inside a Movie. */
+export type LiveRef = {
+  channelId: string;
+  sourceId: string;
+  sourceName: string;
+  group: string;
+  number: number | null;
+  logo: string | null;
+  /** "live" | "movie" (VOD entry of the playlist). */
+  kind: string;
+};
+
 export type Movie = {
   id: string;
   /** Present for online titles served by Stremio addons (no Jellyfin item behind). */
   external?: ExternalRef | null;
+  /** Present for IPTV channels (kind "LiveTv"). */
+  live?: LiveRef | null;
   /** Jellyfin item type; anything unknown is treated like a movie. */
   kind: ItemKind | string;
   seriesId: string | null;
@@ -386,6 +400,15 @@ export type Settings = {
     /** Text after "Watching": the application name, the first line or the second line. */
     header: DiscordHeader;
   };
+  /** Live TV (IPTV lists). */
+  iptv: {
+    /** Download the playlists and guides again on launch when older than 12 hours. */
+    autoRefresh: boolean;
+    /** Fetch the XMLTV programme guide. */
+    epg: boolean;
+    /** Mouse wheel over the video changes channel instead of volume. */
+    wheelZap: boolean;
+  };
 };
 
 export type DiscordHeader = "name" | "details" | "state";
@@ -415,6 +438,102 @@ export type UpdateProgress = { received: number; total: number };
 
 export type DiscordStatus = { connected: boolean; error: string | null };
 
+// ---- IPTV ----
+
+export type IptvSourceKind = "m3uUrl" | "m3uFile" | "xtream";
+
+export type XtreamAccount = {
+  status: string;
+  expiresMs: number | null;
+  maxConnections: number | null;
+  activeConnections: number | null;
+  trial: boolean;
+};
+
+/** Configured IPTV source with its loaded state (never the password). */
+export type IptvSource = {
+  id: string;
+  name: string;
+  kind: IptvSourceKind;
+  url: string;
+  path: string;
+  imported: boolean;
+  username: string;
+  hasPassword: boolean;
+  epgUrl: string;
+  output: string;
+  userAgent: string;
+  includeVod: boolean;
+  enabled: boolean;
+  channelCount: number;
+  groupCount: number;
+  epgChannels: number;
+  updatedMs: number;
+  loading: boolean;
+  error: string | null;
+  epgError: string | null;
+  epgSource: string | null;
+  account: XtreamAccount | null;
+};
+
+export type IptvSourceInput = {
+  id?: string | null;
+  name: string;
+  kind: IptvSourceKind;
+  url: string;
+  path: string;
+  username: string;
+  /** New password; empty or null keeps the stored one. */
+  password?: string | null;
+  epgUrl: string;
+  output: string;
+  userAgent: string;
+  includeVod: boolean;
+  enabled: boolean;
+};
+
+export type IptvStatus = { sources: IptvSource[]; loading: boolean };
+
+export type Channel = {
+  id: string;
+  sourceId: string;
+  name: string;
+  logo: string | null;
+  group: string;
+  /** "live" | "movie" */
+  kind: string;
+  number: number | null;
+  tvgId: string;
+  favorite: boolean;
+  /** A programme guide is attached to this channel. */
+  epg: boolean;
+};
+
+export type Programme = {
+  /** Unix seconds. */
+  start: number;
+  stop: number;
+  title: string;
+  desc: string | null;
+  category: string | null;
+};
+
+export type EpgNow = { now: Programme | null; next: Programme | null };
+
+export type ChannelGroup = { name: string; sourceId: string; count: number; kind: string };
+
+export type ChannelQuery = {
+  sourceId?: string | null;
+  group?: string | null;
+  search?: string | null;
+  favorites?: boolean;
+  recent?: boolean;
+  offset?: number;
+  limit?: number;
+};
+
+export type ChannelPage = { items: Channel[]; total: number };
+
 export type SettingsPatch = { [K in keyof Settings]?: Partial<Settings[K]> };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -442,4 +561,5 @@ export const DEFAULT_SETTINGS: Settings = {
     showPaused: true,
     header: "details",
   },
+  iptv: { autoRefresh: true, epg: true, wheelZap: false },
 };

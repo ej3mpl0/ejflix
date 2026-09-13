@@ -37,6 +37,7 @@ The interface is available in **Spanish** and **English** (ES / EN control on th
 - My list (Jellyfin favourites) and mark as watched / unwatched for movies, series, seasons and episodes
 - Settings per profile: 12 accent themes (Crimson, White, Gold, Jade, Rose gold, Arctic, Graphite, Ocean, Violet, Emerald, Amber, Rose), AMOLED black, poster size, playback preferences, app language, account
 - Stremio addons: load any `manifest.json` (AIOStreams, Torrentio…) to get catalog rows on Home and online sources played straight in mpv, with local resume and automatic next episode
+- Live TV (IPTV): M3U playlists by URL or file and Xtream Codes accounts (Settings › IPTV), with the XMLTV programme guide, groups, favorites, recently watched channels, a channels panel and zapping inside the player
 - Search across the server and the searchable addon catalogs, results grouped as "My server" and "Online", with recent queries
 - Discord Rich Presence (Settings › Discord): shows what you are watching with poster, time remaining and paused state; the two text lines are templates
 - Language selector: Spanish and English
@@ -57,7 +58,7 @@ Pick "Watch online with addons" on the welcome screen and create a profile. Home
 
 ### Discord Rich Presence
 
-Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. It ships with ejFlix's own Discord application, so the card reads "ejFlix" and the status line "Watching <title>" (configurable: title, second line or app name); paste another Application ID in Settings › Discord if you want a different name or icon. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
+Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. While a live channel plays, `{title}` is the channel, `{episode}` the programme on air (from the guide), `{type}` reads "Live TV" and the time shown is the programme's own window. It ships with ejFlix's own Discord application, so the card reads "ejFlix" and the status line "Watching <title>" (configurable: title, second line or app name); paste another Application ID in Settings › Discord if you want a different name or icon. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
 
 ### Updates
 
@@ -75,6 +76,16 @@ Settings › Addons accepts the `manifest.json` URL of any Stremio addon (`https
 - Cinemeta is built in for the "Popular" rows and metadata; switch it off in the same section if you only want your own addons.
 
 The Jellyfin access token is never sent to addon hosts; only the headers an addon asks for (`behaviorHints.proxyHeaders`) go with the stream request.
+
+### Live TV (IPTV)
+
+Settings › IPTV takes any number of sources per profile (up to 12): an **M3U / M3U8 playlist by URL** (the usual `get.php?username=…&password=…&type=m3u_plus` link works), an **M3U file** picked from disk (its content is imported) or typed as a path (re-read on every refresh), or an **Xtream Codes** account (server, username and password; pasting the full `get.php` link fills them in). Each source can carry an XMLTV guide URL (`.xml` or `.xml.gz`; gzip is decoded by the app itself), a custom User-Agent for providers that require one, and for Xtream the stream container (MPEG-TS or HLS) and whether to list the VOD movie catalog. "Check account" signs in to an Xtream server and shows the status, expiry date and connection limit.
+
+Playlists and guides are downloaded from Rust, parsed and cached under `iptv/` in the app data folder, so the TV tab opens instantly; with "Refresh lists on launch" on they are downloaded again when older than 12 hours (or on demand). Stream URLs never reach the webview: the player asks Rust for the channel, which builds the Xtream URL with the credentials at that moment. Passwords are sealed with DPAPI like the Jellyfin token.
+
+The TV tab lists every channel with its logo, number and the programme on air (with progress), grouped as in the playlist, plus Favorites, Recent, a search box and a source filter. Inside the player a live channel shows a "Live" badge, the current and next programme, a channels panel (E or C) and zapping with the arrow keys, Page Up / Page Down or, if enabled, the mouse wheel. Discord shows the channel as `{title}` and the programme as `{episode}`, with the programme's own time window.
+
+Not covered: Stalker / MAC portals, catch-up (timeshift) and Xtream series; VOD entries of a playlist play as one-off streams.
 
 ### Audio and Discord screen share
 
@@ -150,15 +161,16 @@ Settings live per profile in the app data store (`settings.<userId>` in `session
 | Key | Action |
 | --- | --- |
 | Space / K | Play / pause |
-| Left / Right, J / L | Seek 10 seconds |
+| Left / Right, J / L | Seek 10 seconds (live TV: previous / next channel) |
+| Page Up / Page Down | Previous / next channel (live TV) |
 | 0–9 | Jump to 0%–90% |
 | Home / End | Jump to the start / near the end |
-| Up / Down, mouse wheel | Volume |
+| Up / Down, mouse wheel | Volume (the wheel can zap instead: Settings › IPTV) |
 | M | Mute |
 | < / > | Playback speed down / up |
 | Enter / S | Skip the intro, recap or credits when the prompt is shown |
 | N | Next episode |
-| E | Episodes and versions panel |
+| E | Episodes and versions panel (live TV: channels panel, also C) |
 | F, double-click | Fullscreen |
 | Click on the video | Play / pause |
 | Click on the time | Toggle elapsed / remaining |
