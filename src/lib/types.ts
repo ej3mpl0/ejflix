@@ -383,8 +383,12 @@ export type Settings = {
     showPoster: boolean;
     showTime: boolean;
     showPaused: boolean;
+    /** Text after "Watching": the application name, the first line or the second line. */
+    header: DiscordHeader;
   };
 };
+
+export type DiscordHeader = "name" | "details" | "state";
 
 export type DiscordStatus = { connected: boolean; error: string | null };
 
@@ -413,5 +417,6 @@ export const DEFAULT_SETTINGS: Settings = {
     showPoster: true,
     showTime: true,
     showPaused: true,
+    header: "details",
   },
 };

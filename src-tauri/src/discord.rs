@@ -48,6 +48,8 @@ pub struct Activity {
     pub timestamps: Option<(u64, Option<u64>)>,
     pub large_image: Option<String>,
     pub large_text: String,
+    /// Discord `status_display_type`: 0 = application name, 1 = state, 2 = details.
+    pub status_display: u8,
 }
 
 impl Activity {
@@ -69,10 +71,15 @@ impl Activity {
             && self.state == other.state
             && self.large_image == other.large_image
             && self.large_text == other.large_text
+            && self.status_display == other.status_display
     }
 
     fn to_command(&self) -> Value {
-        let mut activity = json!({ "type": 3, "instance": false });
+        let mut activity = json!({
+            "type": 3,
+            "instance": false,
+            "status_display_type": self.status_display,
+        });
         if let Some(details) = &self.details {
             activity["details"] = Value::String(details.clone());
         }

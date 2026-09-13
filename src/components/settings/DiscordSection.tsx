@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Film } from "lucide-react";
-import type { DiscordStatus } from "../../lib/types";
+import type { DiscordHeader, DiscordStatus } from "../../lib/types";
+import { SegmentedControl } from "./SegmentedControl";
 import { api } from "../../lib/api";
 import { cn } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
@@ -70,6 +71,8 @@ export function DiscordSection() {
   );
   const previewDetails = sample(details, vars) || t("discordSampleTitle");
   const previewState = sample(state, vars);
+  const previewHeader =
+    prefs.header === "name" ? "ejFlix" : prefs.header === "state" ? previewState || previewDetails : previewDetails;
 
   const commit = (patch: Partial<typeof prefs>) => void update({ discord: patch });
   const field =
@@ -99,6 +102,18 @@ export function DiscordSection() {
             ) : null}
             <Toggle checked={prefs.enabled} onChange={(enabled) => commit({ enabled })} label={t("discordEnable")} />
           </div>
+        </SettingsRow>
+        <SettingsRow label={t("discordHeader")} hint={t("discordHeaderHint")}>
+          <SegmentedControl<DiscordHeader>
+            label={t("discordHeader")}
+            value={prefs.header}
+            options={[
+              { value: "details", label: t("discordDetails") },
+              { value: "state", label: t("discordState") },
+              { value: "name", label: t("discordHeaderName") },
+            ]}
+            onChange={(header) => commit({ header })}
+          />
         </SettingsRow>
         <SettingsRow label={t("discordShowPoster")} hint={t("discordShowPosterHint")}>
           <Toggle checked={prefs.showPoster} onChange={(showPoster) => commit({ showPoster })} label={t("discordShowPoster")} />
@@ -158,7 +173,9 @@ export function DiscordSection() {
 
           {/* Discord-style card */}
           <div className="self-start rounded-2xl bg-[#111214] p-4 text-white shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
-            <p className="mb-3 text-[11px] font-bold tracking-wide text-white/60 uppercase">{t("discordWatching")}</p>
+            <p className="mb-3 truncate text-[11px] font-bold tracking-wide text-white/60 uppercase">
+              {t("discordWatching", { what: previewHeader })}
+            </p>
             <div className="flex gap-3">
               <div className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-xl bg-[#2b2d31]">
                 {prefs.showPoster ? (

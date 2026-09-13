@@ -40,6 +40,8 @@ pub struct DiscordPrefs {
     pub show_time: bool,
     /// Keep the presence (marked as paused) while playback is paused.
     pub show_paused: bool,
+    /// What Discord prints after "Watching": "name" (the application), "details" or "state".
+    pub header: String,
 }
 
 impl Default for DiscordPrefs {
@@ -52,6 +54,7 @@ impl Default for DiscordPrefs {
             show_poster: true,
             show_time: true,
             show_paused: true,
+            header: "details".into(),
         }
     }
 }
@@ -192,6 +195,9 @@ impl Settings {
             .collect();
         self.discord.details = self.discord.details.chars().take(128).collect();
         self.discord.state = self.discord.state.chars().take(128).collect();
+        if !["name", "details", "state"].contains(&self.discord.header.as_str()) {
+            self.discord.header = "details".into();
+        }
         self
     }
 }

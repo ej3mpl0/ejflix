@@ -106,6 +106,11 @@ async fn refresh_presence(app: &tauri::AppHandle) {
         timestamps,
         large_image,
         large_text: info.title.chars().take(128).collect(),
+        status_display: match prefs.header.as_str() {
+            "name" => 0,
+            "state" => 1,
+            _ => 2,
+        },
     };
     state.discord.set(&prefs.client_id, Some(activity)).await;
 }
