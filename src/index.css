@@ -545,6 +545,48 @@ p {
 .skip-progress {
   animation: skip-progress 10s linear forwards;
 }
+/* Accent ring around the skip icon that empties while the prompt is visible. */
+@property --skip-p {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+@keyframes skip-ring {
+  from {
+    --skip-p: 1;
+  }
+  to {
+    --skip-p: 0;
+  }
+}
+.skip-ring {
+  --skip-p: 1;
+  background: conic-gradient(
+    var(--color-accent) calc(var(--skip-p) * 360deg),
+    rgb(0 0 0 / 0.1) 0
+  );
+  animation: skip-ring 10s linear forwards;
+}
+.skip-pill:hover .skip-ring {
+  filter: saturate(1.15);
+}
+@keyframes pin-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+.pin-shake {
+  animation: pin-shake 400ms var(--ease-std);
+}
 @keyframes slide-in-right {
   from {
     opacity: 0;
@@ -588,6 +630,8 @@ p {
   .hero-in,
   .skip-in,
   .skip-progress,
+  .skip-ring,
+  .pin-shake,
   .slide-in-right,
   .panel-in {
     animation: none !important;

@@ -52,6 +52,11 @@ export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }
 
-export function sessionAvatar(session: { userId: string; avatarUrl?: string | null }): string {
+export function sessionAvatar(session: {
+  mode?: "jellyfin" | "local";
+  userId: string;
+  avatarUrl?: string | null;
+}): string | null {
+  if (session.mode === "local") return session.avatarUrl ?? null;
   return session.avatarUrl || `http://jfimg.localhost/Users/${session.userId}/Images/Primary?quality=90`;
 }

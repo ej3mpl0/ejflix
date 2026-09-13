@@ -184,7 +184,7 @@ export function HeroCarousel({
           <Pill variant="tonal" pill size="lg" icon={<Info size={18} />} onClick={() => onDetails(current)}>
             {t("viewDetails")}
           </Pill>
-          <FavoriteButton movie={current} pill className="h-12" />
+          {current.external ? null : <FavoriteButton movie={current} pill className="h-12" />}
         </div>
       </div>
 

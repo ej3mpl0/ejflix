@@ -179,6 +179,8 @@ pub enum PlaybackSource {
 #[derive(Clone)]
 pub struct PlaybackContext {
     pub source: PlaybackSource,
+    /// What Discord (and any other "now playing" surface) should say about it.
+    pub presence: crate::discord::PresenceInfo,
 }
 
 /// Per-profile playback preferences applied before every `loadfile`.

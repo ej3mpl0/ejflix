@@ -1,9 +1,50 @@
+/**
+ * Who is using the app: a Jellyfin user, or a local ("online") profile that may have a
+ * Jellyfin account linked. `serverUrl` is null when there is no server at all.
+ */
 export type Session = {
-  serverUrl: string;
+  mode: "jellyfin" | "local";
   userId: string;
   userName: string;
+  /** Jellyfin picture URL, or the local profile avatar (`preset:n` / data URL). */
+  avatarUrl: string | null;
   deviceId: string;
-  avatarUrl?: string | null;
+  serverUrl: string | null;
+  serverName: string | null;
+  /** Jellyfin user behind a linked local profile. */
+  jellyfinUserName: string | null;
+};
+
+export function hasServer(session: Session | null | undefined): boolean {
+  return Boolean(session?.serverUrl);
+}
+
+/** Profile that lives only inside the app (online mode). */
+export type LocalProfile = {
+  id: string;
+  name: string;
+  avatar: string;
+  hasPin: boolean;
+  linked: boolean;
+};
+
+export type ProfilePatch = {
+  name?: string;
+  avatar?: string;
+  pin?: string;
+  clearPin?: boolean;
+};
+
+export type BrowseSort = "popular" | "newest" | "year" | "name";
+
+/** Discover filters against the Jellyfin library. */
+export type BrowseArgs = {
+  type: "movie" | "series";
+  genre?: string | null;
+  year?: number | null;
+  sort?: BrowseSort;
+  start?: number;
+  limit?: number;
 };
 
 export type PublicInfo = {
@@ -332,7 +373,20 @@ export type Settings = {
   };
   library: { pinned: string[] };
   addons: { urls: string[]; cinemeta: boolean };
+  /** Discord Rich Presence; templates accept {title} {episode} {year} {type} {source}. */
+  discord: {
+    enabled: boolean;
+    /** Discord application id; "" uses the built-in one. */
+    clientId: string;
+    details: string;
+    state: string;
+    showPoster: boolean;
+    showTime: boolean;
+    showPaused: boolean;
+  };
 };
+
+export type DiscordStatus = { connected: boolean; error: string | null };
 
 export type SettingsPatch = { [K in keyof Settings]?: Partial<Settings[K]> };
 
@@ -351,4 +405,13 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true },
+  discord: {
+    enabled: false,
+    clientId: "",
+    details: "{title}",
+    state: "{episode}",
+    showPoster: true,
+    showTime: true,
+    showPaused: true,
+  },
 };

@@ -1,6 +1,6 @@
 # ejFlix
 
-A lightweight Jellyfin client for Windows 11. Netflix-style browsing and native Direct Play through mpv: 4K, HDR, and the original codec, without transcoding.
+A lightweight Jellyfin client for Windows 11 that also works without a server. Netflix-style browsing and native Direct Play through mpv: 4K, HDR, and the original codec, without transcoding. Online mode plays Stremio addon sources (AIOStreams, Torrentio with debrid…) straight in mpv.
 
 The interface is available in **Spanish** and **English**. Use the ES / EN control in the title bar.
 
@@ -18,10 +18,12 @@ The interface is available in **Spanish** and **English**. Use the ES / EN contr
 
 ## Features
 
-- Connect with the Jellyfin server URL only, then pick a profile
+- First launch asks how you want to use the app: **with a Jellyfin server** (enter the URL, pick a user) or **online with addons** (create a local profile, no server needed). Both kinds of profile share the same "Who is watching?" screen
+- Local profiles have a name, a picture (preset gradient or an uploaded photo) and an optional 4-digit PIN; they can link a Jellyfin account later from Settings › Account and keep their own settings and progress
 - Saved server, profiles, and session (the access token is encrypted with Windows DPAPI)
-- Home with a hero carousel (parallax, auto-advance, drag or arrow keys), continue watching, next up, My list, recently added (with a "New" tag for the last 14 days), and genre rows
-- Glass header with springy tabs; add any of your Jellyfin libraries as a tab with the "+" (movies and TV shows), saved per profile
+- Home with a hero carousel (parallax, auto-advance, drag or arrow keys) that mixes your server's newest titles with the addon catalogs, continue watching, next up, My list, recently added (with a "New" tag for the last 14 days), addon rows and genre rows
+- Glass header with springy tabs: Home, My server (server content only), your pinned Jellyfin libraries (add them with the "+"), Discover and My list
+- Discover tab: movies or series, filtered by genre and year, across the server (with popular / newest / year / name sorting) and every addon catalog that supports the genre filter; server copies win over online duplicates
 - Full details page for movies and series: backdrop tinted with its dominant colour, logo, meta chips, expandable synopsis, season chips with the episode list, circular cast avatars, chapters, "More like this" and production info; pages stack so you can browse from one title to another and come back
 - Skip intro / recap / credits: data from the Jellyfin media segments (10.10+, filled by the Intro Skipper or TheIntroDB plugins) with the public IntroDB community database as a fallback for series with an IMDb id; each kind can be "ask", "automatic" or "off"
 - Next-episode card at the start of the credits (or in the last 30 s) with a configurable countdown (manual, 5, 10 or 15 s)
@@ -31,7 +33,8 @@ The interface is available in **Spanish** and **English**. Use the ES / EN contr
 - My list (Jellyfin favourites) and mark as watched / unwatched for movies, series, seasons and episodes
 - Settings per profile: 12 accent themes (Crimson, White, Gold, Jade, Rose gold, Arctic, Graphite, Ocean, Violet, Emerald, Amber, Rose), AMOLED black, poster size, playback preferences, app language, account
 - Stremio addons: load any `manifest.json` (AIOStreams, Torrentio…) to get catalog rows on Home and online sources played straight in mpv, with local resume and automatic next episode
-- Search page with recent queries and a "Discover" section by genre
+- Search across the server and the searchable addon catalogs, results grouped as "My server" and "Online", with recent queries
+- Discord Rich Presence (Settings › Discord): shows what you are watching with poster, time remaining and paused state; the two text lines are templates
 - Language selector: Spanish and English
 - Native playback: Direct Play, hardware decode, HDR when Windows HDR is on
 
@@ -44,11 +47,19 @@ The player looks for intro, recap and credits ranges in this order:
 
 Without any of them the player behaves as before: the "next episode" card appears in the last 30 seconds.
 
+### Online mode (no server)
+
+Pick "Watch online with addons" on the welcome screen and create a profile. Home, Discover and Search are then fed by the addon catalogs (Cinemeta is built in for the popular rows); add your own `manifest.json` in Settings › Addons to get sources. The profile can connect a Jellyfin server at any time from Settings › Account; the library then appears next to the addons and the "My server" and "My list" tabs show up. Local profiles, their PIN and their linked account live in the app data store; the linked token is encrypted like a normal session.
+
+### Discord Rich Presence
+
+Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. By default it uses a public application id, so Discord labels it with that application's name; create your own application at discord.com/developers/applications, name it ejFlix and paste its Application ID to show that name instead. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
+
 ### Stremio addons (online sources)
 
 Settings › Addons accepts the `manifest.json` URL of any Stremio addon (`https://…/manifest.json` or `stremio://…`), for example an AIOStreams or Torrentio configuration that already carries your debrid key. What you get:
 
-- The addon's catalogs appear as rows on Home (after "Recently added"), and its search catalogs are used by the search page's "Discover" section when available.
+- The addon's catalogs appear as rows on Home (after "Recently added") and feed the hero, the Discover tab and the search page.
 - Opening a title shows its metadata (from the addon, or from Cinemeta as a fallback) with seasons and episodes; pressing Play lists the streams of every addon that serves that title and plays the chosen one in mpv without downloading anything.
 - Jellyfin movies and episodes with an IMDb id get an "Online sources" button, handy for episodes your library is missing.
 - Progress of online titles is remembered locally per profile ("Continue watching (online)" row), the next episode chains automatically preferring the same addon and binge group, and intro/credits skipping works through IntroDB by IMDb id.
@@ -68,7 +79,7 @@ Scene previews need trickplay images generated on the Jellyfin server (Jellyfin 
 ## Requirements
 
 - Windows 11
-- A reachable Jellyfin server
+- A reachable Jellyfin server, or Stremio addons with http(s) streams (a debrid-backed AIOStreams / Torrentio configuration)
 - [mpv](https://mpv.io/) for local builds (`C:\mpv\mpv.exe` or `src-tauri/resources/mpv.exe`)
 
 To develop from source you also need:
@@ -81,7 +92,7 @@ To develop from source you also need:
 
 Use the NSIS installer from [Releases](../../releases) (`ejFlix_*_x64-setup.exe`). It installs per-user and does not require admin.
 
-After install, enter your Jellyfin URL (for example `http://192.168.1.10:8096`) and sign in.
+After install, choose "I have a Jellyfin server" and enter its URL (for example `http://192.168.1.10:8096`), or "Watch online with addons" and create a profile.
 
 ## Development
 

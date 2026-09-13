@@ -1,6 +1,8 @@
 mod addons;
+mod discord;
 mod jellyfin;
 mod player;
+mod profiles;
 mod protect;
 mod segments;
 mod settings;
@@ -9,9 +11,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use jellyfin::{
-    HomeData, JellyfinClient, Library, Movie, PublicInfo, PublicUser, SavedServer, Session,
-    SessionView,
+    BrowseArgs, HomeData, JellyfinClient, Library, Movie, PublicInfo, PublicUser, SavedServer,
+    Session,
 };
+use profiles::{LocalProfile, LocalProfileView, ProfilePatch};
 use addons::{AddonClient, AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ResumeEntry};
 use player::{PlaybackContext, PlaybackPrefs, PlaybackSource, Player, PlayerState};
 use segments::{MediaSegment, SegmentsCache};
@@ -29,6 +32,9 @@ pub struct AppState {
     pub settings_lock: tokio::sync::Mutex<()>,
     pub segments: Arc<SegmentsCache>,
     pub addons: Arc<AddonClient>,
+    /// Active local ("online") profile; a Jellyfin session may be linked to it.
+    pub local: tokio::sync::RwLock<Option<LocalProfile>>,
+    pub discord: Arc<discord::Discord>,
 }
 
 impl AppState {
@@ -39,8 +45,178 @@ impl AppState {
             settings_lock: tokio::sync::Mutex::new(()),
             segments: Arc::new(SegmentsCache::new()),
             addons: Arc::new(AddonClient::new()),
+            local: tokio::sync::RwLock::new(None),
+            discord: discord::Discord::new(),
         }
     }
+}
+
+/// Recomputes the Discord activity from what is playing and the profile's preferences.
+async fn refresh_presence(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let prefs = match settings_user(app, &state).await {
+        Some(uid) => settings::load(app, &uid).unwrap_or_default().discord,
+        None => Settings::default().discord,
+    };
+    if !prefs.enabled {
+        state.discord.set(&prefs.client_id, None).await;
+        return;
+    }
+    let ctx = state.player.context.read().await.clone();
+    let Some(ctx) = ctx else {
+        state.discord.set(&prefs.client_id, None).await;
+        return;
+    };
+    let snap = state.player.snapshot().await;
+    if snap.paused && !prefs.show_paused {
+        state.discord.set(&prefs.client_id, None).await;
+        return;
+    }
+    let locale = load_locale(app).unwrap_or_default();
+    let info = &ctx.presence;
+    let details = discord::clamp_text(discord::fill_template(&prefs.details, info, &locale));
+    let mut state_text = discord::fill_template(&prefs.state, info, &locale);
+    if snap.paused {
+        let paused = if locale == "en" { "Paused" } else { "Pausado" };
+        state_text = if state_text.trim().is_empty() {
+            paused.to_string()
+        } else {
+            format!("{} · {paused}", state_text.trim())
+        };
+    }
+    let state_text = discord::clamp_text(state_text);
+    let timestamps = if prefs.show_time && !snap.paused && snap.duration > 0.0 {
+        let now = discord::now_secs();
+        let start = now.saturating_sub(snap.time.max(0.0) as u64);
+        let end = now + (snap.duration - snap.time).max(0.0) as u64;
+        Some((start, Some(end)))
+    } else {
+        None
+    };
+    let large_image = if prefs.show_poster {
+        info.poster_url
+            .clone()
+            .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+    } else {
+        None
+    };
+    let activity = discord::Activity {
+        details,
+        state: state_text,
+        timestamps,
+        large_image,
+        large_text: info.title.chars().take(128).collect(),
+    };
+    state.discord.set(&prefs.client_id, Some(activity)).await;
+}
+
+#[tauri::command]
+async fn discord_status(state: State<'_, AppState>) -> Result<discord::Status, String> {
+    Ok(state.discord.status().await)
+}
+
+/// Presence description of a Jellyfin item (poster through the server, not the local proxy).
+fn presence_for_item(session: &Session, movie: &Movie, server_name: Option<String>) -> discord::PresenceInfo {
+    let is_episode = movie.kind == "Episode";
+    let poster_item = if is_episode {
+        movie.series_id.clone().unwrap_or_else(|| movie.id.clone())
+    } else {
+        movie.id.clone()
+    };
+    let episode = if is_episode {
+        let code = match (movie.season_number, movie.episode_number) {
+            (Some(s), Some(e)) => format!("S{s}:E{e}"),
+            (_, Some(e)) => format!("E{e}"),
+            _ => String::new(),
+        };
+        Some([code, movie.name.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
+    } else {
+        None
+    };
+    discord::PresenceInfo {
+        title: if is_episode {
+            movie.series_name.clone().unwrap_or_else(|| movie.name.clone())
+        } else {
+            movie.name.clone()
+        },
+        episode,
+        year: movie.year,
+        kind: if is_episode || movie.kind == "Series" { "series".into() } else { "movie".into() },
+        poster_url: Some(format!(
+            "{}/Items/{poster_item}/Images/Primary?maxHeight=512&quality=80",
+            session.server_url
+        )),
+        source: server_name.unwrap_or_else(|| "Jellyfin".to_string()),
+    }
+}
+
+fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
+    let is_episode = entry.kind == "series" && entry.season.is_some();
+    let episode = if is_episode {
+        let code = match (entry.season, entry.episode) {
+            (Some(s), Some(e)) => format!("S{s}:E{e}"),
+            _ => String::new(),
+        };
+        Some([code, entry.name.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
+    } else {
+        None
+    };
+    discord::PresenceInfo {
+        title: if is_episode {
+            entry.series_name.clone().unwrap_or_else(|| entry.name.clone())
+        } else {
+            entry.name.clone()
+        },
+        episode,
+        year: None,
+        kind: if entry.kind == "series" { "series".into() } else { "movie".into() },
+        poster_url: entry.poster.clone(),
+        source: "Online".into(),
+    }
+}
+
+/// Who is using the app: a Jellyfin user, or a local profile (with or without a linked
+/// Jellyfin account). `server_url` is `None` when there is no server at all.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountView {
+    /// "jellyfin" | "local"
+    pub mode: &'static str,
+    pub user_id: String,
+    pub user_name: String,
+    pub avatar_url: Option<String>,
+    pub device_id: String,
+    pub server_url: Option<String>,
+    pub server_name: Option<String>,
+    /// Name of the Jellyfin user behind a linked local profile.
+    pub jellyfin_user_name: Option<String>,
+}
+
+async fn account_view(app: &tauri::AppHandle, state: &AppState) -> Option<AccountView> {
+    let jf = state.jellyfin.session().await;
+    let server_name = load_server(app).ok().flatten().map(|s| s.server_name);
+    if let Some(profile) = state.local.read().await.clone() {
+        return Some(AccountView {
+            mode: "local",
+            user_id: profile.id,
+            user_name: profile.name,
+            avatar_url: Some(profile.avatar),
+            device_id: jf.as_ref().map(|s| s.device_id.clone()).unwrap_or_default(),
+            server_url: jf.as_ref().map(|s| s.server_url.clone()),
+            server_name: jf.as_ref().and(server_name),
+            jellyfin_user_name: jf.as_ref().map(|s| s.user_name.clone()),
+        });
+    }
+    jf.map(|s| AccountView {
+        mode: "jellyfin",
+        user_id: s.user_id,
+        user_name: s.user_name,
+        avatar_url: s.avatar_url,
+        device_id: s.device_id,
+        server_url: Some(s.server_url),
+        server_name,
+        jellyfin_user_name: None,
+    })
 }
 
 /// Intro / recap / credits ranges for an item. Always succeeds (empty when unknown).
@@ -58,6 +234,9 @@ async fn get_media_segments(
 /// User whose settings apply right now: the active session, else the last user that
 /// saved settings (so Login/Profiles keep the last theme).
 async fn settings_user(app: &tauri::AppHandle, state: &AppState) -> Option<String> {
+    if let Some(profile) = state.local.read().await.as_ref() {
+        return Some(profile.id.clone());
+    }
     if let Some(session) = state.jellyfin.session().await {
         return Some(session.user_id);
     }
@@ -84,6 +263,8 @@ async fn settings_set(
     let _guard = state.settings_lock.lock().await;
     let saved = settings::merge_and_save(&app, &uid, patch)?;
     let _ = app.emit("settings://changed", &saved);
+    drop(_guard);
+    refresh_presence(&app).await;
     Ok(saved)
 }
 
@@ -106,12 +287,14 @@ async fn login(
     url: String,
     username: String,
     password: String,
-) -> Result<SessionView, String> {
+) -> Result<AccountView, String> {
     let device_id = existing_device_id(&app).unwrap_or_else(|| Uuid::new_v4().to_string());
     let session = state
         .jellyfin
         .login(&url, &username, &password, &device_id)
         .await?;
+    *state.local.write().await = None;
+    let _ = profiles::set_active(&app, None);
     save_session(&app, &session)?;
     save_server(&app, &session.server_url, "")?;
     save_device_id(&app, &session.device_id)?;
@@ -124,11 +307,183 @@ async fn login(
             avatar_url: session.avatar_url.clone(),
         },
     )?;
-    Ok(session.view())
+    account_view(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())
+}
+
+// ---- local profiles ----
+
+#[tauri::command]
+fn local_profiles_list(app: tauri::AppHandle) -> Result<Vec<LocalProfileView>, String> {
+    Ok(profiles::list(&app)?.iter().map(|p| p.view(&app)).collect())
 }
 
 #[tauri::command]
-async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<SessionView>, String> {
+fn local_profile_create(
+    app: tauri::AppHandle,
+    name: String,
+    avatar: String,
+    pin: Option<String>,
+) -> Result<LocalProfileView, String> {
+    let profile = profiles::create(&app, &name, &avatar, pin.as_deref())?;
+    Ok(profile.view(&app))
+}
+
+#[tauri::command]
+async fn local_profile_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    patch: ProfilePatch,
+) -> Result<LocalProfileView, String> {
+    let updated = profiles::update(&app, &id, patch)?;
+    let mut active = state.local.write().await;
+    if active.as_ref().is_some_and(|p| p.id == id) {
+        *active = Some(updated.clone());
+    }
+    Ok(updated.view(&app))
+}
+
+#[tauri::command]
+async fn local_profile_delete(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    let is_active = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+    if is_active {
+        let _ = state.player.stop().await;
+        *state.local.write().await = None;
+        state.jellyfin.set_session(None).await;
+    }
+    profiles::delete(&app, &id)
+}
+
+/// Opens a local profile (after checking its PIN) and restores its linked Jellyfin
+/// account, if any. Becomes the profile restored on the next launch.
+#[tauri::command]
+async fn local_profile_enter(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    pin: Option<String>,
+) -> Result<AccountView, String> {
+    let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+    if !profile.verify_pin(pin.as_deref()) {
+        return Err("PIN incorrecto".into());
+    }
+    let _ = state.player.stop().await;
+    state.jellyfin.set_session(None).await;
+    state.segments.clear().await;
+    profiles::set_active(&app, Some(&profile.id))?;
+    *state.local.write().await = Some(profile.clone());
+    restore_linked_session(&app, &state, &profile.id).await;
+    account_view(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())
+}
+
+/// Puts the Jellyfin account linked to a local profile back in memory, dropping the
+/// link when the server no longer accepts the token.
+async fn restore_linked_session(app: &tauri::AppHandle, state: &AppState, profile_id: &str) {
+    let key = profiles::session_key(profile_id);
+    let Ok(Some(session)) = load_session_at(app, &key) else {
+        return;
+    };
+    state.jellyfin.set_session(Some(session)).await;
+    match state.jellyfin.validate().await {
+        Ok(valid) => {
+            let _ = save_session_at(app, &key, &valid);
+            let _ = save_server(app, &valid.server_url, "");
+        }
+        Err(_) => {
+            state.jellyfin.set_session(None).await;
+            let _ = clear_session_at(app, &key);
+        }
+    }
+}
+
+/// Links a Jellyfin account to the active local profile: the library shows up next to
+/// the addons while the profile keeps its own settings and progress.
+#[tauri::command]
+async fn link_server(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    username: String,
+    password: String,
+) -> Result<AccountView, String> {
+    let profile = state
+        .local
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "No hay un perfil local activo".to_string())?;
+    let device_id = existing_device_id(&app).unwrap_or_else(|| Uuid::new_v4().to_string());
+    let session = state
+        .jellyfin
+        .login(&url, &username, &password, &device_id)
+        .await?;
+    save_session_at(&app, &profiles::session_key(&profile.id), &session)?;
+    save_server(&app, &session.server_url, "")?;
+    save_device_id(&app, &session.device_id)?;
+    let _ = upsert_profile(
+        &app,
+        PublicUser {
+            id: session.user_id.clone(),
+            name: session.user_name.clone(),
+            has_password: !password.is_empty(),
+            avatar_url: session.avatar_url.clone(),
+        },
+    );
+    state.segments.clear().await;
+    account_view(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())
+}
+
+#[tauri::command]
+async fn unlink_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<AccountView, String> {
+    let profile = state
+        .local
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "No hay un perfil local activo".to_string())?;
+    let _ = state.player.stop().await;
+    state.jellyfin.set_session(None).await;
+    state.segments.clear().await;
+    clear_session_at(&app, &profiles::session_key(&profile.id))?;
+    account_view(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())
+}
+
+#[tauri::command]
+async fn browse_items(state: State<'_, AppState>, args: BrowseArgs) -> Result<Vec<Movie>, String> {
+    state.jellyfin.browse(&args).await
+}
+
+#[tauri::command]
+async fn get_genres(state: State<'_, AppState>) -> Result<Vec<String>, String> {
+    state.jellyfin.genres().await
+}
+
+#[tauri::command]
+async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<AccountView>, String> {
+    if let Some(id) = profiles::active_id(&app) {
+        match profiles::get(&app, &id)? {
+            Some(profile) => {
+                *state.local.write().await = Some(profile.clone());
+                restore_linked_session(&app, &state, &profile.id).await;
+                return Ok(account_view(&app, &state).await);
+            }
+            None => {
+                let _ = profiles::set_active(&app, None);
+            }
+        }
+    }
     let Some(session) = load_session(&app)? else {
         return Ok(None);
     };
@@ -147,7 +502,7 @@ async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> R
                     avatar_url: valid.avatar_url.clone(),
                 },
             );
-            Ok(Some(valid.view()))
+            Ok(account_view(&app, &state).await)
         }
         Err(_) => {
             clear_session(&app)?;
@@ -157,19 +512,28 @@ async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> R
     }
 }
 
+/// Back to the profile picker. A local profile keeps its linked account for next time.
 #[tauri::command]
 async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let _ = state.player.stop().await;
+    let was_local = state.local.write().await.take().is_some();
     state.jellyfin.set_session(None).await;
     state.segments.clear().await;
+    profiles::set_active(&app, None)?;
+    if was_local {
+        return Ok(());
+    }
     clear_session(&app)
 }
 
+/// Forgets the Jellyfin server (its users and the session), keeping local profiles.
 #[tauri::command]
 async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let _ = state.player.stop().await;
+    *state.local.write().await = None;
     state.jellyfin.set_session(None).await;
     state.segments.clear().await;
+    profiles::set_active(&app, None)?;
     clear_session(&app)?;
     clear_profiles(&app)?;
     clear_server(&app)
@@ -319,6 +683,11 @@ async fn player_start(
             media_source_id: media_source_id.clone(),
             play_session_id: play_session_id.clone(),
         },
+        presence: presence_for_item(
+            &session,
+            &movie,
+            load_server(&app).ok().flatten().map(|s| s.server_name),
+        ),
     };
     let headers = vec![("X-Emby-Token".to_string(), session.token.clone())];
     state
@@ -335,6 +704,7 @@ async fn player_start(
         )
         .await;
     show_player_overlay(&app);
+    refresh_presence(&app).await;
     Ok(state.player.snapshot().await)
 }
 
@@ -379,6 +749,7 @@ async fn player_stop(
             }
         }
     }
+    refresh_presence(&app).await;
     if switching.unwrap_or(false) {
         return Ok(());
     }
@@ -431,8 +802,12 @@ async fn player_set_aspect(state: State<'_, AppState>, mode: String) -> Result<(
 }
 
 #[tauri::command]
-async fn player_toggle_pause(state: State<'_, AppState>) -> Result<(), String> {
-    state.player.toggle_pause().await
+async fn player_toggle_pause(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.player.toggle_pause().await?;
+    // mpv confirms the new pause state asynchronously; give it a moment before reporting.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    refresh_presence(&app).await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -503,11 +878,15 @@ fn locale_set(app: tauri::AppHandle, locale: String) -> Result<(), String> {
 }
 
 fn save_session(app: &tauri::AppHandle, session: &Session) -> Result<(), String> {
+    save_session_at(app, "data", session)
+}
+
+fn save_session_at(app: &tauri::AppHandle, key: &str, session: &Session) -> Result<(), String> {
     let store = app.store("session.json").map_err(|e| e.to_string())?;
     let raw = serde_json::to_vec(session).map_err(|e| e.to_string())?;
     let sealed = protect::protect(&raw)?;
     store.set(
-        "data",
+        key,
         serde_json::json!({
             "v": 2,
             "blob": protect::to_hex(&sealed),
@@ -518,8 +897,12 @@ fn save_session(app: &tauri::AppHandle, session: &Session) -> Result<(), String>
 }
 
 fn load_session(app: &tauri::AppHandle) -> Result<Option<Session>, String> {
+    load_session_at(app, "data")
+}
+
+fn load_session_at(app: &tauri::AppHandle, key: &str) -> Result<Option<Session>, String> {
     let store = app.store("session.json").map_err(|e| e.to_string())?;
-    let Some(value) = store.get("data") else {
+    let Some(value) = store.get(key) else {
         return Ok(None);
     };
     if value.get("v").and_then(|v| v.as_i64()) == Some(2) {
@@ -533,13 +916,17 @@ fn load_session(app: &tauri::AppHandle) -> Result<Option<Session>, String> {
         return Ok(Some(session));
     }
     let session: Session = serde_json::from_value(value).map_err(|e| e.to_string())?;
-    let _ = save_session(app, &session);
+    let _ = save_session_at(app, key, &session);
     Ok(Some(session))
 }
 
 fn clear_session(app: &tauri::AppHandle) -> Result<(), String> {
+    clear_session_at(app, "data")
+}
+
+fn clear_session_at(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
     let store = app.store("session.json").map_err(|e| e.to_string())?;
-    store.delete("data");
+    store.delete(key);
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -816,7 +1203,8 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
                         .await;
                 }
                 PlaybackSource::Addon { entry } => {
-                    if let Some(uid) = jellyfin.session().await.map(|s| s.user_id) {
+                    let uid = settings_user(&app, &app.state::<AppState>()).await;
+                    if let Some(uid) = uid {
                         let _ = addons::upsert_progress(
                             &app,
                             &uid,
@@ -831,6 +1219,7 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
                 }
             }
             let _ = app.emit("player://state", snap);
+            refresh_presence(&app).await;
         }
     });
 }
@@ -1027,6 +1416,7 @@ async fn player_start_url(
         source: PlaybackSource::Addon {
             entry: args.entry.clone(),
         },
+        presence: presence_for_entry(&args.entry),
     };
     state
         .player
@@ -1041,6 +1431,7 @@ async fn player_start_url(
         )
         .await?;
     show_player_overlay(&app);
+    refresh_presence(&app).await;
     Ok(state.player.snapshot().await)
 }
 
@@ -1077,6 +1468,16 @@ pub fn run() {
             logout_server,
             saved_server,
             list_public_users,
+            local_profiles_list,
+            local_profile_create,
+            local_profile_update,
+            local_profile_delete,
+            local_profile_enter,
+            link_server,
+            unlink_server,
+            browse_items,
+            get_genres,
+            discord_status,
             get_libraries,
             get_home,
             get_item,
@@ -1140,6 +1541,7 @@ pub fn run() {
                     }
                 });
             }
+            state.discord.spawn();
             start_progress_loop(handle, state.player.clone(), state.jellyfin.clone());
             Ok(())
         })

@@ -157,7 +157,11 @@ impl Default for ResumeEntry {
 pub struct AddonClient {
     http: reqwest::Client,
     manifests: Mutex<HashMap<String, (Instant, AddonInfo)>>,
+    /// Catalog pages by URL: Home, the hero and Discover ask for the same ones.
+    catalogs: Mutex<HashMap<String, (Instant, Vec<AddonMeta>)>>,
 }
+
+const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
 
 impl AddonClient {
     pub fn new() -> Self {
@@ -169,6 +173,7 @@ impl AddonClient {
         Self {
             http,
             manifests: Mutex::new(HashMap::new()),
+            catalogs: Mutex::new(HashMap::new()),
         }
     }
 
@@ -203,6 +208,8 @@ impl AddonClient {
     pub fn forget(&self, url: &str) {
         if let Ok(url) = normalize_manifest_url(url) {
             self.manifests.lock().unwrap().remove(&url);
+            let base = base_of(&url);
+            self.catalogs.lock().unwrap().retain(|k, _| !k.starts_with(&base));
         }
     }
 
@@ -225,14 +232,30 @@ impl AddonClient {
             path.push_str(&query.join("&"));
         }
         path.push_str(".json");
+        let cacheable = !extra.iter().any(|(k, _)| k == "search");
+        if cacheable {
+            if let Some((at, metas)) = self.catalogs.lock().unwrap().get(&path) {
+                if at.elapsed() < CATALOG_TTL {
+                    return Ok(metas.clone());
+                }
+            }
+        }
         let value = self.get_json(&path).await?;
-        Ok(value
+        let metas: Vec<AddonMeta> = value
             .get("metas")
             .and_then(|v| v.as_array())
             .into_iter()
             .flatten()
             .filter_map(parse_meta)
-            .collect())
+            .collect();
+        if cacheable {
+            let mut cache = self.catalogs.lock().unwrap();
+            if cache.len() > 200 {
+                cache.clear();
+            }
+            cache.insert(path, (Instant::now(), metas.clone()));
+        }
+        Ok(metas)
     }
 
     /// Full metadata: the first addon that serves `meta` for this type/id, else Cinemeta.

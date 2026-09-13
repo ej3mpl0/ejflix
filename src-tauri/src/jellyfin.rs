@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 const CLIENT_NAME: &str = "ejFlix";
-const CLIENT_VERSION: &str = "0.2.0";
+const CLIENT_VERSION: &str = "0.3.0";
 const DEVICE_NAME: &str = "Windows";
 pub const IMAGE_SCHEME: &str = "jfimg";
 const IMAGE_ORIGIN: &str = "http://jfimg.localhost";
@@ -23,28 +23,6 @@ pub struct Session {
     pub device_id: String,
     #[serde(default)]
     pub avatar_url: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SessionView {
-    pub server_url: String,
-    pub user_id: String,
-    pub user_name: String,
-    pub device_id: String,
-    pub avatar_url: Option<String>,
-}
-
-impl Session {
-    pub fn view(&self) -> SessionView {
-        SessionView {
-            server_url: self.server_url.clone(),
-            user_id: self.user_id.clone(),
-            user_name: self.user_name.clone(),
-            device_id: self.device_id.clone(),
-            avatar_url: self.avatar_url.clone(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -224,6 +202,85 @@ pub struct JellyfinClient {
     http: reqwest::Client,
     http_local: reqwest::Client,
     session: Arc<RwLock<Option<Session>>>,
+}
+
+/// Filters of the Discover tab.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct BrowseArgs {
+    /// "movie" | "series"
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub genre: Option<String>,
+    pub year: Option<u32>,
+    /// "popular" | "newest" | "year" | "name"
+    pub sort: String,
+    pub start: u32,
+    pub limit: u32,
+}
+
+impl Default for BrowseArgs {
+    fn default() -> Self {
+        Self {
+            kind: "movie".into(),
+            genre: None,
+            year: None,
+            sort: "popular".into(),
+            start: 0,
+            limit: 40,
+        }
+    }
+}
+
+impl JellyfinClient {
+    /// Library browse with genre / year filters (Discover tab).
+    pub async fn browse(&self, args: &BrowseArgs) -> Result<Vec<Movie>, String> {
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        let item_type = if args.kind == "series" { "Series" } else { "Movie" };
+        let (sort_by, order) = match args.sort.as_str() {
+            "newest" => ("DateCreated,SortName", "Descending"),
+            "year" => ("ProductionYear,SortName", "Descending"),
+            "name" => ("SortName", "Ascending"),
+            _ => ("CommunityRating,SortName", "Descending"),
+        };
+        let mut path = format!(
+            "/Users/{}/Items?IncludeItemTypes={item_type}&Recursive=true&SortBy={sort_by}&SortOrder={order}&StartIndex={}&Limit={}&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo",
+            session.user_id,
+            args.start,
+            args.limit.clamp(1, 60)
+        );
+        if let Some(genre) = args.genre.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+            path.push_str("&Genres=");
+            path.push_str(&urlencoding_lite(genre));
+        }
+        if let Some(year) = args.year.filter(|y| (1880..=2100).contains(y)) {
+            path.push_str(&format!("&Years={year}"));
+        }
+        self.items_query(&path).await
+    }
+
+    /// Genre names of the whole library (movies and series).
+    pub async fn genres(&self) -> Result<Vec<String>, String> {
+        let session = self.require_session().await?;
+        let res = self
+            .get(&format!(
+                "/Genres?IncludeItemTypes=Movie,Series&UserId={}&Recursive=true&SortBy=SortName",
+                session.user_id
+            ))
+            .await?;
+        if !res.status().is_success() {
+            return Ok(vec![]);
+        }
+        let value: Value = res.json().await.map_err(|e| e.to_string())?;
+        Ok(value
+            .get("Items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|g| g.get("Name").and_then(|v| v.as_str()).map(|s| s.to_string()))
+            .collect())
+    }
 }
 
 impl JellyfinClient {

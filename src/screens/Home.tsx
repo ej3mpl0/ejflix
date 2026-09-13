@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Puzzle } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
 import { PosterCard } from "../components/PosterCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { Settings } from "./Settings";
 import { SearchPage } from "./SearchPage";
+import { Discover } from "./Discover";
 import { DetailsPage } from "./DetailsPage";
 import { ExternalDetailsPage } from "./ExternalDetailsPage";
 import { StreamPicker } from "../components/StreamPicker";
 import { resumeToMovie } from "../lib/addons";
 import { api } from "../lib/api";
-import type { HomeData, Library, Movie, SavedServer, Session } from "../lib/types";
+import { hasServer as sessionHasServer, type HomeData, type Library, type Movie, type SavedServer, type Session } from "../lib/types";
 import { sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
 import { useBackNavigation } from "../lib/use-back";
 import { routeFor, type DetailsRoute } from "../lib/view-stack";
+import { mixFeatured, useAddonFeatured } from "../hooks/useAddonFeatured";
 
 const PAGE_EXIT_MS = 250;
+
+/** Home without a server: every row comes from the addons. */
+const EMPTY_HOME: HomeData = { featured: [], resume: [], nextUp: [], latest: [], genres: [], all: [] };
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -34,6 +40,7 @@ export function Home({
   refreshToken = 0,
   onPlay,
   onToast,
+  onSessionChange,
   onSwitchProfile,
   onLogout,
 }: {
@@ -46,11 +53,14 @@ export function Home({
   refreshToken?: number;
   onPlay: (movie: Movie) => void;
   onToast: (message: string) => void;
+  /** The account changed (profile edited, server linked or unlinked). */
+  onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
 }) {
   const { t } = useI18n();
   const { version: userDataVersion, clearOverrides } = useUserData();
+  const hasServer = sessionHasServer(session);
   const [data, setData] = useState<HomeData | null>(null);
   const [favorites, setFavorites] = useState<Movie[] | null>(null);
   const [error, setError] = useState("");
@@ -66,6 +76,7 @@ export function Home({
   const scrolledRef = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const firstRefresh = useRef(true);
+  const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
 
   // Libraries: everything on the server, and the ids the user pinned to the header
   // (persisted with the profile settings).
@@ -78,6 +89,12 @@ export function Home({
   const [libError, setLibError] = useState("");
 
   const load = async (silent = false) => {
+    if (!hasServer) {
+      setData(EMPTY_HOME);
+      setError("");
+      setLoading(false);
+      return;
+    }
     if (!silent) {
       setLoading(true);
       setError("");
@@ -93,17 +110,21 @@ export function Home({
   };
 
   const loadFavorites = useCallback(async () => {
-    try {
-      setFavorites(await api.getFavorites());
-    } catch {
-      /* the list is optional; keep what we have */
+    if (hasServer) {
+      try {
+        setFavorites(await api.getFavorites());
+      } catch {
+        /* the list is optional; keep what we have */
+      }
+    } else {
+      setFavorites([]);
     }
     try {
       setOnlineResume((await api.addonProgressList()).map(resumeToMovie));
     } catch {
       /* no addons or nothing remembered */
     }
-  }, []);
+  }, [hasServer]);
 
   const loadLibrary = async (library: Library, silent = false) => {
     if (!silent) {
@@ -123,11 +144,17 @@ export function Home({
   useEffect(() => {
     void load();
     void loadFavorites();
-    api
-      .getLibraries()
-      .then(setLibraries)
-      .catch(() => undefined);
-  }, [loadFavorites]);
+    if (hasServer) {
+      api
+        .getLibraries()
+        .then(setLibraries)
+        .catch(() => undefined);
+    } else {
+      setLibraries([]);
+      setLibData({});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadFavorites, hasServer, session.serverUrl]);
 
   const pinned = useMemo(
     () => added.map((id) => libraries.find((lib) => lib.id === id)).filter((lib): lib is Library => Boolean(lib)),
@@ -142,6 +169,11 @@ export function Home({
     if (activeLibrary && !libData[activeLibrary.id]) void loadLibrary(activeLibrary);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeLibrary?.id]);
+
+  // Server tabs vanish when the server goes away (unlinked): fall back to Home.
+  useEffect(() => {
+    if (!hasServer && (view === "myserver" || view === "mylist" || view.startsWith("lib:"))) setView("home");
+  }, [hasServer, view]);
 
   // Background refresh (keeps current data, scroll and view): continue-watching
   // progress changes after every playback, favorites/watched after every toggle.
@@ -173,7 +205,7 @@ export function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userDataVersion]);
 
-  const movies = useMemo(() => data?.all ?? [], [data]);
+  const hero = useMemo(() => mixFeatured(data?.featured ?? [], addonFeatured), [data, addonFeatured]);
 
   const openView = (next: NavView) => {
     setStack([]);
@@ -286,11 +318,44 @@ export function Home({
     </div>
   );
 
+  // Nothing at all to show (online profile without addons): point at Settings › Addons.
+  const noAddons = (
+    <div className="px-page pt-16">
+      <div className="mx-auto max-w-[560px] rounded-card bg-surface px-8 py-12 text-center">
+        <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent">
+          <Puzzle size={26} />
+        </span>
+        <p className="text-[18px] font-semibold">{t("noAddonsYet")}</p>
+        <p className="mt-1 text-[13px] text-dim">{t("noAddonsYetHint")}</p>
+        <button
+          type="button"
+          onClick={() => openView("settings")}
+          className="btn-press mt-6 h-11 rounded-btn bg-accent px-6 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+        >
+          {t("goToAddons")}
+        </button>
+      </div>
+    </div>
+  );
+
+  const skeleton = (
+    <>
+      <HeroSkeleton />
+      <RowSkeleton />
+      <RowSkeleton />
+    </>
+  );
+
+  // Online-only profiles: wait for the addon list so the hero does not flash empty.
+  const homeLoading = loading || (!hasServer && addonCatalogs == null);
+
   return (
     <div className={`h-full bg-base text-text ${hidden ? "invisible" : ""}`} aria-hidden={hidden}>
       <GlassHeader
         userName={session.userName}
         avatarUrl={sessionAvatar(session)}
+        mode={session.mode}
+        hasServer={hasServer}
         view={view}
         onView={openView}
         libraries={pinned}
@@ -321,6 +386,7 @@ export function Home({
             session={session}
             server={server}
             version={version}
+            onSessionChange={onSessionChange}
             onSwitchProfile={onSwitchProfile}
             onLogout={onLogout}
             onBack={back}
@@ -329,23 +395,22 @@ export function Home({
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}
+            hasServer={hasServer}
             genres={data?.genres ?? []}
             onOpen={openDetails}
             onPlay={play}
             onError={onToast}
           />
+        ) : view === "discover" ? (
+          <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} />
         ) : error ? (
           retry
-        ) : loading ? (
-          <>
-            <HeroSkeleton />
-            <RowSkeleton />
-            <RowSkeleton />
-          </>
+        ) : homeLoading ? (
+          skeleton
         ) : view === "mylist" ? (
           grid(t("myList"), favorites ?? [], { text: t("emptyList"), hint: t("emptyListHint") })
-        ) : view === "movies" ? (
-          grid(t("allMovies"), movies)
+        ) : view === "myserver" && data ? (
+          <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
           activeData ? (
             <Feed
@@ -358,19 +423,18 @@ export function Home({
           ) : libError && libLoading !== activeLibrary.id ? (
             retry
           ) : (
-            <>
-              <HeroSkeleton />
-              <RowSkeleton />
-              <RowSkeleton />
-            </>
+            skeleton
           )
         ) : data ? (
           <Feed
+            key="home"
             data={data}
             tv={false}
+            featured={hero}
             myList={favorites ?? []}
             onlineResume={onlineResume}
             showAddons
+            empty={noAddons}
             onOpen={openDetails}
             onPlay={play}
           />

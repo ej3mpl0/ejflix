@@ -30,6 +30,7 @@ function mergePatch(base: Settings, patch: SettingsPatch): Settings {
     playback: { ...base.playback, ...(patch.playback ?? {}) },
     library: { ...base.library, ...(patch.library ?? {}) },
     addons: { ...base.addons, ...(patch.addons ?? {}) },
+    discord: { ...base.discord, ...(patch.discord ?? {}) },
   };
 }
 

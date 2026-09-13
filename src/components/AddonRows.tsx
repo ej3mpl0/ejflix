@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { AddonCatalog, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -42,7 +42,16 @@ function CatalogRow({
 }
 
 /** One rail per addon catalog (movies and series), in addon priority order. */
-export function AddonRows({ onOpen, onPlay }: { onOpen: (movie: Movie) => void; onPlay: (movie: Movie) => void }) {
+export function AddonRows({
+  onOpen,
+  onPlay,
+  empty = null,
+}: {
+  onOpen: (movie: Movie) => void;
+  onPlay: (movie: Movie) => void;
+  /** Rendered when no addon offers a catalog. */
+  empty?: ReactNode;
+}) {
   const { settings } = useSettings();
   const [catalogs, setCatalogs] = useState<AddonCatalog[] | null>(null);
   const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
@@ -67,7 +76,8 @@ export function AddonRows({ onOpen, onPlay }: { onOpen: (movie: Movie) => void; 
     };
   }, [key]);
 
-  if (!catalogs?.length) return null;
+  if (catalogs == null) return null;
+  if (!catalogs.length) return <>{empty}</>;
   return (
     <>
       {catalogs.map((catalog) => (

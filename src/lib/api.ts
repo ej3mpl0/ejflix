@@ -5,11 +5,15 @@ import type {
   AddonMeta,
   AddonMetaFull,
   AddonStream,
+  BrowseArgs,
+  DiscordStatus,
   HomeData,
   Library,
+  LocalProfile,
   MediaSegment,
   Movie,
   PlayerState,
+  ProfilePatch,
   PublicInfo,
   PublicUser,
   ResumeEntry,
@@ -28,6 +32,24 @@ export const api = {
   listPublicUsers: (url: string) => invoke<PublicUser[]>("list_public_users", { url }),
   logout: () => invoke<void>("logout"),
   logoutServer: () => invoke<void>("logout_server"),
+  // Local (online) profiles
+  localProfilesList: () => invoke<LocalProfile[]>("local_profiles_list"),
+  localProfileCreate: (name: string, avatar: string, pin?: string | null) =>
+    invoke<LocalProfile>("local_profile_create", { name, avatar, pin: pin ?? null }),
+  localProfileUpdate: (id: string, patch: ProfilePatch) =>
+    invoke<LocalProfile>("local_profile_update", { id, patch }),
+  localProfileDelete: (id: string) => invoke<void>("local_profile_delete", { id }),
+  /** Opens a local profile; `pin` is required when the profile has one. */
+  localProfileEnter: (id: string, pin?: string | null) =>
+    invoke<Session>("local_profile_enter", { id, pin: pin ?? null }),
+  /** Links a Jellyfin account to the active local profile. */
+  linkServer: (url: string, username: string, password: string) =>
+    invoke<Session>("link_server", { url, username, password }),
+  unlinkServer: () => invoke<Session>("unlink_server"),
+  /** Discover: library browse with filters. */
+  browseItems: (args: BrowseArgs) => invoke<Movie[]>("browse_items", { args }),
+  discordStatus: () => invoke<DiscordStatus>("discord_status"),
+  getGenres: () => invoke<string[]>("get_genres"),
   getLibraries: () => invoke<Library[]>("get_libraries"),
   getHome: (library?: Library | null) => invoke<HomeData>("get_home", { library: library ?? null }),
   getItem: (id: string) => invoke<Movie>("get_item", { id }),

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LoaderCircle } from "lucide-react";
+import { ArrowLeft, LoaderCircle } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
 import { LanguageSelect } from "../components/LanguageSelect";
@@ -9,8 +9,11 @@ import type { SavedServer } from "../lib/types";
 
 export function Login({
   onConnected,
+  onBack,
 }: {
   onConnected: (server: SavedServer) => void;
+  /** Return to the previous screen (welcome or profiles). */
+  onBack?: () => void;
 }) {
   const { t } = useI18n();
   const [url, setUrl] = useState("http://localhost:8096");
@@ -40,9 +43,23 @@ export function Login({
     <div className="grain relative flex h-full flex-col bg-base">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_circle_at_50%_20%,color-mix(in_oklab,var(--color-accent)_15%,transparent),transparent_60%)]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_40%,var(--color-base)_100%)]" />
-      <div className="relative z-10 flex h-[60px] items-center justify-end gap-2 pr-0">
-        <LanguageSelect />
-        <WindowControls />
+      <div className="relative z-10 flex h-[60px] items-center justify-between pl-6">
+        {onBack ? (
+          <button
+            type="button"
+            onClick={onBack}
+            className="inline-flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm text-dim hover:text-text"
+          >
+            <ArrowLeft size={16} />
+            {t("back")}
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-2">
+          <LanguageSelect />
+          <WindowControls />
+        </div>
       </div>
       <div className="relative z-10 flex flex-1 items-center justify-center px-6">
         <form
@@ -59,6 +76,7 @@ export function Login({
             {t("jellyfinServer")}
           </label>
           <input
+            autoFocus
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="http://192.168.1.10:8096"

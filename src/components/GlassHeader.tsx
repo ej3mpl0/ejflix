@@ -9,7 +9,14 @@ import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 
 /** `lib:<id>` selects a pinned Jellyfin library. */
-export type NavView = "home" | "movies" | "mylist" | "search" | "settings" | `lib:${string}`;
+export type NavView =
+  | "home"
+  | "myserver"
+  | "discover"
+  | "mylist"
+  | "search"
+  | "settings"
+  | `lib:${string}`;
 
 export function libraryView(id: string): NavView {
   return `lib:${id}`;
@@ -22,6 +29,8 @@ export function libraryView(id: string): NavView {
 export function GlassHeader({
   userName,
   avatarUrl,
+  mode,
+  hasServer,
   view,
   onView,
   libraries,
@@ -35,6 +44,10 @@ export function GlassHeader({
 }: {
   userName: string;
   avatarUrl?: string | null;
+  /** Jellyfin user or local profile (decides the account menu entries). */
+  mode: "jellyfin" | "local";
+  /** Server tabs (My server, libraries, My list) only make sense with a server. */
+  hasServer: boolean;
   view: NavView;
   onView: (view: NavView) => void;
   /** Libraries pinned as tabs. */
@@ -83,14 +96,14 @@ export function GlassHeader({
     const observer = new ResizeObserver(measure);
     observer.observe(nav);
     return () => observer.disconnect();
-  }, [view, libraries.length]);
+  }, [view, libraries.length, hasServer]);
 
   useEffect(() => {
     setJellyKey((n) => n + 1);
   }, [view]);
 
   const pinned = new Set(libraries.map((lib) => lib.id));
-  // The built-in "Movies" tab already shows every movie. With a single movies library on
+  // The "My server" tab already shows every movie. With a single movies library on
   // the server that tab *is* that library, so offering it again would only duplicate it.
   const movieLibraries = available.filter((lib) => lib.collectionType === "movies");
   const addable = available.filter(
@@ -135,66 +148,71 @@ export function GlassHeader({
         </div>
         <nav ref={navRef} className="relative flex h-full min-w-0 items-center gap-5">
           <Tab id="home" label={t("home")} />
-          <Tab id="movies" label={t("movies")} />
-          {libraries.map((lib) => {
-            const id = libraryView(lib.id);
-            return (
-              <div key={lib.id} className="group/tab relative flex h-full min-w-0 items-center">
-                <Tab id={id} label={lib.name} className="max-w-[180px] truncate" />
-                <button
-                  type="button"
-                  aria-label={`${t("removeLibrary")}: ${lib.name}`}
-                  title={t("removeLibrary")}
-                  onClick={() => onRemoveLibrary(lib.id)}
-                  className="ml-1 hidden h-5 w-5 place-items-center rounded-full text-white/50 hover:bg-white/10 hover:text-white group-hover/tab:grid group-focus-within/tab:grid"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-            );
-          })}
-          <Tab id="mylist" label={t("myList")} />
-          <div className="relative flex items-center" ref={addRef}>
-            <button
-              type="button"
-              aria-label={t("addLibrary")}
-              title={t("addLibrary")}
-              aria-expanded={add}
-              onClick={() => setAdd((v) => !v)}
-              className={cn(
-                "icon-hit grid h-8 w-8 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white",
-                add && "bg-white/10 text-white",
-              )}
-            >
-              <Plus size={18} />
-            </button>
-            {add ? (
-              <div className="modal-enter absolute top-11 left-0 w-64 rounded-2xl bg-panel/95 p-2 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
-                <p className="px-3 py-2 text-[11px] font-semibold tracking-wide text-dim uppercase">{t("addLibrary")}</p>
-                {addable.map((lib) => (
-                  <button
-                    key={lib.id}
-                    type="button"
-                    className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-white/5"
-                    onClick={() => {
-                      onAddLibrary(lib);
-                      setAdd(false);
-                    }}
-                  >
-                    {lib.collectionType === "tvshows" ? (
-                      <Tv size={15} className="shrink-0 text-muted" />
-                    ) : (
-                      <Film size={15} className="shrink-0 text-muted" />
-                    )}
-                    <span className="truncate">{lib.name}</span>
-                  </button>
-                ))}
-                {!addable.length ? (
-                  <p className="px-3 py-2 text-[13px] text-muted">{t("noMoreLibraries")}</p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          {hasServer ? <Tab id="myserver" label={t("myServer")} /> : null}
+          {hasServer
+            ? libraries.map((lib) => {
+                const id = libraryView(lib.id);
+                return (
+                  <div key={lib.id} className="group/tab relative flex h-full min-w-0 items-center">
+                    <Tab id={id} label={lib.name} className="max-w-[180px] truncate" />
+                    <button
+                      type="button"
+                      aria-label={`${t("removeLibrary")}: ${lib.name}`}
+                      title={t("removeLibrary")}
+                      onClick={() => onRemoveLibrary(lib.id)}
+                      className="ml-1 hidden h-5 w-5 place-items-center rounded-full text-white/50 hover:bg-white/10 hover:text-white group-hover/tab:grid group-focus-within/tab:grid"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                );
+              })
+            : null}
+          <Tab id="discover" label={t("discover")} />
+          {hasServer ? <Tab id="mylist" label={t("myList")} /> : null}
+          {hasServer ? (
+            <div className="relative flex items-center" ref={addRef}>
+              <button
+                type="button"
+                aria-label={t("addLibrary")}
+                title={t("addLibrary")}
+                aria-expanded={add}
+                onClick={() => setAdd((v) => !v)}
+                className={cn(
+                  "icon-hit grid h-8 w-8 place-items-center rounded-full text-white/70 hover:bg-white/10 hover:text-white",
+                  add && "bg-white/10 text-white",
+                )}
+              >
+                <Plus size={18} />
+              </button>
+              {add ? (
+                <div className="modal-enter absolute top-11 left-0 w-64 rounded-2xl bg-panel/95 p-2 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
+                  <p className="px-3 py-2 text-[11px] font-semibold tracking-wide text-dim uppercase">{t("addLibrary")}</p>
+                  {addable.map((lib) => (
+                    <button
+                      key={lib.id}
+                      type="button"
+                      className="flex min-h-10 w-full items-center gap-2.5 rounded-lg px-3 text-left text-sm hover:bg-white/5"
+                      onClick={() => {
+                        onAddLibrary(lib);
+                        setAdd(false);
+                      }}
+                    >
+                      {lib.collectionType === "tvshows" ? (
+                        <Tv size={15} className="shrink-0 text-muted" />
+                      ) : (
+                        <Film size={15} className="shrink-0 text-muted" />
+                      )}
+                      <span className="truncate">{lib.name}</span>
+                    </button>
+                  ))}
+                  {!addable.length ? (
+                    <p className="px-3 py-2 text-[13px] text-muted">{t("noMoreLibraries")}</p>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {indicator ? (
             <span
               key={jellyKey}
@@ -264,14 +282,16 @@ export function GlassHeader({
                 <Users size={14} />
                 {t("switchProfile")}
               </button>
-              <button
-                type="button"
-                className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm hover:bg-white/5"
-                onClick={onLogout}
-              >
-                <LogOut size={14} />
-                {t("signOut")}
-              </button>
+              {mode === "jellyfin" ? (
+                <button
+                  type="button"
+                  className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-sm hover:bg-white/5"
+                  onClick={onLogout}
+                >
+                  <LogOut size={14} />
+                  {t("signOut")}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

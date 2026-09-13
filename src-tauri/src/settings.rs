@@ -23,6 +23,37 @@ pub struct Settings {
     pub playback: Playback,
     pub library: LibraryPrefs,
     pub addons: AddonPrefs,
+    pub discord: DiscordPrefs,
+}
+
+/// Discord Rich Presence. Templates accept `{title}`, `{episode}`, `{year}`, `{type}`
+/// and `{source}`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DiscordPrefs {
+    pub enabled: bool,
+    /// Discord application id; empty falls back to the built-in one.
+    pub client_id: String,
+    pub details: String,
+    pub state: String,
+    pub show_poster: bool,
+    pub show_time: bool,
+    /// Keep the presence (marked as paused) while playback is paused.
+    pub show_paused: bool,
+}
+
+impl Default for DiscordPrefs {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            client_id: String::new(),
+            details: "{title}".into(),
+            state: "{episode}".into(),
+            show_poster: true,
+            show_time: true,
+            show_paused: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +182,16 @@ impl Settings {
         let mut seen_urls = std::collections::HashSet::new();
         self.addons.urls.retain(|u| seen_urls.insert(u.clone()));
         self.addons.urls.truncate(30);
+        self.discord.client_id = self
+            .discord
+            .client_id
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_digit())
+            .take(32)
+            .collect();
+        self.discord.details = self.discord.details.chars().take(128).collect();
+        self.discord.state = self.discord.state.chars().take(128).collect();
         self
     }
 }

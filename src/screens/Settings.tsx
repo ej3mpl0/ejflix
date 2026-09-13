@@ -1,25 +1,221 @@
 import { useState } from "react";
-import { ArrowLeft, Info, LogOut, Palette, Play, Puzzle, Server, Users, Languages as LanguagesIcon } from "lucide-react";
+import type { LocalProfile } from "../lib/types";
+import {
+  ArrowLeft,
+  Info,
+  Link2,
+  MessageCircle,
+  LoaderCircle,
+  LogOut,
+  Palette,
+  Pencil,
+  Play,
+  Puzzle,
+  Server,
+  Unlink,
+  Users,
+  Languages as LanguagesIcon,
+} from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
-import type { SavedServer, Session, SkipMode, Countdown } from "../lib/types";
+import { DiscordSection } from "../components/settings/DiscordSection";
+import { hasServer as sessionHasServer, type SavedServer, type Session, type SkipMode, type Countdown } from "../lib/types";
+import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { Avatar } from "../components/Avatar";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { ReleaseNotes } from "../components/ReleaseNotes";
+import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 
-type Section = "appearance" | "playback" | "addons" | "language" | "account";
+type Section = "appearance" | "playback" | "addons" | "discord" | "language" | "account";
+
+const field =
+  "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
+const tonal =
+  "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
+
+/** Settings › Account for a local profile: edit it, link or unlink a Jellyfin account. */
+function LocalAccount({
+  session,
+  onSessionChange,
+  onSwitchProfile,
+  onToast,
+}: {
+  session: Session;
+  onSessionChange: (session: Session) => void;
+  onSwitchProfile: () => void;
+  onToast: (message: string) => void;
+}) {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState<LocalProfile | null>(null);
+  const [url, setUrl] = useState("http://localhost:8096");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const linked = sessionHasServer(session);
+
+  const link = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.probeServer(url);
+      onSessionChange(await api.linkServer(url, username.trim(), password));
+      setPassword("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEditing = async () => {
+    const fallback: LocalProfile = {
+      id: session.userId,
+      name: session.userName,
+      avatar: session.avatarUrl ?? "preset:0",
+      hasPin: false,
+      linked,
+    };
+    try {
+      const list = await api.localProfilesList();
+      setEditing(list.find((p) => p.id === session.userId) ?? fallback);
+    } catch {
+      setEditing(fallback);
+    }
+  };
+
+  const unlink = async () => {
+    setBusy(true);
+    try {
+      onSessionChange(await api.unlinkServer());
+    } catch (err) {
+      onToast(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <SettingsSection title={t("account")}>
+        {editing ? (
+          <div className="py-4">
+            <ProfileForm
+              initial={editing}
+              onCancel={() => setEditing(null)}
+              onSaved={(profile) => {
+                setEditing(null);
+                onSessionChange({ ...session, userName: profile.name, avatarUrl: profile.avatar });
+              }}
+            />
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 py-3">
+              <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[16px] font-semibold">{session.userName}</p>
+                <p className="truncate text-[13px] text-dim">{t("localProfile")}</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-3 py-4">
+              <button type="button" onClick={() => void startEditing()} className={tonal}>
+                <Pencil size={16} />
+                {t("editProfile")}
+              </button>
+              <button type="button" onClick={onSwitchProfile} className={tonal}>
+                <Users size={16} />
+                {t("switchProfile")}
+              </button>
+            </div>
+          </>
+        )}
+      </SettingsSection>
+      <SettingsSection
+        title={t("jellyfinServer")}
+        description={linked ? t("serverLinkedHint") : t("linkServerHint")}
+      >
+        {linked ? (
+          <>
+            <div className="flex items-center gap-4 py-3">
+              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+                <Server size={18} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[14px] font-medium">{session.serverName ?? "Jellyfin"}</p>
+                <p className="truncate text-[12px] text-dim">
+                  {session.serverUrl}
+                  {session.jellyfinUserName ? ` · ${session.jellyfinUserName}` : ""}
+                </p>
+              </div>
+            </div>
+            <div className="py-4">
+              <button type="button" disabled={busy} onClick={() => void unlink()} className={tonal}>
+                {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Unlink size={16} />}
+                {t("disconnectServer")}
+              </button>
+            </div>
+          </>
+        ) : (
+          <form
+            className="space-y-3 py-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void link();
+            }}
+          >
+            <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_1fr]">
+              <input
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="http://192.168.1.10:8096"
+                aria-label={t("jellyfinServer")}
+                className={field}
+              />
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={t("username")}
+                aria-label={t("username")}
+                className={field}
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t("password")}
+                aria-label={t("password")}
+                className={field}
+              />
+            </div>
+            {error ? <p className="text-[13px] text-accent">{error}</p> : null}
+            <button
+              type="submit"
+              disabled={busy || !url.trim() || !username.trim()}
+              className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
+            >
+              {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Link2 size={16} />}
+              {t("connect")}
+            </button>
+          </form>
+        )}
+      </SettingsSection>
+    </>
+  );
+}
 
 export function Settings({
   session,
   server,
   version,
+  onSessionChange,
   onSwitchProfile,
   onLogout,
   onBack,
@@ -28,6 +224,7 @@ export function Settings({
   session: Session;
   server: SavedServer | null;
   version: string | null;
+  onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
   onBack: () => void;
@@ -54,6 +251,7 @@ export function Settings({
     { id: "appearance", label: t("appearance"), icon: Palette },
     { id: "playback", label: t("playback"), icon: Play },
     { id: "addons", label: t("addons"), icon: Puzzle },
+    { id: "discord", label: t("discord"), icon: MessageCircle },
     { id: "language", label: t("language"), icon: LanguagesIcon },
     { id: "account", label: t("account"), icon: Users },
   ];
@@ -200,6 +398,8 @@ export function Settings({
 
           {section === "addons" ? <AddonsSection onToast={onToast} /> : null}
 
+          {section === "discord" ? <DiscordSection /> : null}
+
           {section === "language" ? (
             <SettingsSection title={t("language")}>
               <SettingsRow label={t("appLanguage")}>
@@ -210,36 +410,37 @@ export function Settings({
 
           {section === "account" ? (
             <>
-              <SettingsSection title={t("account")}>
-                <div className="flex items-center gap-4 py-3">
-                  <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
-                  <div className="min-w-0">
-                    <p className="truncate text-[16px] font-semibold">{session.userName}</p>
-                    <p className="flex items-center gap-1.5 truncate text-[13px] text-dim">
-                      <Server size={13} />
-                      {server?.serverName ?? "Jellyfin"} · {server?.serverUrl ?? session.serverUrl}
-                    </p>
+              {session.mode === "local" ? (
+                <LocalAccount
+                  session={session}
+                  onSessionChange={onSessionChange}
+                  onSwitchProfile={onSwitchProfile}
+                  onToast={onToast}
+                />
+              ) : (
+                <SettingsSection title={t("account")}>
+                  <div className="flex items-center gap-4 py-3">
+                    <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
+                    <div className="min-w-0">
+                      <p className="truncate text-[16px] font-semibold">{session.userName}</p>
+                      <p className="flex items-center gap-1.5 truncate text-[13px] text-dim">
+                        <Server size={13} />
+                        {server?.serverName ?? session.serverName ?? "Jellyfin"} · {server?.serverUrl ?? session.serverUrl}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex flex-wrap gap-3 py-4">
-                  <button
-                    type="button"
-                    onClick={onSwitchProfile}
-                    className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18"
-                  >
-                    <Users size={16} />
-                    {t("switchProfile")}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onLogout}
-                    className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18"
-                  >
-                    <LogOut size={16} />
-                    {t("signOut")}
-                  </button>
-                </div>
-              </SettingsSection>
+                  <div className="flex flex-wrap gap-3 py-4">
+                    <button type="button" onClick={onSwitchProfile} className={tonal}>
+                      <Users size={16} />
+                      {t("switchProfile")}
+                    </button>
+                    <button type="button" onClick={onLogout} className={tonal}>
+                      <LogOut size={16} />
+                      {t("signOut")}
+                    </button>
+                  </div>
+                </SettingsSection>
+              )}
               <SettingsSection title={t("releaseNotes")}>
                 <div className="py-3">
                   <p className="mb-3 flex items-center gap-1.5 text-[13px] text-dim">
