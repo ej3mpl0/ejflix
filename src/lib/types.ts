@@ -56,8 +56,60 @@ export type Library = {
 
 export type ItemKind = "Movie" | "Series" | "Season" | "Episode";
 
+/** Cast / crew entry. */
+export type Person = {
+  id: string;
+  name: string;
+  role: string | null;
+  kind: string;
+  imageUrl: string | null;
+};
+
+/** One playable version of an item. */
+export type MediaSourceInfo = {
+  id: string;
+  name: string;
+};
+
+/** Stremio addon stream (an online source for a title). */
+export type AddonStream = {
+  addonName: string;
+  addonUrl: string;
+  name: string;
+  title: string;
+  url: string | null;
+  externalUrl: string | null;
+  infoHash: string | null;
+  headers: [string, string][];
+  bingeGroup: string | null;
+  filename: string | null;
+  videoSize: number | null;
+  /** True when mpv can open it directly (an http(s) url). */
+  playable: boolean;
+};
+
+/** Identity of an online (addon) title carried inside a Movie. */
+export type ExternalRef = {
+  type: "movie" | "series";
+  /** Stremio meta id, e.g. "tt0944947". */
+  metaId: string;
+  /** Stremio video id: the meta id for movies, "tt…:season:episode" for episodes. */
+  videoId: string;
+  imdb: string | null;
+  season: number | null;
+  episode: number | null;
+  /** Stream chosen for playback (set right before playing). */
+  stream?: AddonStream | null;
+  /** Addon/binge group of the stream being played, used to auto-pick the next episode. */
+  prefer?: { addonUrl: string; bingeGroup: string | null } | null;
+  /** Next episode of the show, for the next-episode card. */
+  next?: Movie | null;
+};
+
 export type Movie = {
   id: string;
+  /** Present for online titles served by Stremio addons (no Jellyfin item behind). */
+  external?: ExternalRef | null;
   /** Jellyfin item type; anything unknown is treated like a movie. */
   kind: ItemKind | string;
   seriesId: string | null;
@@ -80,13 +132,30 @@ export type Movie = {
   logoUrl: string | null;
   playbackPositionTicks: number;
   playedPercentage: number;
+  /** In "My list" (Jellyfin favorite). */
+  favorite: boolean;
+  played: boolean;
+  /** Series/seasons: episodes left to watch. */
+  unplayedCount: number | null;
   badges: string[];
   videoLabel: string | null;
   audioLabel: string | null;
   subtitleLabels: string[];
   directors: string[];
-  cast: string[];
+  writers: string[];
+  studios: string[];
+  cast: Person[];
+  /** External ids: Imdb, Tmdb, Tvdb... */
+  providerIds: Record<string, string>;
+  remoteTrailers: string[];
+  /** Seasons: episode count; series: season count. */
+  childCount: number | null;
+  /** Series: "Continuing" | "Ended". */
+  status: string | null;
+  tagline: string | null;
+  endYear: number | null;
   mediaSourceId: string | null;
+  mediaSources: MediaSourceInfo[];
   /** ISO-8601 date the item was added to the library. */
   dateCreated: string | null;
   trickplay: TrickplayInfo | null;
@@ -100,7 +169,8 @@ export type GenreRow = {
 };
 
 export type HomeData = {
-  featured: Movie | null;
+  /** Hero carousel items. */
+  featured: Movie[];
   resume: Movie[];
   /** Next episodes to watch (TV libraries only). */
   nextUp: Movie[];
@@ -132,9 +202,153 @@ export type PlayerState = {
   title: string;
   cacheTime: number;
   speed: number;
+  /** "auto" | "16:9" | "4:3" | "2.35:1" | "fill" */
+  aspect: string;
 };
 
 export type Toast = {
   id: number;
   message: string;
+};
+
+export type AddonCatalog = {
+  addonUrl: string;
+  addonName: string;
+  type: string;
+  id: string;
+  name: string;
+  searchable: boolean;
+  requiresExtra: boolean;
+  genres: string[];
+};
+
+export type AddonInfo = {
+  url: string;
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  logo: string | null;
+  types: string[];
+  resources: string[];
+  catalogs: AddonCatalog[];
+  builtin: boolean;
+};
+
+export type AddonMeta = {
+  id: string;
+  type: string;
+  name: string;
+  poster: string | null;
+  background: string | null;
+  logo: string | null;
+  description: string | null;
+  releaseInfo: string | null;
+  imdbRating: number | null;
+  genres: string[];
+  runtime: string | null;
+  year: number | null;
+  imdb: string | null;
+};
+
+export type AddonVideo = {
+  id: string;
+  title: string;
+  season: number | null;
+  episode: number | null;
+  released: string | null;
+  thumbnail: string | null;
+  overview: string | null;
+};
+
+export type AddonMetaFull = AddonMeta & {
+  cast: string[];
+  director: string[];
+  videos: AddonVideo[];
+};
+
+/** Locally remembered position of an online title. */
+export type ResumeEntry = {
+  key: string;
+  type: string;
+  metaId: string;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  background: string | null;
+  logo: string | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  positionSeconds: number;
+  durationSeconds: number;
+  updatedMs: number;
+};
+
+export type MediaSegmentKind = "intro" | "recap" | "outro" | "preview" | "commercial";
+
+/** Skippable range of an item (Jellyfin media segments or IntroDB). */
+export type MediaSegment = {
+  kind: MediaSegmentKind | string;
+  startSeconds: number;
+  endSeconds: number;
+  source: "jellyfin" | "introdb" | string;
+};
+
+export const THEME_IDS = [
+  "white",
+  "gold",
+  "jade",
+  "rose_gold",
+  "arctic",
+  "graphite",
+  "crimson",
+  "ocean",
+  "violet",
+  "emerald",
+  "amber",
+  "rose",
+] as const;
+export type ThemeId = (typeof THEME_IDS)[number];
+export type PosterSize = "small" | "medium" | "large";
+export type SkipMode = "ask" | "auto" | "off";
+export type Countdown = 0 | 5 | 10 | 15;
+
+/** Per-profile settings, mirrored from `src-tauri/src/settings.rs`. */
+export type Settings = {
+  appearance: { theme: ThemeId; amoled: boolean; posterSize: PosterSize };
+  playback: {
+    skipIntro: SkipMode;
+    skipRecap: SkipMode;
+    skipOutro: SkipMode;
+    nextEpisodeCountdown: Countdown;
+    /** "" = file default, else ISO 639-2 ("spa"). */
+    audioLanguage: string;
+    /** "" = file default, "off" = none, else ISO 639-2. */
+    subtitleLanguage: string;
+    rememberSpeed: boolean;
+    lastSpeed: number;
+    showTimeRemaining: boolean;
+  };
+  library: { pinned: string[] };
+  addons: { urls: string[]; cinemeta: boolean };
+};
+
+export type SettingsPatch = { [K in keyof Settings]?: Partial<Settings[K]> };
+
+export const DEFAULT_SETTINGS: Settings = {
+  appearance: { theme: "crimson", amoled: false, posterSize: "medium" },
+  playback: {
+    skipIntro: "ask",
+    skipRecap: "ask",
+    skipOutro: "ask",
+    nextEpisodeCountdown: 5,
+    audioLanguage: "",
+    subtitleLanguage: "",
+    rememberSpeed: false,
+    lastSpeed: 1,
+    showTimeRemaining: false,
+  },
+  library: { pinned: [] },
+  addons: { urls: [], cinemeta: true },
 };

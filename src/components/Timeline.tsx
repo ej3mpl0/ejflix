@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Movie } from "../lib/types";
+import type { MediaSegment, Movie } from "../lib/types";
 import { PREVIEW_WIDTH } from "../lib/trickplay";
 import { TimelinePreview } from "./TimelinePreview";
 import { useI18n } from "../lib/locale-context";
@@ -18,6 +18,7 @@ export function Timeline({
   time,
   duration,
   cacheTime,
+  segments = [],
   onSeekTo,
   onScrub,
   onScrubbing,
@@ -26,6 +27,8 @@ export function Timeline({
   time: number;
   duration: number;
   cacheTime: number;
+  /** Intro / recap / credits ranges, drawn as translucent bands. */
+  segments?: MediaSegment[];
   /** Committed, exact seek (on release / click). */
   onSeekTo: (seconds: number) => void;
   /** Throttled live seek while dragging (keyframe accuracy). */
@@ -128,6 +131,18 @@ export function Timeline({
       {buffered > 0 ? (
         <div className="absolute inset-y-0 left-0 rounded-full bg-white/35" style={{ width: `${buffered}%` }} />
       ) : null}
+      {interactive
+        ? segments.map((segment) => (
+            <div
+              key={`${segment.kind}:${segment.startSeconds}`}
+              className="pointer-events-none absolute inset-y-0 rounded-sm bg-white/28"
+              style={{
+                left: `${pct(segment.startSeconds)}%`,
+                width: `${Math.max(0.2, pct(segment.endSeconds) - pct(segment.startSeconds))}%`,
+              }}
+            />
+          ))
+        : null}
       {interactive
         ? movie.chapters
             .filter((chapter) => chapter.startSeconds > 0 && chapter.startSeconds < duration)

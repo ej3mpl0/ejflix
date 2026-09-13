@@ -6,6 +6,8 @@ import { Player } from "./screens/Player";
 import { ToastStack } from "./components/Toast";
 import { Logo } from "./components/Logo";
 import { UpdateModal } from "./components/UpdateModal";
+import { SettingsProvider } from "./lib/settings-context";
+import { UserDataProvider } from "./lib/userdata-context";
 import { api } from "./lib/api";
 import type { Movie, SavedServer, Session, Toast } from "./lib/types";
 
@@ -16,6 +18,7 @@ export default function App() {
   const [playing, setPlaying] = useState<Movie | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [version, setVersion] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
 
   const toast = (message: string) => {
@@ -47,6 +50,7 @@ export default function App() {
       .then(([restored, saved, info]) => {
         setSession(restored);
         setServer(saved);
+        if (info) setVersion(info.current);
         if (info?.showNotes) setUpdateVersion(info.current);
       })
       .finally(() => setBoot(false));
@@ -85,31 +89,39 @@ export default function App() {
   return (
     <>
       {!session && !server ? (
-        <Login
-          onConnected={(next) => {
-            setServer(next);
-          }}
-        />
-      ) : !session && server ? (
-        <Profiles
-          server={server}
-          onReady={setSession}
-          onChangeServer={() => void logoutServer()}
-        />
-      ) : session ? (
-        <>
-          {/* Home stays mounted while playing so the view and scroll survive the trip. */}
-          <Home
-            session={session}
-            hidden={playing != null}
-            refreshToken={homeRefresh}
-            onPlay={setPlaying}
-            onToast={toast}
-            onSwitchProfile={() => void switchProfile()}
-            onLogout={() => void logoutServer()}
+        <SettingsProvider userId={null}>
+          <Login
+            onConnected={(next) => {
+              setServer(next);
+            }}
           />
-          {playing ? <Player movie={playing} mode="engine" onExit={stopPlaying} onError={toast} /> : null}
-        </>
+        </SettingsProvider>
+      ) : !session && server ? (
+        <SettingsProvider userId={null}>
+          <Profiles
+            server={server}
+            onReady={setSession}
+            onChangeServer={() => void logoutServer()}
+          />
+        </SettingsProvider>
+      ) : session ? (
+        <SettingsProvider key={session.userId} userId={session.userId} migrate onError={toast}>
+          <UserDataProvider onError={toast}>
+            {/* Home stays mounted while playing so the view and scroll survive the trip. */}
+            <Home
+              session={session}
+              server={server}
+              version={version}
+              hidden={playing != null}
+              refreshToken={homeRefresh}
+              onPlay={setPlaying}
+              onToast={toast}
+              onSwitchProfile={() => void switchProfile()}
+              onLogout={() => void logoutServer()}
+            />
+            {playing ? <Player movie={playing} mode="engine" onExit={stopPlaying} onError={toast} /> : null}
+          </UserDataProvider>
+        </SettingsProvider>
       ) : null}
       {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
       <ToastStack toasts={toasts} />

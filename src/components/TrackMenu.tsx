@@ -7,17 +7,19 @@ function capitalize(text: string): string {
   return text.charAt(0).toLocaleUpperCase() + text.slice(1);
 }
 
+/** Audio or subtitle picker, anchored above the toolbar chip that opened it. */
 export function TrackMenu({
+  kind,
   tracks,
   onSelect,
 }: {
+  kind: "audio" | "sub";
   tracks: PlayerTrack[];
   onSelect: (kind: string, id: number) => void;
 }) {
   const { t, locale } = useI18n();
-  const audio = tracks.filter((track) => track.kind === "audio");
-  const subs = tracks.filter((track) => track.kind === "sub");
-  const subOff = !subs.some((track) => track.selected);
+  const list = tracks.filter((track) => track.kind === kind);
+  const subOff = kind === "sub" && !list.some((track) => track.selected);
 
   const languageNames = useMemo(() => {
     try {
@@ -62,7 +64,7 @@ export function TrackMenu({
         }`}
         onClick={onClick}
       >
-        <span className="grid w-4 shrink-0 place-items-center text-white">
+        <span className="grid w-4 shrink-0 place-items-center text-accent">
           {selected ? <Check size={14} strokeWidth={2.5} /> : null}
         </span>
         <span className="min-w-0 flex-1">
@@ -74,47 +76,28 @@ export function TrackMenu({
   );
 
   return (
-    <div className="absolute right-0 bottom-12 w-[400px] rounded-xl bg-panel/95 p-4 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">{t("audio")}</p>
-          <ul className="max-h-[300px] space-y-0.5 overflow-y-auto">
-            {audio.map((track) => {
-              const { primary, secondary } = label(track);
-              return (
-                <Item
-                  key={track.id}
-                  selected={track.selected}
-                  primary={primary}
-                  secondary={secondary}
-                  onClick={() => onSelect("audio", track.id)}
-                />
-              );
-            })}
-            {!audio.length ? <li className="px-2 text-dim">{t("noTracks")}</li> : null}
-          </ul>
-        </div>
-        <div>
-          <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
-            {t("subtitles")}
-          </p>
-          <ul className="max-h-[300px] space-y-0.5 overflow-y-auto">
-            <Item selected={subOff} primary={t("subtitlesOff")} onClick={() => onSelect("sub", 0)} />
-            {subs.map((track) => {
-              const { primary, secondary } = label(track);
-              return (
-                <Item
-                  key={track.id}
-                  selected={track.selected}
-                  primary={primary}
-                  secondary={secondary}
-                  onClick={() => onSelect("sub", track.id)}
-                />
-              );
-            })}
-          </ul>
-        </div>
-      </div>
+    <div className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 w-[300px] -translate-x-1/2 rounded-2xl bg-panel/95 p-3 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
+      <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
+        {kind === "audio" ? t("audio") : t("subtitles")}
+      </p>
+      <ul className="max-h-[320px] space-y-0.5 overflow-y-auto">
+        {kind === "sub" ? (
+          <Item selected={subOff} primary={t("subtitlesOff")} onClick={() => onSelect("sub", 0)} />
+        ) : null}
+        {list.map((track) => {
+          const { primary, secondary } = label(track);
+          return (
+            <Item
+              key={track.id}
+              selected={track.selected}
+              primary={primary}
+              secondary={secondary}
+              onClick={() => onSelect(kind, track.id)}
+            />
+          );
+        })}
+        {!list.length && kind === "audio" ? <li className="px-2 text-dim">{t("noTracks")}</li> : null}
+      </ul>
     </div>
   );
 }

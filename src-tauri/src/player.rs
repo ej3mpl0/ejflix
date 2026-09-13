@@ -138,6 +138,8 @@ pub struct PlayerState {
     /// Absolute position (seconds) up to which the demuxer has cached data.
     pub cache_time: f64,
     pub speed: f64,
+    /// "auto" | "16:9" | "4:3" | "2.35:1" | "fill"
+    pub aspect: String,
 }
 
 impl Default for PlayerState {
@@ -156,15 +158,80 @@ impl Default for PlayerState {
             title: String::new(),
             cache_time: 0.0,
             speed: 1.0,
+            aspect: "auto".to_string(),
         }
     }
 }
 
+/// Where playback progress is reported to.
+#[derive(Clone)]
+pub enum PlaybackSource {
+    /// A Jellyfin item: progress goes to the server (`/Sessions/Playing/*`).
+    Jellyfin {
+        item_id: String,
+        media_source_id: Option<String>,
+        play_session_id: String,
+    },
+    /// An online stream from a Stremio addon: progress is kept locally.
+    Addon { entry: crate::addons::ResumeEntry },
+}
+
 #[derive(Clone)]
 pub struct PlaybackContext {
-    pub item_id: String,
-    pub media_source_id: Option<String>,
-    pub play_session_id: String,
+    pub source: PlaybackSource,
+}
+
+/// Per-profile playback preferences applied before every `loadfile`.
+#[derive(Clone, Default)]
+pub struct PlaybackPrefs {
+    /// "" = file default, else ISO 639-2 ("spa").
+    pub audio_language: String,
+    /// "" = file default, "off" = no subtitles, else ISO 639-2.
+    pub subtitle_language: String,
+    pub remember_speed: bool,
+    pub last_speed: f64,
+}
+
+pub const ASPECT_MODES: &[&str] = &["auto", "16:9", "4:3", "2.35:1", "fill"];
+
+/// mpv compares language tags literally on older builds, so list every spelling a file
+/// may use (639-2/T, 639-2/B and 639-1) for the codes the settings offer.
+fn lang_aliases(code: &str) -> String {
+    match code {
+        "" => String::new(),
+        "spa" => "spa,es".into(),
+        "eng" => "eng,en".into(),
+        "fra" => "fra,fre,fr".into(),
+        "deu" => "deu,ger,de".into(),
+        "ita" => "ita,it".into(),
+        "por" => "por,pt".into(),
+        "jpn" => "jpn,ja".into(),
+        "kor" => "kor,ko".into(),
+        "zho" => "zho,chi,zh".into(),
+        "nld" => "nld,dut,nl".into(),
+        "rus" => "rus,ru".into(),
+        "cat" => "cat,ca".into(),
+        "eus" => "eus,baq,eu".into(),
+        "glg" => "glg,gl".into(),
+        "ara" => "ara,ar".into(),
+        "hin" => "hin,hi".into(),
+        "tur" => "tur,tr".into(),
+        "pol" => "pol,pl".into(),
+        "swe" => "swe,sv".into(),
+        "nor" => "nor,no".into(),
+        "dan" => "dan,da".into(),
+        "fin" => "fin,fi".into(),
+        "ell" => "ell,gre,el".into(),
+        "heb" => "heb,he".into(),
+        "ces" => "ces,cze,cs".into(),
+        "hun" => "hun,hu".into(),
+        "ron" => "ron,rum,ro".into(),
+        "ukr" => "ukr,uk".into(),
+        "tha" => "tha,th".into(),
+        "vie" => "vie,vi".into(),
+        "ind" => "ind,id".into(),
+        other => other.to_string(),
+    }
 }
 
 struct IpcRequest {
@@ -290,16 +357,24 @@ impl Player {
         self.overlay_gen.fetch_add(1, Ordering::SeqCst);
     }
 
+    /// `headers` are sent with every HTTP request of this file only (the Jellyfin token
+    /// for the server, an addon's proxy headers for online streams, nothing otherwise).
     pub async fn start(
         &self,
         app: &AppHandle,
         url: &str,
-        token: &str,
+        headers: &[(String, String)],
         title: &str,
         start_seconds: f64,
         context: PlaybackContext,
+        prefs: PlaybackPrefs,
     ) -> Result<(), String> {
         self.ensure_process(app).await?;
+        let speed = if prefs.remember_speed && prefs.last_speed.is_finite() {
+            prefs.last_speed.clamp(0.25, 4.0)
+        } else {
+            1.0
+        };
         {
             let mut state = self.state.write().await;
             *state = PlayerState {
@@ -309,15 +384,21 @@ impl Player {
                 // Until mpv reports time-pos, treat the resume point as the current
                 // time so an immediate stop does not report position 0 to Jellyfin.
                 time: start_seconds.max(0.0),
+                speed,
                 ..PlayerState::default()
             };
             state.title = title.to_string();
         }
         *self.context.write().await = Some(context);
         self.show_video(true);
+        let header_lines: Vec<String> = headers
+            .iter()
+            .filter(|(k, v)| !k.is_empty() && !v.contains('\n') && !v.contains('\r'))
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect();
         let _ = self
             .command(
-                json!(["set_property", "http-header-fields", format!("X-Emby-Token: {token}")]),
+                json!(["set_property", "http-header-fields", header_lines]),
                 false,
             )
             .await;
@@ -332,9 +413,35 @@ impl Player {
         let _ = self
             .command(json!(["set_property", "start", start]), false)
             .await;
+        // Track preferences are mpv *player* options that persist across loadfile, so
+        // they are reset explicitly every time (a previous item may have left sid=no).
         let _ = self
-            .command(json!(["set_property", "speed", 1.0]), false)
+            .command(
+                json!(["set_property", "alang", lang_aliases(&prefs.audio_language)]),
+                false,
+            )
             .await;
+        let _ = self.command(json!(["set_property", "aid", "auto"]), false).await;
+        if prefs.subtitle_language == "off" {
+            let _ = self.command(json!(["set_property", "slang", ""]), false).await;
+            let _ = self.command(json!(["set_property", "sid", "no"]), false).await;
+        } else {
+            let _ = self
+                .command(
+                    json!(["set_property", "slang", lang_aliases(&prefs.subtitle_language)]),
+                    false,
+                )
+                .await;
+            let _ = self.command(json!(["set_property", "sid", "auto"]), false).await;
+        }
+        let _ = self
+            .command(json!(["set_property", "speed", speed]), false)
+            .await;
+        // Every file starts with its own aspect ratio.
+        let _ = self
+            .command(json!(["set_property", "video-aspect-override", -1]), false)
+            .await;
+        let _ = self.command(json!(["set_property", "panscan", 0.0]), false).await;
         self.command(json!(["loadfile", url, "replace"]), false)
             .await?;
         self.raise_video();
@@ -348,14 +455,18 @@ impl Player {
         Ok(())
     }
 
-    pub async fn stop(&self) -> Result<Option<(PlaybackContext, i64)>, String> {
+    /// Returns the playback context with the last position (seconds) and duration.
+    pub async fn stop(&self) -> Result<Option<(PlaybackContext, f64, f64)>, String> {
         self.stop_overlay_guard();
         self.running.store(false, Ordering::SeqCst);
         let ctx = self.context.write().await.take();
-        let time = self.state.read().await.time;
+        let (time, duration) = {
+            let state = self.state.read().await;
+            (state.time, state.duration)
+        };
         let _ = self.command(json!(["stop"]), false).await;
         self.show_video(false);
-        Ok(ctx.map(|c| (c, seconds_to_ticks(time))))
+        Ok(ctx.map(|c| (c, time, duration)))
     }
 
     pub async fn toggle_pause(&self) -> Result<(), String> {
@@ -372,6 +483,24 @@ impl Player {
             (false, true) => "absolute+keyframes",
         };
         self.command(json!(["seek", seconds, mode]), false).await?;
+        Ok(())
+    }
+
+    /// Aspect override: `auto` (file), a fixed ratio, or `fill` (crop to the window).
+    pub async fn set_aspect(&self, mode: &str) -> Result<(), String> {
+        let (ratio, panscan): (f64, f64) = match mode {
+            "auto" => (-1.0, 0.0),
+            "16:9" => (16.0 / 9.0, 0.0),
+            "4:3" => (4.0 / 3.0, 0.0),
+            "2.35:1" => (2.35, 0.0),
+            "fill" => (-1.0, 1.0),
+            _ => return Err("Relación de aspecto no válida".into()),
+        };
+        self.command(json!(["set_property", "video-aspect-override", ratio]), false)
+            .await?;
+        self.command(json!(["set_property", "panscan", panscan]), false)
+            .await?;
+        self.state.write().await.aspect = mode.to_string();
         Ok(())
     }
 
@@ -455,6 +584,8 @@ impl Player {
             "--ontop=no".into(),
             "--ao=wasapi".into(),
             "--audio-exclusive=no".into(),
+            // Always stereo (normalised downmix): keeps dialogue audible when Discord
+            // captures the app, for Jellyfin files and online streams alike.
             "--audio-channels=stereo".into(),
             "--audio-normalize-downmix=yes".into(),
             "--ad-lavc-downmix=yes".into(),
@@ -846,10 +977,6 @@ fn client_size(hwnd: isize) -> (i32, i32) {
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-fn seconds_to_ticks(seconds: f64) -> i64 {
-    (seconds * 10_000_000.0) as i64
 }
 
 fn parent_hwnd(window: &tauri::WebviewWindow) -> Result<isize, String> {

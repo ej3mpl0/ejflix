@@ -1,19 +1,23 @@
 const KEY = "ejflix.libraries";
 
-/** Ids of the Jellyfin libraries the user pinned to the header, per profile. */
-export function loadAddedLibraries(userId: string): string[] {
+/**
+ * Pinned library ids saved by ejFlix ≤ 0.1.13 in localStorage. Read once by the settings
+ * migration; the source of truth is now `settings.library.pinned` (Rust store).
+ */
+export function readLegacyPinned(userId: string): string[] | null {
   try {
     const raw = localStorage.getItem(`${KEY}.${userId}`);
-    const list: unknown = raw ? JSON.parse(raw) : [];
-    return Array.isArray(list) ? list.filter((id): id is string => typeof id === "string") : [];
+    if (!raw) return null;
+    const list: unknown = JSON.parse(raw);
+    return Array.isArray(list) ? list.filter((id): id is string => typeof id === "string") : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-export function saveAddedLibraries(userId: string, ids: string[]) {
+export function clearLegacyPinned(userId: string) {
   try {
-    localStorage.setItem(`${KEY}.${userId}`, JSON.stringify(ids));
+    localStorage.removeItem(`${KEY}.${userId}`);
   } catch {
     /* storage unavailable */
   }

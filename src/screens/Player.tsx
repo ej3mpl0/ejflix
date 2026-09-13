@@ -1,17 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { Pause, Play, RotateCcw, RotateCw, SkipForward } from "lucide-react";
+import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { PlayerControls, type PlayerMenu } from "../components/PlayerControls";
 import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
+import { SkipButton } from "../components/SkipButton";
+import { NextEpisodeCard } from "../components/NextEpisodeCard";
+import { LockScreen } from "../components/LockScreen";
+import { PauseInfo } from "../components/PauseInfo";
+import { EpisodesPanel } from "../components/EpisodesPanel";
 import { api } from "../lib/api";
 import type { Movie, PlayerState } from "../lib/types";
 import { episodeCode, ticksToSeconds } from "../lib/format";
+import { nextAspect } from "../lib/aspect";
+import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
-
-/** Seconds before the end at which the "next episode" button appears. */
-const NEXT_BUTTON_WINDOW = 30;
-/** Countdown (seconds) before the next episode starts automatically at the end. */
-const AUTOPLAY_SECONDS = 5;
+import { useSettings } from "../lib/settings-context";
+import { useSegments } from "../hooks/useSegments";
+import { useSkipPrompt } from "../hooks/useSkipPrompt";
+import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
+import { usePauseInfo } from "../hooks/usePauseInfo";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -27,27 +34,12 @@ const emptyState: PlayerState = {
   title: "",
   cacheTime: 0,
   speed: 1,
+  aspect: "auto",
 };
 
+const LOCK_HINT_MS = 2000;
+
 type Flash = "play" | "pause" | "back" | "fwd";
-
-const REMAINING_KEY = "ejflix.timeRemaining";
-
-function readRemainingPref(): boolean {
-  try {
-    return localStorage.getItem(REMAINING_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeRemainingPref(value: boolean) {
-  try {
-    localStorage.setItem(REMAINING_KEY, value ? "1" : "0");
-  } catch {
-    /* storage unavailable */
-  }
-}
 
 export function Player({
   movie,
@@ -61,19 +53,25 @@ export function Player({
   onError: (message: string) => void;
 }) {
   const { t } = useI18n();
+  const { settings, update: updateSettings } = useSettings();
   const [state, setState] = useState<PlayerState>(emptyState);
   const [detail, setDetail] = useState<Movie | null>(null);
-  const [visible, setVisible] = useState(true);
+  // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
+  const [visible, setVisible] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
   const [menu, setMenu] = useState<PlayerMenu>(null);
+  const [panel, setPanel] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [lockHint, setLockHint] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [splash, setSplash] = useState(true);
-  const [remaining, setRemaining] = useState(readRemainingPref);
+  const remaining = settings.playback.showTimeRemaining;
   const [nextEpisode, setNextEpisode] = useState<Movie | null>(null);
-  const [countdown, setCountdown] = useState<number | null>(null);
   const mounted = useRef(true);
+  /** Re-shows the skip prompt on mouse/keyboard activity (set once the hook exists). */
+  const revealRef = useRef<() => void>(() => undefined);
   /** Pending stop of the previous item; the next start waits for it (engine mode). */
   const stopping = useRef<Promise<void> | null>(null);
   /** Guards against asking for the next episode twice (button + countdown). */
@@ -82,7 +80,10 @@ export function Player({
   const volTimer = useRef<number>(0);
   const flashTimer = useRef<number>(0);
   const clickTimer = useRef<number>(0);
+  const lockHintTimer = useRef<number>(0);
   const overUi = useRef(false);
+  const lockedRef = useRef(false);
+  lockedRef.current = locked;
   const overlay = mode === "overlay";
   const timelineMovie = detail ?? movie;
   const isEpisode = movie.kind === "Episode";
@@ -90,8 +91,19 @@ export function Player({
   const heading = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
   const subheading = isEpisode ? [code, movie.name].filter(Boolean).join(" · ") : "";
 
+  const showLockHint = () => {
+    setLockHint(true);
+    window.clearTimeout(lockHintTimer.current);
+    lockHintTimer.current = window.setTimeout(() => setLockHint(false), LOCK_HINT_MS);
+  };
+
   const bump = () => {
+    if (lockedRef.current) {
+      showLockHint();
+      return;
+    }
     setVisible(true);
+    revealRef.current();
     window.clearTimeout(hideTimer.current);
     if (overUi.current) return;
     hideTimer.current = window.setTimeout(() => {
@@ -132,7 +144,6 @@ export function Player({
   }, []);
 
   useEffect(() => {
-    bump();
     let cancelled = false;
     const unlistenState = api.onPlayerState(setState);
     const unlistenHotkey = api.onPlayerHotkey((key) => hotkeyRef.current(key));
@@ -152,6 +163,46 @@ export function Player({
         }
         if (cancelled) return;
         try {
+          if (movie.external) {
+            // Online title: resolve the stream (chosen in the picker, or auto-picked when
+            // chaining episodes), work out the next episode and start by URL.
+            const ext = movie.external;
+            let stream = ext.stream ?? null;
+            if (!stream) {
+              stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null);
+            }
+            if (cancelled) return;
+            if (!stream?.url) throw new Error(tRef.current("noStreams"));
+            const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
+            let nextMovie: Movie | null = null;
+            if (ext.type === "series") {
+              try {
+                const meta = await api.addonMeta("series", ext.metaId);
+                const nextVideo = nextVideoOf(meta, ext.videoId);
+                if (nextVideo) {
+                  const candidate = videoToMovie(meta, nextVideo);
+                  nextMovie = { ...candidate, external: { ...candidate.external!, prefer } };
+                }
+              } catch {
+                /* no metadata: no chaining */
+              }
+            }
+            if (cancelled) return;
+            const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
+            const entry = resumeEntryOf(full);
+            if (!entry) throw new Error(tRef.current("playerStartError"));
+            const next = await api.playerStartUrl({
+              url: stream.url,
+              title,
+              headers: stream.headers,
+              startSeconds: start > 5 ? start : 0,
+              entry,
+            });
+            if (cancelled) return;
+            void api.openPlayer(full);
+            setState(next);
+            return;
+          }
           const next = await api.playerStart({
             itemId: movie.id,
             title,
@@ -180,9 +231,21 @@ export function Player({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie, overlay]);
 
-  // Episodes: look up what comes next so the end of the file can chain into it.
+  // A new item (next episode, another version) may chain again later.
   useEffect(() => {
-    if (!overlay || !isEpisode || !movie.seriesId) return;
+    nextSent.current = false;
+    setPanel(false);
+  }, [movie]);
+
+  // Episodes: look up what comes next so the end of the file can chain into it.
+  // Online episodes carry their successor already (resolved by the engine side).
+  useEffect(() => {
+    if (!overlay) return;
+    if (movie.external) {
+      setNextEpisode(movie.external.next ?? null);
+      return;
+    }
+    if (!isEpisode || !movie.seriesId) return;
     let alive = true;
     api
       .getNextEpisode(movie.seriesId, movie.id)
@@ -193,34 +256,13 @@ export function Player({
     return () => {
       alive = false;
     };
-  }, [overlay, isEpisode, movie.seriesId, movie.id]);
+  }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external]);
 
-  // End of file (overlay decides): autoplay the next episode after a short countdown,
-  // otherwise leave the player.
+  // End of file without anything to chain into: leave the player. With a next episode
+  // the card (below) decides whether and when to continue.
   useEffect(() => {
-    if (!overlay || !state.eof) return;
-    if (!nextEpisode) {
-      onExit();
-      return;
-    }
-    setCountdown(AUTOPLAY_SECONDS);
-    const started = Date.now();
-    const handle = window.setInterval(() => {
-      const left = AUTOPLAY_SECONDS - Math.floor((Date.now() - started) / 1000);
-      if (left <= 0) {
-        window.clearInterval(handle);
-        if (!nextSent.current) {
-          nextSent.current = true;
-          void api.playNext(nextEpisode);
-        }
-      } else {
-        setCountdown(left);
-      }
-    }, 250);
-    return () => {
-      window.clearInterval(handle);
-      setCountdown(null);
-    };
+    if (!overlay || !state.eof || nextEpisode) return;
+    onExit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [overlay, state.eof, nextEpisode]);
 
@@ -237,7 +279,7 @@ export function Player({
 
   // Items coming from list queries lack trickplay/chapters; fetch the detail once.
   useEffect(() => {
-    if (!overlay) return;
+    if (!overlay || movie.external) return;
     if (movie.trickplay || movie.chapters.length) return;
     let alive = true;
     api
@@ -257,6 +299,7 @@ export function Player({
     const onMove = () => bump();
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (lockedRef.current) return;
       void changeVolume(stateRef.current.volume + (e.deltaY < 0 ? 5 : -5));
     };
     window.addEventListener("keydown", onKey);
@@ -305,6 +348,7 @@ export function Player({
 
   const setSpeed = (speed: number) => {
     void api.playerSetSpeed(speed);
+    if (settings.playback.rememberSpeed) void updateSettings({ playback: { lastSpeed: speed } });
   };
 
   const stepSpeed = (dir: 1 | -1) => {
@@ -316,10 +360,7 @@ export function Player({
   };
 
   const toggleRemaining = () => {
-    setRemaining((value) => {
-      writeRemainingPref(!value);
-      return !value;
-    });
+    void updateSettings({ playback: { showTimeRemaining: !remaining } });
   };
 
   const playNext = () => {
@@ -328,14 +369,80 @@ export function Player({
     void api.playNext(nextEpisode);
   };
 
+  // Skip intro / recap / credits and the next-episode card (overlay only).
+  const segments = useSegments(movie, state.duration, overlay);
+  const outro = segments.find((segment) => segment.kind === "outro") ?? null;
+  const skipPrompt = useSkipPrompt({
+    segments,
+    time: state.time,
+    duration: state.duration,
+    ready: overlay && ready,
+    settings,
+    controlsVisible: visible,
+    nextEpisode,
+    onSeekTo: seekTo,
+    onPlayNext: playNext,
+  });
+  revealRef.current = skipPrompt.reveal;
+  const nextCard = useNextEpisodeCard({
+    nextEpisode,
+    outro,
+    time: state.time,
+    duration: state.duration,
+    eof: state.eof,
+    ready: overlay && ready,
+    countdownSeconds: settings.playback.nextEpisodeCountdown,
+    onPlayNext: playNext,
+  });
+
+  const pauseInfo = usePauseInfo(state.paused, visible);
+
   const escape = () => {
-    if (menu) setMenu(null);
+    if (panel) setPanel(false);
+    else if (menu) setMenu(null);
     else if (fullscreen) void toggleFullscreen();
     else onExit();
   };
 
+  const togglePanel = () => {
+    setPanel((open) => !open);
+    setMenu(null);
+  };
+
+  const lock = () => {
+    setLocked(true);
+    setMenu(null);
+    setPanel(false);
+    setVisible(false);
+    window.clearTimeout(hideTimer.current);
+    showLockHint();
+  };
+
+  const unlock = () => {
+    setLocked(false);
+    setLockHint(false);
+    window.clearTimeout(lockHintTimer.current);
+    // Reveal the controls right away so the user sees where they are.
+    window.setTimeout(bump, 0);
+  };
+
+  const cycleAspect = () => {
+    void api.playerSetAspect(nextAspect(stateRef.current.aspect));
+  };
+
+  const playFromPanel = (target: Movie) => {
+    if (nextSent.current) return;
+    nextSent.current = true;
+    setPanel(false);
+    void api.playNext(target);
+  };
+
   const onVideoClick = () => {
     window.clearTimeout(clickTimer.current);
+    if (panel) {
+      setPanel(false);
+      return;
+    }
     if (menu) {
       setMenu(null);
       return;
@@ -349,12 +456,17 @@ export function Player({
   };
 
   hotkeyRef.current = (key) => {
+    if (lockedRef.current) {
+      showLockHint();
+      return;
+    }
     if (key === "escape") escape();
     if (key === "space") void togglePause();
   };
 
   keydownRef.current = (e) => {
     bump();
+    if (lockedRef.current) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     const current = stateRef.current;
     switch (e.key) {
@@ -408,6 +520,18 @@ export function Player({
       case "n":
       case "N":
         playNext();
+        break;
+      case "Enter":
+      case "s":
+      case "S":
+        if (skipPrompt.prompt) {
+          e.preventDefault();
+          skipPrompt.skip();
+        }
+        break;
+      case "e":
+      case "E":
+        if ((isEpisode && movie.seriesId) || movie.mediaSources.length > 1) togglePanel();
         break;
       default:
         if (/^[0-9]$/.test(e.key) && current.duration > 0) {
@@ -470,48 +594,73 @@ export function Player({
         </div>
       ) : null}
       {volHud != null ? (
-        <div className="pointer-events-none absolute top-6 right-6 z-30 rounded-full bg-black/60 px-3 py-1 text-sm tabular backdrop-blur-sm">
+        <div className="pointer-events-none absolute top-[72px] right-6 z-30 rounded-full bg-black/60 px-3 py-1 text-sm tabular backdrop-blur-sm">
           {Math.round(volHud)}%
         </div>
       ) : null}
-      {nextEpisode &&
-      ready &&
-      state.duration > 0 &&
-      (state.eof || state.duration - state.time <= NEXT_BUTTON_WINDOW) ? (
-        <button
-          type="button"
-          onClick={playNext}
-          className="enter btn-press absolute right-6 bottom-[116px] z-30 inline-flex h-11 items-center gap-2 rounded-md bg-white pr-5 pl-4 text-[14px] font-semibold text-black shadow-[0_8px_24px_rgb(0_0_0_/_0.5)] hover:bg-white/85"
-        >
-          <SkipForward size={18} fill="currentColor" />
-          {countdown != null ? t("nextEpisodeIn", { n: countdown }) : t("nextEpisode")}
-        </button>
+      {!locked && pauseInfo && !splash && !menu && !panel ? (
+        <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
-      <PlayerControls
-        movie={movie}
-        timelineMovie={timelineMovie}
-        state={state}
-        visible={visible}
-        fullscreen={fullscreen}
-        menu={menu}
-        remaining={remaining}
-        onMenu={setMenu}
-        onToggleRemaining={toggleRemaining}
-        onBack={onExit}
-        onTogglePause={() => void togglePause()}
-        onVideoClick={onVideoClick}
-        onVideoDoubleClick={onVideoDoubleClick}
-        onSeek={seekBy}
-        onSeekTo={seekTo}
-        onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
-        onVolume={(value) => void changeVolume(value)}
-        onMute={() => void api.playerSetMute(!state.mute)}
-        onTrack={(kind, id) => void api.playerSetTrack(kind, id)}
-        onSpeed={setSpeed}
-        onFullscreen={() => void toggleFullscreen()}
-        onReveal={bump}
-        onHoldUi={holdUi}
-      />
+      {locked ? null : nextEpisode && nextCard.visible ? (
+        <NextEpisodeCard
+          episode={nextEpisode}
+          countdown={nextCard.countdown}
+          onPlay={playNext}
+          onDismiss={nextCard.dismiss}
+        />
+      ) : skipPrompt.prompt ? (
+        <SkipButton
+          key={`${skipPrompt.prompt.key}:${skipPrompt.prompt.showId}`}
+          label={t(skipPrompt.prompt.labelKey)}
+          onSkip={skipPrompt.skip}
+          onDismiss={skipPrompt.dismiss}
+        />
+      ) : null}
+      {locked ? (
+        <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
+      ) : (
+        <PlayerControls
+          movie={movie}
+          timelineMovie={timelineMovie}
+          segments={segments}
+          state={state}
+          visible={visible}
+          fullscreen={fullscreen}
+          menu={menu}
+          remaining={remaining}
+          panelOpen={panel}
+          onMenu={setMenu}
+          onToggleRemaining={toggleRemaining}
+          onBack={onExit}
+          onTogglePause={() => void togglePause()}
+          onVideoClick={onVideoClick}
+          onVideoDoubleClick={onVideoDoubleClick}
+          onSeek={seekBy}
+          onSeekTo={seekTo}
+          onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
+          onVolume={(value) => void changeVolume(value)}
+          onMute={() => void api.playerSetMute(!state.mute)}
+          onTrack={(kind, id) => void api.playerSetTrack(kind, id)}
+          onSpeed={setSpeed}
+          onAspect={cycleAspect}
+          onFullscreen={() => void toggleFullscreen()}
+          onLock={lock}
+          onPanel={togglePanel}
+          onReveal={bump}
+          onHoldUi={holdUi}
+        />
+      )}
+      {panel && !locked ? (
+        <EpisodesPanel
+          key={movie.id}
+          movie={movie}
+          time={state.time}
+          duration={state.duration}
+          onPlay={playFromPanel}
+          onClose={() => setPanel(false)}
+          onHoldUi={holdUi}
+        />
+      ) : null}
     </div>
   );
 }

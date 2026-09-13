@@ -1,14 +1,16 @@
+import { Shimmer } from "./Shimmer";
+
 export function HeroSkeleton() {
   return (
-    <div className="relative min-h-[480px] h-[78vh] bg-surface">
-      <div className="absolute inset-0 animate-[pulse-soft_1.6s_ease-in-out_infinite] bg-white/5" />
-      <div className="absolute bottom-20 left-12 space-y-4">
-        <div className="h-14 w-[380px] max-w-[60vw] rounded-md bg-white/8" />
-        <div className="h-4 w-56 rounded bg-white/6" />
-        <div className="h-4 w-[420px] max-w-[50vw] rounded bg-white/6" />
+    <div className="relative h-[min(78vh,720px)] min-h-[480px] overflow-hidden rounded-b-[var(--radius-hero)] bg-surface">
+      <Shimmer className="absolute inset-0 rounded-none bg-transparent" />
+      <div className="absolute bottom-16 left-page space-y-4">
+        <Shimmer className="h-16 w-[420px] max-w-[60vw] rounded-lg" />
+        <Shimmer className="h-4 w-64 rounded" />
+        <Shimmer className="h-4 w-[460px] max-w-[50vw] rounded" />
         <div className="flex gap-3 pt-2">
-          <div className="h-11 w-32 rounded-md bg-white/10" />
-          <div className="h-11 w-36 rounded-md bg-white/6" />
+          <Shimmer className="h-12 w-36 rounded-pill" />
+          <Shimmer className="h-12 w-40 rounded-pill" />
         </div>
       </div>
     </div>
@@ -17,17 +19,60 @@ export function HeroSkeleton() {
 
 export function RowSkeleton() {
   return (
-    <div className="px-12 py-4">
-      <div className="mb-3 h-5 w-48 rounded bg-white/5" />
-      <div className="flex gap-2 overflow-hidden">
+    <div className="px-page py-3">
+      <Shimmer className="mb-4 h-5 w-48 rounded" />
+      <div className="flex gap-rail overflow-hidden">
         {Array.from({ length: 8 }).map((_, i) => (
-          <div
-            key={i}
-            className="aspect-[2/3] w-[clamp(150px,16vw,210px)] shrink-0 animate-[pulse-soft_1.6s_ease-in-out_infinite] rounded-[6px] bg-white/5"
-            style={{ animationDelay: `${i * 80}ms` }}
-          />
+          <div key={i} className="w-[var(--poster-w)] shrink-0">
+            <Shimmer className="aspect-[2/3] rounded-poster" delay={i * 80} />
+            <Shimmer className="mt-2 h-3.5 w-3/4 rounded" delay={i * 80} />
+          </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+export function DetailsSkeleton() {
+  return (
+    <div>
+      <div className="relative h-[58vh] min-h-[420px] bg-surface">
+        <Shimmer className="absolute inset-0 rounded-none bg-transparent" />
+        <div className="absolute bottom-10 left-page space-y-4">
+          <Shimmer className="h-14 w-[380px] max-w-[50vw] rounded-lg" />
+          <Shimmer className="h-4 w-56 rounded" />
+          <div className="flex gap-3 pt-2">
+            <Shimmer className="h-12 w-36 rounded-pill" />
+            <Shimmer className="h-12 w-32 rounded-pill" />
+          </div>
+        </div>
+      </div>
+      <div className="space-y-4 px-page py-8">
+        <Shimmer className="h-4 w-[70%] rounded" />
+        <Shimmer className="h-4 w-[60%] rounded" />
+        <div className="flex gap-4 pt-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Shimmer key={i} className="h-[88px] w-[88px] rounded-full" delay={i * 80} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export function EpisodeListSkeleton() {
+  return (
+    <div className="space-y-2">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className="flex gap-4 p-2">
+          <Shimmer className="aspect-video w-[200px] shrink-0 rounded-poster" delay={i * 80} />
+          <div className="flex-1 space-y-2 py-2">
+            <Shimmer className="h-4 w-1/2 rounded" />
+            <Shimmer className="h-3 w-5/6 rounded" />
+            <Shimmer className="h-3 w-2/3 rounded" />
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

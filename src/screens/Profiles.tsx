@@ -84,7 +84,7 @@ export function Profiles({
 
   return (
     <div className="grain relative flex h-full flex-col bg-base">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,rgba(229,9,20,0.12),transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
       <div className="relative z-10 flex h-[60px] items-center justify-between px-6">
         <Logo />
         <div className="flex items-center gap-2">
@@ -202,7 +202,7 @@ export function Profiles({
             <button
               type="submit"
               disabled={signing || !(selected?.name || username.trim())}
-              className="btn-press flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold hover:bg-accent-hover disabled:opacity-60"
+              className="btn-press flex h-12 w-full items-center justify-center gap-2 rounded-btn bg-accent text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
             >
               {signing ? <LoaderCircle size={16} className="animate-spin" /> : null}
               {t("signIn")}

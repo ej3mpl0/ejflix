@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 const CLIENT_NAME: &str = "ejFlix";
-const CLIENT_VERSION: &str = "0.1.13";
+const CLIENT_VERSION: &str = "0.2.0";
 const DEVICE_NAME: &str = "Windows";
 pub const IMAGE_SCHEME: &str = "jfimg";
 const IMAGE_ORIGIN: &str = "http://jfimg.localhost";
@@ -114,6 +115,28 @@ impl Library {
     }
 }
 
+/// Cast / crew entry (Jellyfin `People`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Person {
+    pub id: String,
+    pub name: String,
+    pub role: Option<String>,
+    /// "Actor", "Director", "Writer", ...
+    pub kind: String,
+    pub image_url: Option<String>,
+}
+
+/// One playable version of an item (Jellyfin `MediaSources`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaSourceInfo {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing)]
+    pub container: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Movie {
@@ -141,15 +164,34 @@ pub struct Movie {
     pub logo_url: Option<String>,
     pub playback_position_ticks: i64,
     pub played_percentage: f64,
+    /// `UserData.IsFavorite` ("My list").
+    pub favorite: bool,
+    /// `UserData.Played`.
+    pub played: bool,
+    /// `UserData.UnplayedItemCount` (series and seasons).
+    pub unplayed_count: Option<i32>,
     pub badges: Vec<String>,
     pub video_label: Option<String>,
     pub audio_label: Option<String>,
     pub subtitle_labels: Vec<String>,
     pub directors: Vec<String>,
-    pub cast: Vec<String>,
+    pub writers: Vec<String>,
+    pub studios: Vec<String>,
+    pub cast: Vec<Person>,
+    /// External ids (`ProviderIds`): "Imdb", "Tmdb", "Tvdb"...
+    pub provider_ids: BTreeMap<String, String>,
+    pub remote_trailers: Vec<String>,
+    /// Seasons: episode count; series: season count.
+    pub child_count: Option<i32>,
+    /// Series: "Continuing" | "Ended".
+    pub status: Option<String>,
+    pub tagline: Option<String>,
+    /// Series: year of `EndDate`.
+    pub end_year: Option<i32>,
     #[serde(skip_serializing)]
     pub stream_url: String,
     pub media_source_id: Option<String>,
+    pub media_sources: Vec<MediaSourceInfo>,
     /// ISO-8601 date the item was added to the library (`DateCreated`).
     pub date_created: Option<String>,
     pub trickplay: Option<TrickplayInfo>,
@@ -167,7 +209,8 @@ pub struct GenreRow {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HomeData {
-    pub featured: Option<Movie>,
+    /// Hero carousel items (newest with a backdrop; rotation offset per app launch).
+    pub featured: Vec<Movie>,
     pub resume: Vec<Movie>,
     /// Next episodes to watch (TV libraries only).
     pub next_up: Vec<Movie>,
@@ -436,23 +479,33 @@ impl JellyfinClient {
             self.genre_rows(&session, fields, main_type, &parent),
         )?;
 
-        // Hero: one of the newest movies with a backdrop, rotated per app launch so the
-        // banner is not always the same title. Stable within a session, so the background
-        // refresh after playback does not swap it.
-        let candidates: Vec<&Movie> = latest
+        // Hero carousel: the newest items with a backdrop, rotated per app launch so the
+        // first slide is not always the same title. Stable within a session, so the
+        // background refresh after playback does not reshuffle it.
+        let mut candidates: Vec<Movie> = latest
             .iter()
             .filter(|m| m.backdrop_url.is_some())
-            .take(10)
+            .take(8)
+            .cloned()
             .collect();
-        let featured = if candidates.is_empty() {
-            all.iter()
-                .find(|m| m.backdrop_url.is_some())
+        if candidates.is_empty() {
+            candidates = all
+                .iter()
+                .filter(|m| m.backdrop_url.is_some())
+                .take(8)
                 .cloned()
-                .or_else(|| latest.first().cloned())
-                .or_else(|| all.first().cloned())
-        } else {
-            Some(candidates[(launch_seed() % candidates.len() as u64) as usize].clone())
-        };
+                .collect();
+        }
+        if candidates.is_empty() {
+            if let Some(first) = latest.first().or_else(|| all.first()) {
+                candidates.push(first.clone());
+            }
+        }
+        if !candidates.is_empty() {
+            let offset = (launch_seed() % candidates.len() as u64) as usize;
+            candidates.rotate_left(offset);
+        }
+        let featured = candidates;
 
         Ok(HomeData {
             featured,
@@ -531,6 +584,152 @@ impl JellyfinClient {
             ))
             .await?;
         Ok(first.into_iter().next())
+    }
+
+    /// Items Jellyfin considers similar ("More like this").
+    pub async fn similar(&self, id: &str) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Items/{id}/Similar?UserId={}&Limit=12&Fields={fields}",
+            session.user_id
+        ))
+        .await
+    }
+
+    /// Everything the user marked as favorite ("My list"), newest first.
+    pub async fn favorites(&self) -> Result<Vec<Movie>, String> {
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Users/{}/Items?Filters=IsFavorite&Recursive=true&IncludeItemTypes=Movie,Series,Episode&SortBy=DateCreated,SortName&SortOrder=Descending&Limit=100&Fields={fields}&EnableImageTypes=Primary,Backdrop,Logo,Thumb",
+            session.user_id
+        ))
+        .await
+    }
+
+    pub async fn set_favorite(&self, item_id: &str, favorite: bool) -> Result<bool, String> {
+        self.user_flag("UserFavoriteItems", "FavoriteItems", item_id, favorite, "IsFavorite")
+            .await
+    }
+
+    /// Marks an item (or every child of a season/series) as played or unplayed.
+    pub async fn set_played(&self, item_id: &str, played: bool) -> Result<bool, String> {
+        self.user_flag("UserPlayedItems", "PlayedItems", item_id, played, "Played")
+            .await
+    }
+
+    /// POST/DELETE a per-user flag: the 10.9+ route first, the legacy one on 404.
+    /// Both answer with the updated `UserItemDataDto`; the flag is read back from it.
+    async fn user_flag(
+        &self,
+        modern: &str,
+        legacy: &str,
+        item_id: &str,
+        on: bool,
+        field: &str,
+    ) -> Result<bool, String> {
+        if !valid_item_id(item_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let method = if on {
+            reqwest::Method::POST
+        } else {
+            reqwest::Method::DELETE
+        };
+        let modern_path = format!("/{modern}/{item_id}?userId={}", session.user_id);
+        let legacy_path = format!("/Users/{}/{legacy}/{item_id}", session.user_id);
+        let mut res = self.send_empty(method.clone(), &modern_path).await?;
+        if res.status().as_u16() == 404 {
+            res = self.send_empty(method, &legacy_path).await?;
+        }
+        if !res.status().is_success() {
+            return Err(format!("Jellyfin {modern}: {}", res.status()));
+        }
+        let value: Value = res.json().await.unwrap_or(Value::Null);
+        Ok(value.get(field).and_then(|v| v.as_bool()).unwrap_or(on))
+    }
+
+    /// Series-level IMDb id (episodes carry their own ids, IntroDB is keyed by the show).
+    pub async fn series_imdb_id(&self, series_id: &str) -> Option<String> {
+        let series = self.get_item(series_id).await.ok()?;
+        series
+            .provider_ids
+            .get("Imdb")
+            .filter(|id| id.starts_with("tt"))
+            .cloned()
+    }
+
+    /// Native media segments (Jellyfin 10.10+): `(type, start_seconds, end_seconds)`.
+    /// `Ok(None)` when the server has no MediaSegments API (404 on older versions).
+    pub async fn media_segments(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<Vec<(String, f64, f64)>>, String> {
+        if !valid_item_id(item_id) {
+            return Err("Ítem no válido".into());
+        }
+        let res = self.get(&format!("/MediaSegments/{item_id}")).await?;
+        if res.status().as_u16() == 404 {
+            return Ok(None);
+        }
+        if !res.status().is_success() {
+            return Err(format!("Jellyfin MediaSegments: {}", res.status()));
+        }
+        let value: Value = res.json().await.map_err(|e| e.to_string())?;
+        let items = value
+            .get("Items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|seg| {
+                let kind = seg.get("Type")?.as_str()?.to_string();
+                let start = seg.get("StartTicks")?.as_f64()? / 10_000_000.0;
+                let end = seg.get("EndTicks")?.as_f64()? / 10_000_000.0;
+                Some((kind, start, end))
+            })
+            .collect();
+        Ok(Some(items))
+    }
+
+    /// Intro Skipper plugin API on servers without native segments.
+    /// `credits` selects the end-credits range; `None` on any failure.
+    pub async fn intro_skipper_range(&self, item_id: &str, credits: bool) -> Option<(f64, f64)> {
+        if !valid_item_id(item_id) {
+            return None;
+        }
+        let mode = if credits { "?mode=Credits" } else { "" };
+        let res = self
+            .get(&format!("/Episode/{item_id}/IntroTimestamps/v1{mode}"))
+            .await
+            .ok()?;
+        if !res.status().is_success() {
+            return None;
+        }
+        let value: Value = res.json().await.ok()?;
+        if value.get("Valid").and_then(|v| v.as_bool()) != Some(true) {
+            return None;
+        }
+        let start = value.get("IntroStart")?.as_f64()?;
+        let end = value.get("IntroEnd")?.as_f64()?;
+        Some((start, end))
+    }
+
+    /// Direct-play URL for a specific version of an item.
+    pub fn stream_url_for(session: &Session, item_id: &str, source: Option<&MediaSourceInfo>) -> String {
+        let container = source.map(|s| s.container.as_str()).unwrap_or("mkv");
+        let mut url = format!(
+            "{}/Videos/{item_id}/stream.{container}?static=true",
+            session.server_url
+        );
+        if let Some(source) = source {
+            url.push_str(&format!("&MediaSourceId={}", source.id));
+        }
+        url
     }
 
     pub async fn get_item(&self, id: &str) -> Result<Movie, String> {
@@ -777,15 +976,29 @@ impl JellyfinClient {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        let media_source_id = sources
+        let media_sources: Vec<MediaSourceInfo> = sources
+            .iter()
+            .filter_map(|s| {
+                let id = s.get("Id")?.as_str()?.to_string();
+                let container = s
+                    .get("Container")
+                    .and_then(|v| v.as_str())
+                    .filter(|c| !c.is_empty())
+                    .unwrap_or("mkv")
+                    .to_string();
+                let name = s
+                    .get("Name")
+                    .and_then(|v| v.as_str())
+                    .filter(|n| !n.is_empty())
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| container.to_uppercase());
+                Some(MediaSourceInfo { id, name, container })
+            })
+            .collect();
+        let media_source_id = media_sources.first().map(|s| s.id.clone());
+        let container = media_sources
             .first()
-            .and_then(|s| s.get("Id"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let container = sources
-            .first()
-            .and_then(|s| s.get("Container"))
-            .and_then(|v| v.as_str())
+            .map(|s| s.container.as_str())
             .unwrap_or("mkv");
 
         let people = value
@@ -793,16 +1006,58 @@ impl JellyfinClient {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        let directors = people
-            .iter()
-            .filter(|p| p.get("Type").and_then(|v| v.as_str()) == Some("Director"))
-            .filter_map(|p| p.get("Name")?.as_str().map(|s| s.to_string()))
-            .collect();
-        let cast = people
+        let names_of = |kind: &str| -> Vec<String> {
+            people
+                .iter()
+                .filter(|p| p.get("Type").and_then(|v| v.as_str()) == Some(kind))
+                .filter_map(|p| p.get("Name")?.as_str().map(|s| s.to_string()))
+                .collect()
+        };
+        let directors = names_of("Director");
+        let writers = names_of("Writer");
+        let cast: Vec<Person> = people
             .iter()
             .filter(|p| p.get("Type").and_then(|v| v.as_str()) == Some("Actor"))
-            .filter_map(|p| p.get("Name")?.as_str().map(|s| s.to_string()))
-            .take(8)
+            .filter_map(|p| {
+                let person_id = p.get("Id")?.as_str()?.to_string();
+                let name = p.get("Name")?.as_str()?.to_string();
+                let tag = p.get("PrimaryImageTag").and_then(|v| v.as_str()).filter(|t| !t.is_empty());
+                // Only when the person has a picture: avoids 404 spam through the image proxy.
+                let image_url = tag.and_then(|tag| image_url(session, &person_id, "Primary", 240, Some(tag)));
+                Some(Person {
+                    id: person_id,
+                    name,
+                    role: p
+                        .get("Role")
+                        .and_then(|v| v.as_str())
+                        .filter(|r| !r.is_empty())
+                        .map(|r| r.to_string()),
+                    kind: "Actor".to_string(),
+                    image_url,
+                })
+            })
+            .take(20)
+            .collect();
+        let studios = value
+            .get("Studios")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|s| s.get("Name")?.as_str().map(|n| n.to_string()))
+            .collect();
+        let provider_ids: BTreeMap<String, String> = value
+            .get("ProviderIds")
+            .and_then(|v| v.as_object())
+            .into_iter()
+            .flatten()
+            .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+            .collect();
+        let remote_trailers = value
+            .get("RemoteTrailers")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|t| t.get("Url")?.as_str().map(|u| u.to_string()))
             .collect();
 
         let (badges, video_label, audio_label, subtitle_labels) = quality_from_streams(&streams);
@@ -912,12 +1167,40 @@ impl JellyfinClient {
                 .and_then(|u| u.get("PlayedPercentage"))
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0),
+            favorite: user_data
+                .and_then(|u| u.get("IsFavorite"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            played: user_data
+                .and_then(|u| u.get("Played"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            unplayed_count: user_data
+                .and_then(|u| u.get("UnplayedItemCount"))
+                .and_then(|v| v.as_i64())
+                .map(|n| n as i32),
             badges,
             video_label,
             audio_label,
             subtitle_labels,
             directors,
+            writers,
+            studios,
             cast,
+            provider_ids,
+            remote_trailers,
+            child_count: number("ChildCount"),
+            status: text("Status"),
+            tagline: value
+                .get("Taglines")
+                .and_then(|v| v.as_array())
+                .and_then(|list| list.first())
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string()),
+            end_year: text("EndDate")
+                .and_then(|date| date.get(0..4).and_then(|y| y.parse::<i32>().ok())),
+            media_sources,
             id,
         })
     }
@@ -928,6 +1211,23 @@ impl JellyfinClient {
         self.client_for(&url)
             .get(&url)
             .headers(auth_headers(&session.device_id, Some(&session.token)))
+            .send()
+            .await
+            .map_err(|e| format!("Error de red: {e}"))
+    }
+
+    /// Body-less request (POST/DELETE toggles). Returns the raw response.
+    async fn send_empty(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+    ) -> Result<reqwest::Response, String> {
+        let session = self.require_session().await?;
+        let url = format!("{}{path}", session.server_url);
+        self.client_for(&url)
+            .request(method, &url)
+            .headers(auth_headers(&session.device_id, Some(&session.token)))
+            .header(reqwest::header::CONTENT_LENGTH, "0")
             .send()
             .await
             .map_err(|e| format!("Error de red: {e}"))
@@ -965,7 +1265,7 @@ fn launch_seed() -> u64 {
 }
 
 fn item_fields() -> &'static str {
-    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,DateCreated"
+    "Overview,Genres,MediaStreams,MediaSources,ProductionYear,RunTimeTicks,OfficialRating,CommunityRating,CriticRating,People,ImageTags,BackdropImageTags,DateCreated,Studios,ProviderIds,RemoteTrailers,ChildCount,Status,Taglines,EndDate"
 }
 
 /// Fields for a single item: adds trickplay tiles and chapters (used by the player timeline).
@@ -1345,7 +1645,7 @@ fn push_unique(list: &mut Vec<String>, value: &str) {
     }
 }
 
-fn urlencoding_lite(s: &str) -> String {
+pub(crate) fn urlencoding_lite(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {

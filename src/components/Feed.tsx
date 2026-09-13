@@ -1,18 +1,28 @@
-import { HeroBanner } from "./HeroBanner";
+import { HeroCarousel } from "./HeroCarousel";
 import { PosterRow } from "./PosterRow";
+import { AddonRows } from "./AddonRows";
 import type { HomeData, Movie } from "../lib/types";
 import { useI18n } from "../lib/locale-context";
 
-/** Netflix-style feed: hero plus rows. Used for the main Home and for each library tab. */
+/** Home feed: hero carousel plus rows. Used for the main Home and for each library tab. */
 export function Feed({
   data,
   tv,
+  myList = [],
+  onlineResume = [],
+  showAddons = false,
   onOpen,
   onPlay,
 }: {
   data: HomeData;
   /** TV library: rows talk about series and episodes. */
   tv: boolean;
+  /** Favorites row (main Home only). */
+  myList?: Movie[];
+  /** Online titles with a remembered position (main Home only). */
+  onlineResume?: Movie[];
+  /** Rails from the Stremio addon catalogs (main Home only). */
+  showAddons?: boolean;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
@@ -22,12 +32,12 @@ export function Feed({
 
   return (
     <>
-      {data.featured ? (
-        <HeroBanner movie={data.featured} onPlay={onPlay} onMore={onOpen} />
+      {data.featured.length ? (
+        <HeroCarousel items={data.featured} onPlay={onPlay} onDetails={onOpen} />
       ) : (
         <div className="h-24" />
       )}
-      <div className="enter enter-d4 relative z-10 -mt-6 pb-16">
+      <div className="enter enter-d4 relative z-10 space-y-section pt-6 pb-16">
         {data.resume.length ? (
           <PosterRow
             title={t("continueWatching")}
@@ -37,12 +47,23 @@ export function Feed({
             onPlay={onPlay}
           />
         ) : null}
-        {nextUp.length ? (
-          <PosterRow title={t("nextUp")} items={nextUp} variant="continue" onOpen={onOpen} onPlay={onPlay} />
+        {onlineResume.length ? (
+          <PosterRow
+            title={t("continueWatchingOnline")}
+            items={onlineResume}
+            variant="continue"
+            onOpen={onOpen}
+            onPlay={onPlay}
+          />
         ) : null}
+        {nextUp.length ? (
+          <PosterRow title={t("nextUp")} items={nextUp} variant="nextUp" onOpen={onOpen} onPlay={onPlay} />
+        ) : null}
+        {myList.length ? <PosterRow title={t("myList")} items={myList} onOpen={onOpen} onPlay={onPlay} /> : null}
         {data.latest.length ? (
           <PosterRow title={t("recentlyAdded")} items={data.latest} onOpen={onOpen} onPlay={onPlay} />
         ) : null}
+        {showAddons ? <AddonRows onOpen={onOpen} onPlay={onPlay} /> : null}
         {data.genres.map((row) => (
           <PosterRow key={row.id} title={row.name} items={row.items} onOpen={onOpen} onPlay={onPlay} />
         ))}

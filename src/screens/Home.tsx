@@ -1,22 +1,35 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Nav, libraryView, type NavView } from "../components/Nav";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
 import { PosterCard } from "../components/PosterCard";
-import { MovieModal } from "../components/MovieModal";
-import { SeriesModal } from "../components/SeriesModal";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
+import { Settings } from "./Settings";
+import { SearchPage } from "./SearchPage";
+import { DetailsPage } from "./DetailsPage";
+import { ExternalDetailsPage } from "./ExternalDetailsPage";
+import { StreamPicker } from "../components/StreamPicker";
+import { resumeToMovie } from "../lib/addons";
 import { api } from "../lib/api";
-import type { HomeData, Library, Movie, Session } from "../lib/types";
+import type { HomeData, Library, Movie, SavedServer, Session } from "../lib/types";
 import { sessionAvatar } from "../lib/format";
-import { loadAddedLibraries, saveAddedLibraries } from "../lib/libraries";
 import { useI18n } from "../lib/locale-context";
+import { useSettings } from "../lib/settings-context";
+import { useUserData } from "../lib/userdata-context";
+import { useBackNavigation } from "../lib/use-back";
+import { routeFor, type DetailsRoute } from "../lib/view-stack";
+
+const PAGE_EXIT_MS = 250;
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+const HISTORY_MAX = 10;
+
 export function Home({
   session,
+  server,
+  version,
   hidden = false,
   refreshToken = 0,
   onPlay,
@@ -25,6 +38,8 @@ export function Home({
   onLogout,
 }: {
   session: Session;
+  server: SavedServer | null;
+  version: string | null;
   /** Keep the screen mounted but out of the way while the player runs. */
   hidden?: boolean;
   /** Bump to refresh the data in the background (e.g. after playback). */
@@ -35,19 +50,29 @@ export function Home({
   onLogout: () => void;
 }) {
   const { t } = useI18n();
+  const { version: userDataVersion, clearOverrides } = useUserData();
   const [data, setData] = useState<HomeData | null>(null);
+  const [favorites, setFavorites] = useState<Movie[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<NavView>("home");
-  const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Movie[]>([]);
-  const [selected, setSelected] = useState<Movie | null>(null);
+  const history = useRef<NavView[]>([]);
+  /** Details pages stacked over the current tab (a "More like this" click adds one). */
+  const [stack, setStack] = useState<DetailsRoute[]>([]);
+  /** Online title waiting for a stream to be chosen. */
+  const [picker, setPicker] = useState<Movie | null>(null);
+  const [onlineResume, setOnlineResume] = useState<Movie[]>([]);
   const [scrolled, setScrolled] = useState(false);
+  const scrolledRef = useRef(false);
+  const scroller = useRef<HTMLDivElement>(null);
   const firstRefresh = useRef(true);
 
-  // Libraries: everything on the server, and the ids the user pinned to the header.
+  // Libraries: everything on the server, and the ids the user pinned to the header
+  // (persisted with the profile settings).
+  const { settings, update: updateSettings } = useSettings();
   const [libraries, setLibraries] = useState<Library[]>([]);
-  const [added, setAdded] = useState<string[]>(() => loadAddedLibraries(session.userId));
+  const added = settings.library.pinned;
+  const setAdded = (next: string[]) => void updateSettings({ library: { pinned: next } });
   const [libData, setLibData] = useState<Record<string, HomeData>>({});
   const [libLoading, setLibLoading] = useState<string | null>(null);
   const [libError, setLibError] = useState("");
@@ -67,6 +92,19 @@ export function Home({
     }
   };
 
+  const loadFavorites = useCallback(async () => {
+    try {
+      setFavorites(await api.getFavorites());
+    } catch {
+      /* the list is optional; keep what we have */
+    }
+    try {
+      setOnlineResume((await api.addonProgressList()).map(resumeToMovie));
+    } catch {
+      /* no addons or nothing remembered */
+    }
+  }, []);
+
   const loadLibrary = async (library: Library, silent = false) => {
     if (!silent) {
       setLibLoading(library.id);
@@ -84,15 +122,12 @@ export function Home({
 
   useEffect(() => {
     void load();
+    void loadFavorites();
     api
       .getLibraries()
       .then(setLibraries)
       .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    saveAddedLibraries(session.userId, added);
-  }, [session.userId, added]);
+  }, [loadFavorites]);
 
   const pinned = useMemo(
     () => added.map((id) => libraries.find((lib) => lib.id === id)).filter((lib): lib is Library => Boolean(lib)),
@@ -109,39 +144,86 @@ export function Home({
   }, [activeLibrary?.id]);
 
   // Background refresh (keeps current data, scroll and view): continue-watching
-  // progress changes after every playback.
+  // progress changes after every playback, favorites/watched after every toggle.
+  const refreshAll = useCallback(async () => {
+    const jobs: Promise<unknown>[] = [load(true), loadFavorites()];
+    for (const id of Object.keys(libData)) {
+      const library = libraries.find((lib) => lib.id === id);
+      if (library) jobs.push(loadLibrary(library, true));
+    }
+    await Promise.allSettled(jobs);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [libData, libraries, loadFavorites]);
+
   useEffect(() => {
     if (firstRefresh.current) {
       firstRefresh.current = false;
       return;
     }
-    void load(true);
-    for (const id of Object.keys(libData)) {
-      const library = libraries.find((lib) => lib.id === id);
-      if (library) void loadLibrary(library, true);
-    }
+    void refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshToken]);
 
   useEffect(() => {
-    if (query.trim().length < 2) {
-      setResults([]);
-      if (view === "search") setView("home");
-      return;
-    }
-    setView("search");
+    if (userDataVersion === 0) return;
     const handle = window.setTimeout(() => {
-      api.searchItems(query).then(setResults).catch((err) => {
-        onToast(errorText(err));
-      });
-    }, 250);
+      void refreshAll().then(clearOverrides);
+    }, 300);
     return () => window.clearTimeout(handle);
-  }, [query, onToast]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userDataVersion]);
 
   const movies = useMemo(() => data?.all ?? [], [data]);
 
+  const openView = (next: NavView) => {
+    setStack([]);
+    if (next === view) return;
+    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    setView(next);
+    scroller.current?.scrollTo({ top: 0 });
+  };
+
+  const back = () => {
+    const previous = history.current.pop() ?? "home";
+    setView(previous);
+  };
+
+  const openDetails = (movie: Movie) => {
+    const route = routeFor(movie);
+    setStack((current) => {
+      const topRoute = current[current.length - 1];
+      // Re-opening the page that is already on top just keeps it.
+      if (topRoute && topRoute.id === route.id && !topRoute.leaving) return current;
+      return [...current, route];
+    });
+  };
+
+  const popDetails = () => {
+    setStack((current) => {
+      if (!current.length) return current;
+      const top = current[current.length - 1];
+      if (top.leaving) return current;
+      return [...current.slice(0, -1), { ...top, leaving: true }];
+    });
+    window.setTimeout(() => {
+      setStack((current) => current.filter((route) => !route.leaving));
+    }, PAGE_EXIT_MS);
+  };
+
+  const hasStack = stack.length > 0;
+  useBackNavigation(hasStack || picker || view === "home" ? null : back);
+
   const play = (movie: Movie) => {
-    setSelected(null);
+    if (movie.external) {
+      if (movie.external.stream) {
+        onPlay(movie);
+      } else if (movie.kind === "Series") {
+        openDetails(movie);
+      } else {
+        setPicker(movie);
+      }
+      return;
+    }
     if (movie.kind === "Series") {
       // Play on a series: resume the next episode Jellyfin suggests, else the first one.
       api
@@ -157,13 +239,12 @@ export function Home({
   };
 
   const addLibrary = (library: Library) => {
-    setAdded((list) => (list.includes(library.id) ? list : [...list, library.id]));
-    setQuery("");
-    setView(libraryView(library.id));
+    if (!added.includes(library.id)) setAdded([...added, library.id]);
+    openView(libraryView(library.id));
   };
 
   const removeLibrary = (id: string) => {
-    setAdded((list) => list.filter((item) => item !== id));
+    setAdded(added.filter((item) => item !== id));
     setLibData((map) => {
       const { [id]: _dropped, ...rest } = map;
       return rest;
@@ -171,95 +252,111 @@ export function Home({
     if (view === libraryView(id)) setView("home");
   };
 
-  const seriesId =
-    selected?.kind === "Series" ? selected.id : selected?.kind === "Episode" ? selected.seriesId : null;
+  const retry = (
+    <div className="grid h-full place-items-center px-6 text-center">
+      <div>
+        <p className="mb-4 text-lg">{t("cannotConnect")}</p>
+        <p className="mb-6 text-sm text-muted">{error || libError}</p>
+        <button
+          type="button"
+          onClick={() => (activeLibrary ? void loadLibrary(activeLibrary) : void load())}
+          className="btn-press h-11 rounded-btn bg-accent px-6 text-sm font-semibold text-on-accent hover:bg-accent-hover"
+        >
+          {t("retry")}
+        </button>
+      </div>
+    </div>
+  );
+
+  const grid = (title: string, items: Movie[], empty?: { text: string; hint: string }) => (
+    <div className="page-enter px-page pt-24 pb-16">
+      <h2 className="mb-6 text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
+      {items.length ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
+          {items.map((movie, i) => (
+            <PosterCard key={movie.id} movie={movie} onOpen={openDetails} onPlay={play} delay={i * 20} />
+          ))}
+        </div>
+      ) : empty ? (
+        <div className="rounded-card bg-surface px-8 py-12 text-center">
+          <p className="text-[16px] font-medium">{empty.text}</p>
+          <p className="mt-1 text-[13px] text-dim">{empty.hint}</p>
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
     <div className={`h-full bg-base text-text ${hidden ? "invisible" : ""}`} aria-hidden={hidden}>
-      <Nav
+      <GlassHeader
         userName={session.userName}
         avatarUrl={sessionAvatar(session)}
         view={view}
-        onView={(next) => {
-          setQuery("");
-          setView(next);
-        }}
+        onView={openView}
         libraries={pinned}
         available={libraries}
         onAddLibrary={addLibrary}
         onRemoveLibrary={removeLibrary}
-        query={query}
-        onQuery={setQuery}
         scrolled={scrolled}
+        hidden={hasStack}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
       />
       <div
+        ref={scroller}
         className="h-full overflow-y-auto"
-        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 24)}
+        inert={hasStack}
+        onScroll={(e) => {
+          const y = e.currentTarget.scrollTop;
+          e.currentTarget.style.setProperty("--scroll-y", String(y));
+          const next = y > 24;
+          if (next !== scrolledRef.current) {
+            scrolledRef.current = next;
+            setScrolled(next);
+          }
+        }}
       >
-        {error ? (
-          <div className="grid h-full place-items-center px-6 text-center">
-            <div>
-              <p className="mb-4 text-lg">{t("cannotConnect")}</p>
-              <p className="mb-6 text-sm text-muted">{error}</p>
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="btn-press h-11 rounded-md bg-accent px-6 text-sm font-semibold hover:bg-accent-hover"
-              >
-                {t("retry")}
-              </button>
-            </div>
-          </div>
+        {view === "settings" ? (
+          <Settings
+            session={session}
+            server={server}
+            version={version}
+            onSwitchProfile={onSwitchProfile}
+            onLogout={onLogout}
+            onBack={back}
+            onToast={onToast}
+          />
+        ) : view === "search" ? (
+          <SearchPage
+            userId={session.userId}
+            genres={data?.genres ?? []}
+            onOpen={openDetails}
+            onPlay={play}
+            onError={onToast}
+          />
+        ) : error ? (
+          retry
         ) : loading ? (
           <>
             <HeroSkeleton />
             <RowSkeleton />
             <RowSkeleton />
           </>
-        ) : view === "search" ? (
-          <div className="px-12 pt-24 pb-16">
-            <h2 className="mb-6 text-[20px] font-semibold">{t("resultsFor", { query })}</h2>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
-              {results.map((movie, i) => (
-                <PosterCard key={movie.id} movie={movie} onOpen={setSelected} onPlay={play} delay={i * 30} />
-              ))}
-            </div>
-            {!results.length ? <p className="text-muted">{t("noResults")}</p> : null}
-          </div>
+        ) : view === "mylist" ? (
+          grid(t("myList"), favorites ?? [], { text: t("emptyList"), hint: t("emptyListHint") })
         ) : view === "movies" ? (
-          <div className="px-12 pt-24 pb-16">
-            <h2 className="mb-6 text-[20px] font-semibold">{t("allMovies")}</h2>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
-              {movies.map((movie, i) => (
-                <PosterCard key={movie.id} movie={movie} onOpen={setSelected} onPlay={play} delay={i * 20} />
-              ))}
-            </div>
-          </div>
+          grid(t("allMovies"), movies)
         ) : activeLibrary ? (
           activeData ? (
             <Feed
               key={activeLibrary.id}
               data={activeData}
               tv={activeLibrary.collectionType === "tvshows"}
-              onOpen={setSelected}
+              onOpen={openDetails}
               onPlay={play}
             />
           ) : libError && libLoading !== activeLibrary.id ? (
-            <div className="grid h-full place-items-center px-6 text-center">
-              <div>
-                <p className="mb-4 text-lg">{t("cannotConnect")}</p>
-                <p className="mb-6 text-sm text-muted">{libError}</p>
-                <button
-                  type="button"
-                  onClick={() => void loadLibrary(activeLibrary)}
-                  className="btn-press h-11 rounded-md bg-accent px-6 text-sm font-semibold hover:bg-accent-hover"
-                >
-                  {t("retry")}
-                </button>
-              </div>
-            </div>
+            retry
           ) : (
             <>
               <HeroSkeleton />
@@ -268,18 +365,48 @@ export function Home({
             </>
           )
         ) : data ? (
-          <Feed data={data} tv={false} onOpen={setSelected} onPlay={play} />
+          <Feed
+            data={data}
+            tv={false}
+            myList={favorites ?? []}
+            onlineResume={onlineResume}
+            showAddons
+            onOpen={openDetails}
+            onPlay={play}
+          />
         ) : null}
       </div>
-      {selected && seriesId ? (
-        <SeriesModal
-          seriesId={seriesId}
-          initialSeasonId={selected.kind === "Episode" ? selected.seasonId : null}
-          onClose={() => setSelected(null)}
-          onPlay={play}
+      {stack.map((route, i) =>
+        route.seed?.external ? (
+          <ExternalDetailsPage
+            key={route.key}
+            route={route}
+            top={i === stack.length - 1 && !picker}
+            onBack={popDetails}
+            onPlay={play}
+          />
+        ) : (
+          <DetailsPage
+            key={route.key}
+            route={route}
+            top={i === stack.length - 1 && !picker}
+            onBack={popDetails}
+            onPush={openDetails}
+            onPlay={play}
+            onOnline={(movie) => setPicker(movie)}
+          />
+        ),
+      )}
+      {picker ? (
+        <StreamPicker
+          movie={picker}
+          onClose={() => setPicker(null)}
+          onPlay={(movie, stream) => {
+            setPicker(null);
+            if (!movie.external) return;
+            onPlay({ ...movie, external: { ...movie.external, stream } });
+          }}
         />
-      ) : selected ? (
-        <MovieModal movie={selected} onClose={() => setSelected(null)} onPlay={play} />
       ) : null}
     </div>
   );

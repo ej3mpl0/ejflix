@@ -14,7 +14,7 @@ export function Avatar({
 
   return (
     <span
-      className="img-outline relative grid place-items-center overflow-hidden rounded-full bg-accent text-[12px] font-semibold"
+      className="img-outline relative grid place-items-center overflow-hidden rounded-full bg-accent text-[12px] font-semibold text-on-accent"
       style={{ width: size, height: size }}
     >
       {src && !failed ? (

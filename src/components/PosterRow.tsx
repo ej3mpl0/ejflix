@@ -15,7 +15,7 @@ export function PosterRow({
 }: {
   title: string;
   items: Movie[];
-  variant?: "poster" | "continue";
+  variant?: "poster" | "continue" | "nextUp";
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
@@ -48,54 +48,54 @@ export function PosterRow({
     el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: "smooth" });
   };
 
+  const arrow = (dir: -1 | 1, disabled: boolean) => (
+    <button
+      type="button"
+      aria-label={dir < 0 ? t("previous") : t("next")}
+      onClick={() => scrollBy(dir)}
+      tabIndex={disabled ? -1 : 0}
+      className={cn(
+        "btn-press absolute top-[calc(50%-24px)] z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/60 text-white shadow-[0_8px_24px_rgb(0_0_0_/_0.5)] backdrop-blur-md transition-opacity duration-200 hover:bg-black/80",
+        dir < 0 ? "left-2" : "right-2",
+        hover && !disabled ? "opacity-100" : "pointer-events-none opacity-0",
+      )}
+    >
+      {dir < 0 ? <ChevronLeft size={22} /> : <ChevronRight size={22} />}
+    </button>
+  );
+
   return (
     <section
-      className="relative px-12 py-4"
+      className="relative py-3"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <h2 className="mb-3 text-[20px] font-semibold text-text">{title}</h2>
+      <h2 className="mb-3 px-page text-[18px] font-semibold text-text">{title}</h2>
       <div className="relative">
         <div
           ref={scroller}
           onScroll={measure}
           className={cn(
-            "no-scrollbar flex snap-x snap-mandatory gap-2 overflow-x-auto pt-1 pb-2",
+            "no-scrollbar flex snap-x snap-mandatory gap-rail overflow-x-auto px-page scroll-px-page pt-2 pb-3",
             !edges.end && "row-mask",
           )}
         >
           {items.map((movie, i) =>
-            variant === "continue" ? (
-              <ContinueCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} />
+            variant === "continue" || variant === "nextUp" ? (
+              <ContinueCard
+                key={movie.id}
+                movie={movie}
+                onOpen={onOpen}
+                onPlay={onPlay}
+                variant={variant === "nextUp" ? "nextUp" : "resume"}
+              />
             ) : (
               <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} delay={i * 30} />
             ),
           )}
         </div>
-        <button
-          type="button"
-          aria-label={t("previous")}
-          onClick={() => scrollBy(-1)}
-          tabIndex={edges.start ? -1 : 0}
-          className={cn(
-            "absolute top-0 left-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-r from-base/90 to-transparent text-white/80 transition-opacity duration-200 hover:text-white",
-            hover && !edges.start ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-        >
-          <ChevronLeft size={32} />
-        </button>
-        <button
-          type="button"
-          aria-label={t("next")}
-          onClick={() => scrollBy(1)}
-          tabIndex={edges.end ? -1 : 0}
-          className={cn(
-            "absolute top-0 right-0 z-10 grid h-full w-10 place-items-center bg-gradient-to-l from-base/90 to-transparent text-white/80 transition-opacity duration-200 hover:text-white",
-            hover && !edges.end ? "opacity-100" : "pointer-events-none opacity-0",
-          )}
-        >
-          <ChevronRight size={32} />
-        </button>
+        {arrow(-1, edges.start)}
+        {arrow(1, edges.end)}
       </div>
     </section>
   );

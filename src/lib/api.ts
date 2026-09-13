@@ -1,14 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AddonInfo,
+  AddonMeta,
+  AddonMetaFull,
+  AddonStream,
   HomeData,
   Library,
+  MediaSegment,
   Movie,
   PlayerState,
   PublicInfo,
   PublicUser,
+  ResumeEntry,
   SavedServer,
   Session,
+  Settings,
+  SettingsPatch,
 } from "./types";
 
 export const api = {
@@ -30,6 +38,41 @@ export const api = {
     invoke<Movie | null>("get_next_episode", { seriesId, episodeId }),
   getSeriesNextUp: (seriesId: string) => invoke<Movie | null>("get_series_next_up", { seriesId }),
   searchItems: (query: string) => invoke<Movie[]>("search_items", { query }),
+  getSimilar: (id: string) => invoke<Movie[]>("get_similar", { id }),
+  getFavorites: () => invoke<Movie[]>("get_favorites"),
+  /** Resolves to the flag confirmed by the server. */
+  setFavorite: (itemId: string, favorite: boolean) =>
+    invoke<boolean>("set_favorite", { itemId, favorite }),
+  setPlayed: (itemId: string, played: boolean) => invoke<boolean>("set_played", { itemId, played }),
+  /** Intro / recap / credits ranges; empty when unknown, never throws on the Rust side. */
+  getMediaSegments: (itemId: string) => invoke<MediaSegment[]>("get_media_segments", { itemId }),
+  getMediaSegmentsExternal: (imdb: string, season: number, episode: number) =>
+    invoke<MediaSegment[]>("get_media_segments_external", { imdb, season, episode }),
+  // Stremio addons
+  addonsList: () => invoke<AddonInfo[]>("addons_list"),
+  addonAdd: (url: string) => invoke<AddonInfo>("addon_add", { url }),
+  addonRemove: (url: string) => invoke<void>("addon_remove", { url }),
+  addonCatalog: (args: {
+    addonUrl: string;
+    type: string;
+    id: string;
+    search?: string;
+    genre?: string;
+    skip?: number;
+  }) => invoke<AddonMeta[]>("addon_catalog", { args }),
+  addonMeta: (type: string, id: string) => invoke<AddonMetaFull>("addon_meta", { kind: type, id }),
+  addonStreams: (type: string, id: string) =>
+    invoke<AddonStream[]>("addon_streams", { kind: type, id }),
+  addonProgressList: () => invoke<ResumeEntry[]>("addon_progress_list"),
+  addonProgressRemove: (key: string) => invoke<void>("addon_progress_remove", { key }),
+  /** Plays an online stream; `entry` identifies the title for the local progress. */
+  playerStartUrl: (args: {
+    url: string;
+    title: string;
+    headers: [string, string][];
+    startSeconds?: number;
+    entry: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs">;
+  }) => invoke<PlayerState>("player_start_url", { args }),
   playerStart: (args: {
     itemId: string;
     title: string;
@@ -42,6 +85,7 @@ export const api = {
   playerSeek: (seconds: number, relative: boolean, fast = false) =>
     invoke<void>("player_seek", { seconds, relative, fast }),
   playerSetSpeed: (speed: number) => invoke<number>("player_set_speed", { speed }),
+  playerSetAspect: (mode: string) => invoke<void>("player_set_aspect", { mode }),
   playerSetVolume: (volume: number) => invoke<number>("player_set_volume", { volume }),
   playerSetMute: (mute: boolean) => invoke<void>("player_set_mute", { mute }),
   playerSetTrack: (kind: string, id: number) =>
@@ -69,4 +113,10 @@ export const api = {
   dismissUpdate: () => invoke<void>("dismiss_update"),
   localeGet: () => invoke<string>("locale_get"),
   localeSet: (locale: string) => invoke<void>("locale_set", { locale }),
+  /** Settings of the active profile (Rust resolves the user; defaults before login). */
+  settingsGet: () => invoke<Settings>("settings_get"),
+  /** Deep-merges a partial patch; every window receives `settings://changed`. */
+  settingsSet: (patch: SettingsPatch) => invoke<Settings>("settings_set", { patch }),
+  onSettingsChanged: (handler: (settings: Settings) => void): Promise<UnlistenFn> =>
+    listen<Settings>("settings://changed", (event) => handler(event.payload)),
 };

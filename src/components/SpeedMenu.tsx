@@ -9,7 +9,7 @@ export function formatSpeed(speed: number): string {
 export function SpeedMenu({ speed, onSelect }: { speed: number; onSelect: (speed: number) => void }) {
   const { t } = useI18n();
   return (
-    <div className="absolute right-0 bottom-12 w-[440px] rounded-xl bg-panel/95 px-6 pt-4 pb-6 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
+    <div className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 w-[440px] -translate-x-1/2 rounded-2xl bg-panel/95 px-6 pt-4 pb-6 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
       <p className="mb-6 text-[16px] font-semibold text-white">{t("playbackSpeed")}</p>
       <div className="relative mx-3">
         <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-white/25" />
@@ -27,7 +27,7 @@ export function SpeedMenu({ speed, onSelect }: { speed: number; onSelect: (speed
               >
                 <span
                   className={`block rounded-full transition-[width,height,background-color] duration-150 ${
-                    active ? "h-4 w-4 bg-white" : "h-2.5 w-2.5 bg-white/60 group-hover/speed:bg-white"
+                    active ? "h-4 w-4 bg-accent" : "h-2.5 w-2.5 bg-white/60 group-hover/speed:bg-white"
                   }`}
                 />
                 <span

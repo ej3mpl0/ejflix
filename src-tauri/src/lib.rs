@@ -1,6 +1,9 @@
+mod addons;
 mod jellyfin;
 mod player;
 mod protect;
+mod segments;
+mod settings;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,8 +12,11 @@ use jellyfin::{
     HomeData, JellyfinClient, Library, Movie, PublicInfo, PublicUser, SavedServer, Session,
     SessionView,
 };
-use player::{PlaybackContext, Player, PlayerState};
+use addons::{AddonClient, AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ResumeEntry};
+use player::{PlaybackContext, PlaybackPrefs, PlaybackSource, Player, PlayerState};
+use segments::{MediaSegment, SegmentsCache};
 use serde::Deserialize;
+use settings::Settings;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_store::StoreExt;
@@ -19,6 +25,10 @@ use uuid::Uuid;
 pub struct AppState {
     pub jellyfin: JellyfinClient,
     pub player: Arc<Player>,
+    /// Serializes the read-modify-write of `settings_set` (both windows may write).
+    pub settings_lock: tokio::sync::Mutex<()>,
+    pub segments: Arc<SegmentsCache>,
+    pub addons: Arc<AddonClient>,
 }
 
 impl AppState {
@@ -26,8 +36,55 @@ impl AppState {
         Self {
             jellyfin: JellyfinClient::new(),
             player: Arc::new(Player::new()),
+            settings_lock: tokio::sync::Mutex::new(()),
+            segments: Arc::new(SegmentsCache::new()),
+            addons: Arc::new(AddonClient::new()),
         }
     }
+}
+
+/// Intro / recap / credits ranges for an item. Always succeeds (empty when unknown).
+#[tauri::command]
+async fn get_media_segments(
+    state: State<'_, AppState>,
+    item_id: String,
+) -> Result<Vec<MediaSegment>, String> {
+    if !jellyfin::valid_item_id(&item_id) {
+        return Ok(vec![]);
+    }
+    Ok(state.segments.resolve(&state.jellyfin, &item_id).await)
+}
+
+/// User whose settings apply right now: the active session, else the last user that
+/// saved settings (so Login/Profiles keep the last theme).
+async fn settings_user(app: &tauri::AppHandle, state: &AppState) -> Option<String> {
+    if let Some(session) = state.jellyfin.session().await {
+        return Some(session.user_id);
+    }
+    settings::last_user(app)
+}
+
+#[tauri::command]
+async fn settings_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Settings, String> {
+    match settings_user(&app, &state).await {
+        Some(uid) => settings::load(&app, &uid),
+        None => Ok(Settings::default()),
+    }
+}
+
+#[tauri::command]
+async fn settings_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    patch: serde_json::Value,
+) -> Result<Settings, String> {
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())?;
+    let _guard = state.settings_lock.lock().await;
+    let saved = settings::merge_and_save(&app, &uid, patch)?;
+    let _ = app.emit("settings://changed", &saved);
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -104,6 +161,7 @@ async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> R
 async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let _ = state.player.stop().await;
     state.jellyfin.set_session(None).await;
+    state.segments.clear().await;
     clear_session(&app)
 }
 
@@ -111,6 +169,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(),
 async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
     let _ = state.player.stop().await;
     state.jellyfin.set_session(None).await;
+    state.segments.clear().await;
     clear_session(&app)?;
     clear_profiles(&app)?;
     clear_server(&app)
@@ -191,6 +250,30 @@ async fn search_items(state: State<'_, AppState>, query: String) -> Result<Vec<M
     state.jellyfin.search(&query).await
 }
 
+#[tauri::command]
+async fn get_similar(state: State<'_, AppState>, id: String) -> Result<Vec<Movie>, String> {
+    state.jellyfin.similar(&id).await
+}
+
+#[tauri::command]
+async fn get_favorites(state: State<'_, AppState>) -> Result<Vec<Movie>, String> {
+    state.jellyfin.favorites().await
+}
+
+#[tauri::command]
+async fn set_favorite(
+    state: State<'_, AppState>,
+    item_id: String,
+    favorite: bool,
+) -> Result<bool, String> {
+    state.jellyfin.set_favorite(&item_id, favorite).await
+}
+
+#[tauri::command]
+async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<bool, String> {
+    state.jellyfin.set_played(&item_id, played).await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PlayArgs {
@@ -211,27 +294,36 @@ async fn player_start(
     }
     let movie = state.jellyfin.get_item(&args.item_id).await?;
     let session = state.jellyfin.require_session().await?;
+    let playback = settings::load(&app, &session.user_id)
+        .unwrap_or_default()
+        .playback;
+    let prefs = PlaybackPrefs {
+        audio_language: playback.audio_language,
+        subtitle_language: playback.subtitle_language,
+        remember_speed: playback.remember_speed,
+        last_speed: playback.last_speed,
+    };
     let start = args.start_seconds.unwrap_or(0.0);
     let play_session_id = Uuid::new_v4().to_string();
-    let media_source_id = args
+    // Version picker: play the requested media source when the item has it, else the first.
+    let source = args
         .media_source_id
-        .clone()
-        .or(movie.media_source_id.clone());
+        .as_deref()
+        .and_then(|id| movie.media_sources.iter().find(|s| s.id == id))
+        .or_else(|| movie.media_sources.first());
+    let media_source_id = source.map(|s| s.id.clone()).or(movie.media_source_id.clone());
+    let stream_url = JellyfinClient::stream_url_for(&session, &movie.id, source);
     let ctx = PlaybackContext {
-        item_id: movie.id.clone(),
-        media_source_id: media_source_id.clone(),
-        play_session_id: play_session_id.clone(),
+        source: PlaybackSource::Jellyfin {
+            item_id: movie.id.clone(),
+            media_source_id: media_source_id.clone(),
+            play_session_id: play_session_id.clone(),
+        },
     };
+    let headers = vec![("X-Emby-Token".to_string(), session.token.clone())];
     state
         .player
-        .start(
-            &app,
-            &movie.stream_url,
-            &session.token,
-            &args.title,
-            start,
-            ctx,
-        )
+        .start(&app, &stream_url, &headers, &args.title, start, ctx, prefs)
         .await?;
     let _ = state
         .jellyfin
@@ -254,16 +346,38 @@ async fn player_stop(
     state: State<'_, AppState>,
     switching: Option<bool>,
 ) -> Result<(), String> {
-    if let Some((ctx, ticks)) = state.player.stop().await? {
-        let _ = state
-            .jellyfin
-            .report_stop(
-                &ctx.item_id,
-                ctx.media_source_id.as_deref(),
-                &ctx.play_session_id,
-                ticks,
-            )
-            .await;
+    if let Some((ctx, time, duration)) = state.player.stop().await? {
+        match ctx.source {
+            PlaybackSource::Jellyfin {
+                item_id,
+                media_source_id,
+                play_session_id,
+            } => {
+                let _ = state
+                    .jellyfin
+                    .report_stop(
+                        &item_id,
+                        media_source_id.as_deref(),
+                        &play_session_id,
+                        seconds_to_ticks(time),
+                    )
+                    .await;
+            }
+            PlaybackSource::Addon { entry } => {
+                if let Some(uid) = settings_user(&app, &state).await {
+                    let _ = addons::upsert_progress(
+                        &app,
+                        &uid,
+                        addons::ResumeEntry {
+                            position_seconds: time,
+                            duration_seconds: duration,
+                            updated_ms: addons::now_ms(),
+                            ..entry
+                        },
+                    );
+                }
+            }
+        }
     }
     if switching.unwrap_or(false) {
         return Ok(());
@@ -271,7 +385,7 @@ async fn player_stop(
     hide_player_overlay(&app);
     if let Some(window) = app.get_webview_window("main") {
         set_main_fullscreen(&window, false)?;
-        let _ = window.set_background_color(Some(tauri::window::Color(11, 11, 14, 255)));
+        let _ = window.set_background_color(Some(tauri::window::Color(13, 13, 13, 255)));
     }
     let _ = app.emit("player://close", ());
     Ok(())
@@ -306,6 +420,14 @@ async fn player_set_fullscreen(app: tauri::AppHandle, fullscreen: bool) -> Resul
 #[tauri::command]
 async fn player_set_speed(state: State<'_, AppState>, speed: f64) -> Result<f64, String> {
     state.player.set_speed(speed).await
+}
+
+#[tauri::command]
+async fn player_set_aspect(state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    if !player::ASPECT_MODES.contains(&mode.as_str()) {
+        return Err("Relación de aspecto no válida".into());
+    }
+    state.player.set_aspect(&mode).await
 }
 
 #[tauri::command]
@@ -654,6 +776,9 @@ async fn proxy_jellyfin_image(
             .status(200)
             .header("content-type", content_type)
             .header("cache-control", cache)
+            // Lets the app draw backdrops on a canvas (dominant colour) without tainting it;
+            // the protocol is only reachable from the app's own webviews.
+            .header("access-control-allow-origin", "*")
             .body(bytes)
             .unwrap_or_else(|_| deny(500)),
         Err(_) => deny(404),
@@ -672,20 +797,265 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
             let ctx = state.context.read().await.clone();
             let Some(ctx) = ctx else { continue };
             let snap = state.snapshot().await;
-            let _ = jellyfin
-                .report_progress(
-                    &ctx.item_id,
-                    ctx.media_source_id.as_deref(),
-                    &ctx.play_session_id,
-                    seconds_to_ticks(snap.time),
-                    snap.paused,
-                    snap.volume as i32,
-                    snap.mute,
-                )
-                .await;
+            match ctx.source {
+                PlaybackSource::Jellyfin {
+                    item_id,
+                    media_source_id,
+                    play_session_id,
+                } => {
+                    let _ = jellyfin
+                        .report_progress(
+                            &item_id,
+                            media_source_id.as_deref(),
+                            &play_session_id,
+                            seconds_to_ticks(snap.time),
+                            snap.paused,
+                            snap.volume as i32,
+                            snap.mute,
+                        )
+                        .await;
+                }
+                PlaybackSource::Addon { entry } => {
+                    if let Some(uid) = jellyfin.session().await.map(|s| s.user_id) {
+                        let _ = addons::upsert_progress(
+                            &app,
+                            &uid,
+                            addons::ResumeEntry {
+                                position_seconds: snap.time,
+                                duration_seconds: snap.duration,
+                                updated_ms: addons::now_ms(),
+                                ..entry
+                            },
+                        );
+                    }
+                }
+            }
             let _ = app.emit("player://state", snap);
         }
     });
+}
+
+// ---- Stremio addons ----
+
+/// Manifest URLs to consult, in priority order (built-in Cinemeta last).
+async fn addon_urls(app: &tauri::AppHandle, state: &AppState) -> Vec<(String, bool)> {
+    let prefs = match settings_user(app, state).await {
+        Some(uid) => settings::load(app, &uid).unwrap_or_default().addons,
+        None => settings::Settings::default().addons,
+    };
+    let mut list: Vec<(String, bool)> = prefs.urls.into_iter().map(|u| (u, false)).collect();
+    if prefs.cinemeta && !list.iter().any(|(u, _)| u == addons::CINEMETA_URL) {
+        list.push((addons::CINEMETA_URL.to_string(), true));
+    }
+    list
+}
+
+async fn loaded_addons(app: &tauri::AppHandle, state: &AppState) -> Vec<AddonInfo> {
+    let mut out = Vec::new();
+    for (url, builtin) in addon_urls(app, state).await {
+        if let Ok(info) = state.addons.manifest(&url, builtin).await {
+            out.push(info);
+        }
+    }
+    out
+}
+
+#[tauri::command]
+async fn addons_list(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<AddonInfo>, String> {
+    Ok(loaded_addons(&app, &state).await)
+}
+
+/// Validates the manifest, stores the URL with the profile settings and returns the addon.
+#[tauri::command]
+async fn addon_add(app: tauri::AppHandle, state: State<'_, AppState>, url: String) -> Result<AddonInfo, String> {
+    let url = addons::normalize_manifest_url(&url)?;
+    let info = state.addons.manifest(&url, false).await?;
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())?;
+    let _guard = state.settings_lock.lock().await;
+    let mut urls = settings::load(&app, &uid)?.addons.urls;
+    if !urls.contains(&url) {
+        urls.push(url);
+    }
+    let saved = settings::merge_and_save(&app, &uid, serde_json::json!({ "addons": { "urls": urls } }))?;
+    let _ = app.emit("settings://changed", &saved);
+    Ok(info)
+}
+
+#[tauri::command]
+async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: String) -> Result<(), String> {
+    let url = addons::normalize_manifest_url(&url)?;
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay sesión activa".to_string())?;
+    let _guard = state.settings_lock.lock().await;
+    let current = settings::load(&app, &uid)?.addons;
+    let urls: Vec<String> = current.urls.into_iter().filter(|u| u != &url).collect();
+    let cinemeta = if url == addons::CINEMETA_URL { false } else { current.cinemeta };
+    let saved = settings::merge_and_save(
+        &app,
+        &uid,
+        serde_json::json!({ "addons": { "urls": urls, "cinemeta": cinemeta } }),
+    )?;
+    state.addons.forget(&url);
+    let _ = app.emit("settings://changed", &saved);
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CatalogArgs {
+    addon_url: String,
+    #[serde(rename = "type")]
+    kind: String,
+    id: String,
+    #[serde(default)]
+    search: Option<String>,
+    #[serde(default)]
+    genre: Option<String>,
+    #[serde(default)]
+    skip: Option<u32>,
+}
+
+#[tauri::command]
+async fn addon_catalog(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: CatalogArgs,
+) -> Result<Vec<AddonMeta>, String> {
+    let url = addons::normalize_manifest_url(&args.addon_url)?;
+    let known = addon_urls(&app, &state).await;
+    let builtin = known.iter().find(|(u, _)| u == &url).map(|(_, b)| *b);
+    let Some(builtin) = builtin else {
+        return Err("Addon no configurado".into());
+    };
+    let info = state.addons.manifest(&url, builtin).await?;
+    let mut extra = Vec::new();
+    if let Some(search) = args.search.filter(|s| !s.trim().is_empty()) {
+        extra.push(("search".to_string(), search.trim().to_string()));
+    }
+    if let Some(genre) = args.genre.filter(|s| !s.is_empty()) {
+        extra.push(("genre".to_string(), genre));
+    }
+    if let Some(skip) = args.skip.filter(|s| *s > 0) {
+        extra.push(("skip".to_string(), skip.to_string()));
+    }
+    state.addons.catalog(&info, &args.kind, &args.id, &extra).await
+}
+
+#[tauri::command]
+async fn addon_meta(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+) -> Result<AddonMetaFull, String> {
+    let addons = loaded_addons(&app, &state).await;
+    state.addons.meta(&addons, &kind, &id).await
+}
+
+#[tauri::command]
+async fn addon_streams(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+    id: String,
+) -> Result<Vec<AddonStream>, String> {
+    let addons = loaded_addons(&app, &state).await;
+    Ok(state.addons.streams(&addons, &kind, &id).await)
+}
+
+#[tauri::command]
+async fn addon_progress_list(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ResumeEntry>, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => addons::load_progress(&app, &uid),
+        None => vec![],
+    })
+}
+
+#[tauri::command]
+async fn addon_progress_remove(app: tauri::AppHandle, state: State<'_, AppState>, key: String) -> Result<(), String> {
+    match settings_user(&app, &state).await {
+        Some(uid) => addons::remove_progress(&app, &uid, &key),
+        None => Ok(()),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExternalPlayArgs {
+    url: String,
+    title: String,
+    #[serde(default)]
+    headers: Vec<(String, String)>,
+    #[serde(default)]
+    start_seconds: Option<f64>,
+    /// Identity of what is playing, kept with the local progress.
+    entry: ResumeEntry,
+}
+
+/// Plays an online stream (Stremio addon). The Jellyfin token is never sent along.
+#[tauri::command]
+async fn player_start_url(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: ExternalPlayArgs,
+) -> Result<PlayerState, String> {
+    if !(args.url.starts_with("http://") || args.url.starts_with("https://")) {
+        return Err("Solo se pueden reproducir enlaces http o https".into());
+    }
+    if args.entry.key.is_empty() {
+        return Err("Falta el identificador del título".into());
+    }
+    let playback = match settings_user(&app, &state).await {
+        Some(uid) => settings::load(&app, &uid).unwrap_or_default().playback,
+        None => settings::Settings::default().playback,
+    };
+    let prefs = PlaybackPrefs {
+        audio_language: playback.audio_language,
+        subtitle_language: playback.subtitle_language,
+        remember_speed: playback.remember_speed,
+        last_speed: playback.last_speed,
+    };
+    let headers: Vec<(String, String)> = args
+        .headers
+        .into_iter()
+        .filter(|(k, _)| !k.eq_ignore_ascii_case("x-emby-token"))
+        .collect();
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Addon {
+            entry: args.entry.clone(),
+        },
+    };
+    state
+        .player
+        .start(
+            &app,
+            &args.url,
+            &headers,
+            &args.title,
+            args.start_seconds.unwrap_or(0.0),
+            ctx,
+            prefs,
+        )
+        .await?;
+    show_player_overlay(&app);
+    Ok(state.player.snapshot().await)
+}
+
+/// Segments for an online episode, by the show's IMDb id (IntroDB only).
+#[tauri::command]
+async fn get_media_segments_external(
+    state: State<'_, AppState>,
+    imdb: String,
+    season: i32,
+    episode: i32,
+) -> Result<Vec<MediaSegment>, String> {
+    if !imdb.starts_with("tt") || imdb.len() > 16 || !imdb[2..].bytes().all(|b| b.is_ascii_digit()) {
+        return Ok(vec![]);
+    }
+    Ok(state.segments.resolve_external(&imdb, season, episode).await)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -715,6 +1085,21 @@ pub fn run() {
             get_next_episode,
             get_series_next_up,
             search_items,
+            get_similar,
+            get_favorites,
+            set_favorite,
+            set_played,
+            get_media_segments,
+            get_media_segments_external,
+            addons_list,
+            addon_add,
+            addon_remove,
+            addon_catalog,
+            addon_meta,
+            addon_streams,
+            addon_progress_list,
+            addon_progress_remove,
+            player_start_url,
             player_start,
             player_stop,
             player_toggle_pause,
@@ -725,10 +1110,13 @@ pub fn run() {
             player_state,
             player_set_fullscreen,
             player_set_speed,
+            player_set_aspect,
             update_info,
             dismiss_update,
             locale_get,
             locale_set,
+            settings_get,
+            settings_set,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

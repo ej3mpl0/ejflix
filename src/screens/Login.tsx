@@ -38,8 +38,8 @@ export function Login({
 
   return (
     <div className="grain relative flex h-full flex-col bg-base">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_circle_at_50%_20%,rgba(229,9,20,0.15),transparent_60%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_40%,#0B0B0E_100%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_circle_at_50%_20%,color-mix(in_oklab,var(--color-accent)_15%,transparent),transparent_60%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_40%,var(--color-base)_100%)]" />
       <div className="relative z-10 flex h-[60px] items-center justify-end gap-2 pr-0">
         <LanguageSelect />
         <WindowControls />
@@ -68,7 +68,7 @@ export function Login({
           <button
             type="submit"
             disabled={loading || !url.trim()}
-            className="btn-press flex h-12 w-full items-center justify-center gap-2 rounded-lg bg-accent text-sm font-semibold hover:bg-accent-hover disabled:opacity-60"
+            className="btn-press flex h-12 w-full items-center justify-center gap-2 rounded-btn bg-accent text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
           >
             {loading ? <LoaderCircle size={16} className="animate-spin" /> : null}
             {t("connect")}
