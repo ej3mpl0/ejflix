@@ -40,8 +40,14 @@ New-Item -ItemType Directory -Force "$root\release" | Out-Null
 Copy-Item $built "$root\release\$asset" -Force
 Write-Host "Installer: release\$asset" -ForegroundColor Green
 
-$existing = gh release view $tag 2>$null
-if ($LASTEXITCODE -eq 0) {
+# `gh release view` prints "release not found" on stderr; with $ErrorActionPreference = Stop
+# that line would abort the script when run from another PowerShell, so read it as plain text.
+$previousPreference = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$null = & gh release view $tag 2>&1
+$exists = ($LASTEXITCODE -eq 0)
+$ErrorActionPreference = $previousPreference
+if ($exists) {
     Write-Host "Release $tag already exists; uploading the installer (overwrite)." -ForegroundColor Yellow
     gh release upload $tag "$root\release\$asset" --clobber
     if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
