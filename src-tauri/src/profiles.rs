@@ -84,14 +84,14 @@ pub fn session_key(id: &str) -> String {
 }
 
 fn has_linked_session(app: &tauri::AppHandle, id: &str) -> bool {
-    app.store("session.json")
+    app.store(crate::store_path())
         .ok()
         .map(|store| store.get(session_key(id)).is_some())
         .unwrap_or(false)
 }
 
 pub fn list(app: &tauri::AppHandle) -> Result<Vec<LocalProfile>, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     match store.get(PROFILES_KEY) {
         Some(value) => Ok(serde_json::from_value::<Vec<LocalProfile>>(value).unwrap_or_default()),
         None => Ok(vec![]),
@@ -99,7 +99,7 @@ pub fn list(app: &tauri::AppHandle) -> Result<Vec<LocalProfile>, String> {
 }
 
 fn save_list(app: &tauri::AppHandle, list: &[LocalProfile]) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(
         PROFILES_KEY,
         serde_json::to_value(list).map_err(|e| e.to_string())?,
@@ -160,7 +160,7 @@ pub fn delete(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let mut profiles = list(app)?;
     profiles.retain(|p| p.id != id);
     save_list(app, &profiles)?;
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete(session_key(id));
     store.delete(format!("settings.{id}"));
     store.delete(format!("addonProgress.{id}"));
@@ -172,7 +172,7 @@ pub fn delete(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
 
 /// Profile restored on the next launch.
 pub fn active_id(app: &tauri::AppHandle) -> Option<String> {
-    let store = app.store("session.json").ok()?;
+    let store = app.store(crate::store_path()).ok()?;
     store
         .get(ACTIVE_KEY)
         .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -180,7 +180,7 @@ pub fn active_id(app: &tauri::AppHandle) -> Option<String> {
 }
 
 pub fn set_active(app: &tauri::AppHandle, id: Option<&str>) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     match id {
         Some(id) => store.set(ACTIVE_KEY, Value::String(id.to_string())),
         None => {

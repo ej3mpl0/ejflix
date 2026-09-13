@@ -26,6 +26,15 @@ use tauri::{Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_store::StoreExt;
 use uuid::Uuid;
 
+/// Store file with everything the app remembers. `EJFLIX_DATA_DIR` points it at another
+/// folder (a throwaway profile for tests and screenshots) instead of the app data dir.
+pub fn store_path() -> std::path::PathBuf {
+    match std::env::var("EJFLIX_DATA_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => std::path::PathBuf::from(dir).join("session.json"),
+        _ => std::path::PathBuf::from("session.json"),
+    }
+}
+
 pub struct AppState {
     pub jellyfin: JellyfinClient,
     pub player: Arc<Player>,
@@ -873,7 +882,7 @@ fn dismiss_update(app: tauri::AppHandle) -> Result<(), String> {
 }
 
 fn load_update_prefs(app: &tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let auto = store
         .get("updateAuto")
         .and_then(|v| v.as_bool())
@@ -904,7 +913,7 @@ fn update_prefs(app: tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
 
 #[tauri::command]
 fn update_set_auto(app: tauri::AppHandle, auto: bool) -> Result<update::UpdatePrefs, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("updateAuto", serde_json::Value::Bool(auto));
     store.save().map_err(|e| e.to_string())?;
     load_update_prefs(&app)
@@ -913,7 +922,7 @@ fn update_set_auto(app: tauri::AppHandle, auto: bool) -> Result<update::UpdatePr
 /// Remember (or forget, with an empty string) a version the user does not want to see again.
 #[tauri::command]
 fn update_skip(app: tauri::AppHandle, version: String) -> Result<update::UpdatePrefs, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let clean = update::parse_version(&version)
         .map(|(a, b, c)| format!("{a}.{b}.{c}"))
         .unwrap_or_default();
@@ -983,7 +992,7 @@ fn save_session(app: &tauri::AppHandle, session: &Session) -> Result<(), String>
 }
 
 fn save_session_at(app: &tauri::AppHandle, key: &str, session: &Session) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let raw = serde_json::to_vec(session).map_err(|e| e.to_string())?;
     let sealed = protect::protect(&raw)?;
     store.set(
@@ -1002,7 +1011,7 @@ fn load_session(app: &tauri::AppHandle) -> Result<Option<Session>, String> {
 }
 
 fn load_session_at(app: &tauri::AppHandle, key: &str) -> Result<Option<Session>, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let Some(value) = store.get(key) else {
         return Ok(None);
     };
@@ -1026,14 +1035,14 @@ fn clear_session(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn clear_session_at(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete(key);
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn save_server(app: &tauri::AppHandle, url: &str, name: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("serverUrl", serde_json::Value::String(url.to_string()));
     if !name.is_empty() {
         store.set("serverName", serde_json::Value::String(name.to_string()));
@@ -1043,7 +1052,7 @@ fn save_server(app: &tauri::AppHandle, url: &str, name: &str) -> Result<(), Stri
 }
 
 fn load_server(app: &tauri::AppHandle) -> Result<Option<SavedServer>, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let Some(url) = store.get("serverUrl").and_then(|v| v.as_str().map(|s| s.to_string())) else {
         return Ok(None);
     };
@@ -1062,7 +1071,7 @@ fn load_server(app: &tauri::AppHandle) -> Result<Option<SavedServer>, String> {
 }
 
 fn clear_server(app: &tauri::AppHandle) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("serverUrl");
     store.delete("serverName");
     store.save().map_err(|e| e.to_string())?;
@@ -1070,7 +1079,7 @@ fn clear_server(app: &tauri::AppHandle) -> Result<(), String> {
 }
 
 fn load_profiles(app: &tauri::AppHandle) -> Result<Vec<PublicUser>, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     match store.get("profiles") {
         Some(value) => serde_json::from_value(value).map_err(|e| e.to_string()),
         None => Ok(vec![]),
@@ -1084,7 +1093,7 @@ fn upsert_profile(app: &tauri::AppHandle, profile: PublicUser) -> Result<(), Str
     } else {
         profiles.push(profile);
     }
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(
         "profiles",
         serde_json::to_value(&profiles).map_err(|e| e.to_string())?,
@@ -1094,7 +1103,7 @@ fn upsert_profile(app: &tauri::AppHandle, profile: PublicUser) -> Result<(), Str
 }
 
 fn clear_profiles(app: &tauri::AppHandle) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("profiles");
     store.save().map_err(|e| e.to_string())?;
     Ok(())
@@ -1127,7 +1136,7 @@ fn existing_device_id(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn load_device_id(app: &tauri::AppHandle) -> Option<String> {
-    let store = app.store("session.json").ok()?;
+    let store = app.store(crate::store_path()).ok()?;
     store
         .get("deviceId")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -1135,21 +1144,21 @@ fn load_device_id(app: &tauri::AppHandle) -> Option<String> {
 }
 
 fn save_device_id(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("deviceId", serde_json::Value::String(id.to_string()));
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn load_last_seen_version(app: &tauri::AppHandle) -> Result<Option<String>, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     Ok(store
         .get("lastSeenVersion")
         .and_then(|v| v.as_str().map(|s| s.to_string())))
 }
 
 fn load_locale(app: &tauri::AppHandle) -> Result<String, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     Ok(store
         .get("locale")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -1158,14 +1167,14 @@ fn load_locale(app: &tauri::AppHandle) -> Result<String, String> {
 }
 
 fn save_locale(app: &tauri::AppHandle, locale: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("locale", serde_json::Value::String(locale.to_string()));
     store.save().map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn save_last_seen_version(app: &tauri::AppHandle, version: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("lastSeenVersion", serde_json::Value::String(version.to_string()));
     store.save().map_err(|e| e.to_string())?;
     Ok(())

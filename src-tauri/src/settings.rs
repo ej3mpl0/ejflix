@@ -222,7 +222,7 @@ fn key(user_id: &str) -> String {
 const LAST_USER_KEY: &str = "settingsLastUser";
 
 pub fn load(app: &tauri::AppHandle, user_id: &str) -> Result<Settings, String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let Some(value) = store.get(key(user_id)) else {
         return Ok(Settings::default());
     };
@@ -242,7 +242,7 @@ pub fn merge_and_save(
     if patch.to_string().len() > 32 * 1024 {
         return Err("Ajustes demasiado grandes".into());
     }
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let mut current = store.get(key(user_id)).unwrap_or_else(|| json!({}));
     if !current.is_object() {
         current = json!({});
@@ -262,7 +262,7 @@ pub fn merge_and_save(
 /// User whose settings were saved most recently (used before a session exists, so the
 /// login and profile screens keep the last theme instead of flashing the default).
 pub fn last_user(app: &tauri::AppHandle) -> Option<String> {
-    let store = app.store("session.json").ok()?;
+    let store = app.store(crate::store_path()).ok()?;
     store
         .get(LAST_USER_KEY)
         .and_then(|v| v.as_str().map(|s| s.to_string()))

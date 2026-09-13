@@ -589,7 +589,7 @@ fn progress_key(user_id: &str) -> String {
 }
 
 pub fn load_progress(app: &tauri::AppHandle, user_id: &str) -> Vec<ResumeEntry> {
-    let Ok(store) = app.store("session.json") else {
+    let Ok(store) = app.store(crate::store_path()) else {
         return vec![];
     };
     store
@@ -599,7 +599,7 @@ pub fn load_progress(app: &tauri::AppHandle, user_id: &str) -> Vec<ResumeEntry> 
 }
 
 pub fn upsert_progress(app: &tauri::AppHandle, user_id: &str, entry: ResumeEntry) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let mut list = load_progress(app, user_id);
     list.retain(|e| e.key != entry.key);
     let finished =
@@ -616,7 +616,7 @@ pub fn upsert_progress(app: &tauri::AppHandle, user_id: &str, entry: ResumeEntry
 }
 
 pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Result<(), String> {
-    let store = app.store("session.json").map_err(|e| e.to_string())?;
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let mut list = load_progress(app, user_id);
     list.retain(|e| e.key != key);
     store.set(

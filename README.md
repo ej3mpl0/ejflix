@@ -8,23 +8,17 @@ The interface is available in **Spanish** and **English** (ES / EN control on th
 
 ## Screenshots
 
-| Connect | Profiles |
+| Home | Details |
 | --- | --- |
-| ![Login](docs/screenshots/login.png) | ![Profiles](docs/screenshots/profiles.png) |
+| ![Home](docs/screenshots/home.png) | ![Details](docs/screenshots/details.png) |
 
-| Home | Player |
+| Player with "Skip intro" | Online sources |
 | --- | --- |
-| ![Home](docs/screenshots/home.png) | ![Player](docs/screenshots/player.png) |
+| ![Player](docs/screenshots/player.jpg) | ![Online sources](docs/screenshots/sources.png) |
 
-<!-- Pending captures for 0.3 (drop the files in docs/screenshots/ and uncomment):
-| Welcome | Discover |
+| Addon rows | Continue watching |
 | --- | --- |
-| ![Welcome](docs/screenshots/welcome.png) | ![Discover](docs/screenshots/discover.png) |
-
-| Details | Settings |
-| --- | --- |
-| ![Details](docs/screenshots/details.png) | ![Settings](docs/screenshots/settings.png) |
--->
+| ![Addon rows](docs/screenshots/addons.png) | ![Continue watching](docs/screenshots/continue.png) |
 
 ## Features
 
@@ -117,6 +111,8 @@ npm run tauri dev
 ```
 
 If the repo lives on a network drive, set `CARGO_TARGET_DIR` to a local folder before compiling.
+
+Set `EJFLIX_DATA_DIR` to a folder to run the app with a separate, throwaway data store (profiles, session, settings) instead of the one in `%APPDATA%\com.ejflix.desktop`; handy for testing the first-launch flow or taking screenshots without touching your own data.
 
 ## Build the installer
 
