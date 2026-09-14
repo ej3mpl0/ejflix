@@ -1,28 +1,57 @@
 import { useEffect, useState } from "react";
-import { Globe, Link2Off, Play, X } from "lucide-react";
+import { Download, Globe, Link2, Link2Off, Play, X } from "lucide-react";
 import type { AddonStream, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, episodeCode } from "../lib/format";
 import { formatSize } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
 import { useBackNavigation } from "../lib/use-back";
+import { useDownloads } from "../lib/downloads-context";
+import { KebabMenu, type MenuAction } from "./KebabMenu";
 import { Shimmer } from "./Shimmer";
+
+/** Clipboard, with the old command as a fallback when WebView2 refuses the async API. */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.setAttribute("readonly", "");
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      const ok = document.execCommand("copy");
+      area.remove();
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
 
 /**
  * Sheet listing the online sources (Stremio addon streams) of a title.
- * Picking one plays it; sources mpv cannot open (raw torrents, external links) are
- * listed but disabled.
+ * Picking one plays it; the three-dot menu saves it to the Downloads folder or copies
+ * its link. Sources mpv cannot open (raw torrents, external links) are listed but
+ * cannot be played.
  */
 export function StreamPicker({
   movie,
   onClose,
   onPlay,
+  onToast,
 }: {
   movie: Movie;
   onClose: () => void;
   onPlay: (movie: Movie, stream: AddonStream) => void;
+  onToast: (message: string) => void;
 }) {
   const { t } = useI18n();
+  const downloads = useDownloads();
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
   const [error, setError] = useState("");
   const ext = movie.external;
@@ -48,15 +77,50 @@ export function StreamPicker({
 
   if (!ext) return null;
 
-  const heading = movie.kind === "Episode" ? (movie.seriesName ?? movie.name) : movie.name;
-  const sub =
-    movie.kind === "Episode" ? [episodeCode(movie, t("episodeCode")), movie.name].filter(Boolean).join(" · ") : null;
+  const isEpisode = movie.kind === "Episode";
+  const heading = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
+  const sub = isEpisode ? [episodeCode(movie, t("episodeCode")), movie.name].filter(Boolean).join(" · ") : null;
+  /** Name the download is listed under when the addon does not give a file name. */
+  const downloadTitle = isEpisode
+    ? [movie.seriesName, episodeCode(movie, "S{s}E{e}"), movie.name].filter(Boolean).join(" - ")
+    : [movie.name, movie.year ? `(${movie.year})` : null].filter(Boolean).join(" ");
+
   const groups = new Map<string, AddonStream[]>();
   for (const stream of streams ?? []) {
     const list = groups.get(stream.addonName) ?? [];
     list.push(stream);
     groups.set(stream.addonName, list);
   }
+
+  const copy = async (link: string) => {
+    onToast((await copyText(link)) ? t("linkCopied") : t("copyFailed"));
+  };
+
+  const actionsFor = (stream: AddonStream): MenuAction[] => {
+    const actions: MenuAction[] = [];
+    if (stream.url) {
+      actions.push({
+        id: "download",
+        label: t("download"),
+        icon: <Download size={15} />,
+        hint: formatSize(stream.videoSize) || undefined,
+        onSelect: () =>
+          void downloads.start({
+            url: stream.url ?? "",
+            headers: stream.headers,
+            title: downloadTitle,
+            fileName: stream.filename ?? "",
+            source: stream.addonName,
+            size: stream.videoSize,
+          }),
+      });
+    }
+    const link = stream.url ?? stream.externalUrl;
+    if (link) {
+      actions.push({ id: "copy", label: t("copyLink"), icon: <Link2 size={15} />, onSelect: () => void copy(link) });
+    }
+    return actions;
+  };
 
   return (
     <div className="fixed inset-0 z-[60] grid place-items-center bg-black/70 p-6" onClick={onClose}>
@@ -107,33 +171,41 @@ export function StreamPicker({
               <div className="space-y-1">
                 {list.map((stream, i) => {
                   const size = formatSize(stream.videoSize);
+                  const actions = actionsFor(stream);
                   return (
-                    <button
+                    <div
                       key={`${stream.addonUrl}:${i}`}
-                      type="button"
-                      disabled={!stream.playable}
-                      onClick={() => stream.playable && onPlay(movie, stream)}
                       className={cn(
-                        "group/st flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors duration-150",
+                        "group/st flex items-center rounded-xl pr-1.5 transition-colors duration-150",
                         stream.playable ? "hover:bg-white/6" : "opacity-50",
                       )}
                     >
-                      <span
-                        className={cn(
-                          "grid h-9 w-9 shrink-0 place-items-center rounded-full",
-                          stream.playable ? "bg-white/10 text-white group-hover/st:bg-accent group-hover/st:text-on-accent" : "bg-white/5 text-dim",
-                        )}
+                      <button
+                        type="button"
+                        disabled={!stream.playable}
+                        onClick={() => stream.playable && onPlay(movie, stream)}
+                        className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left"
                       >
-                        {stream.playable ? <Play size={15} fill="currentColor" className="translate-x-px" /> : <Link2Off size={15} />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-medium text-text">{stream.name}</span>
-                        <span className="line-clamp-2 text-[12px] leading-[1.4] whitespace-pre-line text-muted">
-                          {stream.playable ? stream.title || stream.filename || "" : t("streamUnsupported")}
+                        <span
+                          className={cn(
+                            "grid h-9 w-9 shrink-0 place-items-center rounded-full",
+                            stream.playable
+                              ? "bg-white/10 text-white group-hover/st:bg-accent group-hover/st:text-on-accent"
+                              : "bg-white/5 text-dim",
+                          )}
+                        >
+                          {stream.playable ? <Play size={15} fill="currentColor" className="translate-x-px" /> : <Link2Off size={15} />}
                         </span>
-                      </span>
-                      {size ? <span className="shrink-0 text-[12px] text-dim tabular">{size}</span> : null}
-                    </button>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-medium text-text">{stream.name}</span>
+                          <span className="line-clamp-2 text-[12px] leading-[1.4] whitespace-pre-line text-muted">
+                            {stream.playable ? stream.title || stream.filename || "" : t("streamUnsupported")}
+                          </span>
+                        </span>
+                        {size ? <span className="shrink-0 pl-2 text-[12px] text-dim tabular">{size}</span> : null}
+                      </button>
+                      {actions.length ? <KebabMenu actions={actions} label={t("moreOptions")} className="ml-1" /> : null}
+                    </div>
                   );
                 })}
               </div>

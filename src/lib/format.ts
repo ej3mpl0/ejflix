@@ -48,6 +48,16 @@ export function episodeCode(
     .join(String(movie.episodeNumber ?? 1));
 }
 
+/** "1.2 GB" / "340 MB" / "12 KB" for download sizes. */
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 MB";
+  const gb = bytes / 1024 ** 3;
+  if (gb >= 1) return `${gb.toFixed(1)} GB`;
+  const mb = bytes / 1024 ** 2;
+  if (mb >= 1) return `${Math.round(mb)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
 export function cn(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(" ");
 }

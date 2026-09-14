@@ -438,6 +438,38 @@ export type UpdateProgress = { received: number; total: number };
 
 export type DiscordStatus = { connected: boolean; error: string | null };
 
+// ---- Downloads of online sources ----
+
+export type DownloadStatus = "downloading" | "done" | "error" | "canceled";
+
+/** One saved (or saving) online source, mirrored from Rust. */
+export type DownloadItem = {
+  id: string;
+  /** File name on disk. */
+  name: string;
+  title: string;
+  /** Addon that served the stream. */
+  source: string;
+  path: string;
+  received: number;
+  /** 0 when the server does not say how big the file is. */
+  total: number;
+  status: DownloadStatus | string;
+  error: string | null;
+  startedMs: number;
+  updatedMs: number;
+};
+
+export type DownloadRequest = {
+  url: string;
+  headers: [string, string][];
+  /** Name the file gets when the addon does not give one. */
+  title: string;
+  fileName: string;
+  source: string;
+  size: number | null;
+};
+
 // ---- IPTV ----
 
 export type IptvSourceKind = "m3uUrl" | "m3uFile" | "xtream";

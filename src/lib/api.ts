@@ -10,6 +10,8 @@ import type {
   ChannelPage,
   ChannelQuery,
   DiscordStatus,
+  DownloadItem,
+  DownloadRequest,
   EpgNow,
   IptvSource,
   IptvSourceInput,
@@ -162,6 +164,17 @@ export const api = {
   iptvFavorite: (id: string, on: boolean) => invoke<string[]>("iptv_favorite", { id, on }),
   iptvPlay: (id: string) => invoke<PlayerState>("iptv_play", { id }),
   onIptvChanged: (handler: () => void): Promise<UnlistenFn> => listen("iptv://changed", () => handler()),
+  // Downloads of online sources (Rust owns the files and the list)
+  downloadStream: (args: DownloadRequest) => invoke<DownloadItem>("download_stream", { args }),
+  downloadsList: () => invoke<DownloadItem[]>("downloads_list"),
+  downloadCancel: (id: string) => invoke<void>("download_cancel", { id }),
+  /** Drops the entry; a finished file stays on disk. */
+  downloadRemove: (id: string) => invoke<void>("download_remove", { id }),
+  downloadsClear: () => invoke<void>("downloads_clear"),
+  /** Shows the file in Explorer. */
+  downloadReveal: (id: string) => invoke<void>("download_reveal", { id }),
+  onDownloadsChanged: (handler: (items: DownloadItem[]) => void): Promise<UnlistenFn> =>
+    listen<DownloadItem[]>("downloads://changed", (event) => handler(event.payload)),
   updateInfo: () => invoke<{ current: string; showNotes: boolean }>("update_info"),
   updateCheck: (force = false) => invoke<UpdateCheck>("update_check", { force }),
   updatePrefs: () => invoke<UpdatePrefs>("update_prefs"),

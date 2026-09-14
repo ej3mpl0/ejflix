@@ -1,5 +1,6 @@
 mod addons;
 mod discord;
+mod downloads;
 mod inflate;
 mod iptv;
 mod jellyfin;
@@ -50,6 +51,8 @@ pub struct AppState {
     pub discord: Arc<discord::Discord>,
     pub updater: Arc<update::Updater>,
     pub iptv: Arc<IptvState>,
+    /// Online sources saved to disk.
+    pub downloads: Arc<downloads::Downloads>,
 }
 
 impl AppState {
@@ -64,6 +67,7 @@ impl AppState {
             local: tokio::sync::RwLock::new(None),
             discord: discord::Discord::new(),
             iptv: Arc::new(IptvState::new()),
+            downloads: Arc::new(downloads::Downloads::new()),
         }
     }
 }
@@ -1796,6 +1800,57 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
     Ok(state.player.snapshot().await)
 }
 
+// ---- downloads ----
+
+/// Saves an online source (an addon stream) to the Downloads folder. The URL and the
+/// addon headers stay in Rust; the Jellyfin token is never attached.
+#[tauri::command]
+async fn download_stream(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: downloads::StartArgs,
+) -> Result<downloads::DownloadItem, String> {
+    state.downloads.start(&app, args)
+}
+
+#[tauri::command]
+async fn downloads_list(state: State<'_, AppState>) -> Result<Vec<downloads::DownloadItem>, String> {
+    Ok(state.downloads.list())
+}
+
+#[tauri::command]
+async fn download_cancel(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.downloads.cancel(&app, &id);
+    Ok(())
+}
+
+/// Drops the entry. A finished file stays on disk; a partial one is deleted.
+#[tauri::command]
+async fn download_remove(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<(), String> {
+    state.downloads.remove(&app, &id);
+    Ok(())
+}
+
+#[tauri::command]
+async fn downloads_clear(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    state.downloads.clear_finished(&app);
+    Ok(())
+}
+
+/// Opens the file in Explorer (selected), or its folder while it is still downloading.
+#[tauri::command]
+async fn download_reveal(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    state.downloads.reveal(&id)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1859,6 +1914,12 @@ pub fn run() {
             iptv_epg_channel,
             iptv_favorite,
             iptv_play,
+            download_stream,
+            downloads_list,
+            download_cancel,
+            download_remove,
+            downloads_clear,
+            download_reveal,
             player_start_url,
             player_start,
             player_stop,
@@ -1907,6 +1968,7 @@ pub fn run() {
                     }
                 });
             }
+            state.downloads.load(&handle);
             state.discord.spawn();
             start_progress_loop(handle, state.player.clone(), state.jellyfin.clone());
             Ok(())

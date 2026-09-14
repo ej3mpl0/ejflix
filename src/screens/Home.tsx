@@ -521,6 +521,7 @@ export function Home({
       {picker ? (
         <StreamPicker
           movie={picker}
+          onToast={onToast}
           onClose={() => setPicker(null)}
           onPlay={(movie, stream) => {
             setPicker(null);

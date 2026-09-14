@@ -4,6 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Logo";
 import { WindowControls } from "./WindowControls";
 import { Avatar } from "./Avatar";
+import { DownloadsButton } from "./DownloadsButton";
 import type { Library } from "../lib/types";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
@@ -229,6 +230,7 @@ export function GlassHeader({
         </nav>
       </div>
       <div className="flex h-full items-center gap-1 pr-1">
+        <DownloadsButton />
         <button
           type="button"
           aria-label={t("search")}

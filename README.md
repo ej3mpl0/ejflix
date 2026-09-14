@@ -37,6 +37,7 @@ The interface is available in **Spanish** and **English** (ES / EN control on th
 - My list (Jellyfin favourites) and mark as watched / unwatched for movies, series, seasons and episodes
 - Settings per profile: 12 accent themes (Crimson, White, Gold, Jade, Rose gold, Arctic, Graphite, Ocean, Violet, Emerald, Amber, Rose), AMOLED black, poster size, playback preferences, app language, account
 - Stremio addons: load any `manifest.json` (AIOStreams, Torrentio…) to get catalog rows on Home and online sources played straight in mpv, with local resume and automatic next episode
+- Download online sources: the three-dot menu of every source saves it to `Downloads/ejFlix` with progress, cancel and a shortcut to its folder, or copies its link
 - Live TV (IPTV): M3U playlists by URL or file and Xtream Codes accounts (Settings › IPTV), with the XMLTV programme guide, groups, favorites, recently watched channels, a channels panel and zapping inside the player
 - Search across the server and the searchable addon catalogs, results grouped as "My server" and "Online", with recent queries
 - Discord Rich Presence (Settings › Discord): shows what you are watching with poster, time remaining and paused state; the two text lines are templates
@@ -73,9 +74,16 @@ Settings › Addons accepts the `manifest.json` URL of any Stremio addon (`https
 - Jellyfin movies and episodes with an IMDb id get an "Online sources" button, handy for episodes your library is missing.
 - Progress of online titles is remembered locally per profile ("Continue watching (online)" row), the next episode chains automatically preferring the same addon and binge group, and intro/credits skipping works through IntroDB by IMDb id.
 - Only http(s) streams are playable directly: raw torrents (`infoHash`) and external links are listed but disabled. With a debrid-backed addon the streams are plain http(s).
+- The three-dot menu next to each source downloads it or copies its link (see below).
 - Cinemeta is built in for the "Popular" rows and metadata; switch it off in the same section if you only want your own addons.
 
 The Jellyfin access token is never sent to addon hosts; only the headers an addon asks for (`behaviorHints.proxyHeaders`) go with the stream request.
+
+#### Downloading a source
+
+Every source in the "Online sources" sheet carries a three-dot menu with **Download** (when the stream is a direct http(s) link) and **Copy link**. A download goes to `Downloads\ejFlix` under the name the addon reports, or the title of what you are watching plus the container of the URL; an existing file is never overwritten (` (2)`, ` (3)`…). The file is written as `<name>.part` until it is complete, and a canceled or failed download leaves nothing behind.
+
+The download icon in the header shows what is running, with progress, a cancel button and, once finished, a shortcut that opens the file in Explorer. Up to three downloads run at a time, the list survives restarts (anything interrupted by closing the app is marked as canceled) and "Clear" empties everything that is no longer running. Rust does the downloading with the addon's own headers, so the stream URL, which often carries a debrid key, never leaves the backend.
 
 ### Live TV (IPTV)
 
@@ -147,6 +155,14 @@ powershell -ExecutionPolicy Bypass -File scripts/publish-release.ps1 -Notes note
 ```
 
 The script needs the GitHub CLI signed in (`gh auth login`). Without `-Notes` the release body is GitHub's generated changelog; the app shows that body as the update notes, so plain markdown with `##` headings and `-` bullets reads best.
+
+## Android app
+
+`mobile/` holds an Expo (React Native) port of this app for Android phones and tablets: the same
+interface, the same twelve accent themes, Jellyfin, Stremio addons, Live TV and skip intro. Video
+plays through ExoPlayer instead of mpv, so Jellyfin is asked for a transcode when the phone cannot
+decode a track, and Discord Rich Presence is not available there. See
+[mobile/README.md](mobile/README.md) for the build and signing steps.
 
 ## Language
 

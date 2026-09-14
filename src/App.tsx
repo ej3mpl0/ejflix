@@ -14,6 +14,7 @@ import { LanguageSelect } from "./components/LanguageSelect";
 import { SettingsProvider } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
 import { UpdateProvider, useUpdate } from "./lib/update-context";
+import { DownloadsProvider } from "./lib/downloads-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
 import type { Movie, SavedServer, Session, Toast } from "./lib/types";
@@ -121,24 +122,26 @@ function AppInner() {
       <>
         <SettingsProvider key={session.userId} userId={session.userId} migrate onError={toast}>
           <UserDataProvider onError={toast}>
-            {/* Home stays mounted while playing so the view and scroll survive the trip. */}
-            <Home
-              session={session}
-              server={server}
-              version={version}
-              hidden={playing != null}
-              refreshToken={homeRefresh}
-              onPlay={setPlaying}
-              onToast={toast}
-              onSessionChange={(next) => {
-                setSession(next);
-                void api.savedServer().then(setServer).catch(() => undefined);
-                setHomeRefresh((n) => n + 1);
-              }}
-              onSwitchProfile={() => void switchProfile()}
-              onLogout={() => void logoutServer()}
-            />
-            {playing ? <Player movie={playing} mode="engine" onExit={stopPlaying} onError={toast} /> : null}
+            <DownloadsProvider onToast={toast}>
+              {/* Home stays mounted while playing so the view and scroll survive the trip. */}
+              <Home
+                session={session}
+                server={server}
+                version={version}
+                hidden={playing != null}
+                refreshToken={homeRefresh}
+                onPlay={setPlaying}
+                onToast={toast}
+                onSessionChange={(next) => {
+                  setSession(next);
+                  void api.savedServer().then(setServer).catch(() => undefined);
+                  setHomeRefresh((n) => n + 1);
+                }}
+                onSwitchProfile={() => void switchProfile()}
+                onLogout={() => void logoutServer()}
+              />
+              {playing ? <Player movie={playing} mode="engine" onExit={stopPlaying} onError={toast} /> : null}
+            </DownloadsProvider>
           </UserDataProvider>
         </SettingsProvider>
         {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
