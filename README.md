@@ -123,6 +123,28 @@ Use the NSIS installer from [Releases](../../releases) (`ejFlix_*_x64-setup.exe`
 
 After install, choose "I have a Jellyfin server" and enter its URL (for example `http://192.168.1.10:8096`), or "Watch online with addons" and create a profile.
 
+### "Windows protected your PC"
+
+The installer is not signed, so Windows SmartScreen warns about it and some antivirus
+engines flag it on sight. Nothing is wrong with the file: SmartScreen judges an
+executable by whether it carries a certificate and by how many people have already run
+it, and a brand-new unsigned build scores zero on both. Click **More info → Run
+anyway**, or right-click the file → Properties → Unblock before running it.
+
+Signing it properly costs money and identity checks, and there is no free route:
+
+| | Cost | What it buys |
+| --- | --- | --- |
+| [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) | ~10 €/month | The cheapest real option. Individuals need a verifiable public history (3+ years). Reputation still builds over the first downloads |
+| OV certificate (Sectigo, DigiCert…) | ~200-400 €/year | Drops "unknown publisher". Must live on a hardware token or a cloud HSM. Reputation still builds |
+| EV certificate | ~400-700 €/year | The only one SmartScreen trusts from the first download |
+
+With a certificate in hand, add its thumbprint to `src-tauri/tauri.conf.json` under
+`bundle.windows` (`certificateThumbprint`, `digestAlgorithm: "sha256"` and a
+`timestampUrl`) and `npm run tauri build` signs the installer and the executable on its
+own. If Microsoft Defender in particular flags a release, the file can also be
+submitted at [the Defender false-positive form](https://www.microsoft.com/wdsi/filesubmission).
+
 ## Development
 
 ```bash

@@ -8,7 +8,9 @@ export function Logo({ size = "nav" }: { size?: "nav" | "login" }) {
       src={wordmark}
       alt="ejFlix"
       draggable={false}
-      className={cn("w-auto select-none object-contain", size === "nav" ? "h-[22px]" : "h-[38px]")}
+      // Inline, so a parent that centres its text centres the wordmark too: the
+      // preflight would otherwise make it a block stuck to the left edge.
+      className={cn("inline-block w-auto select-none object-contain", size === "nav" ? "h-[22px]" : "h-[38px]")}
     />
   );
 }

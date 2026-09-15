@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Globe, Link2, Link2Off, Play, X, Zap } from "lucide-react";
+import { Download, Globe, Link2, Link2Off, Play, SlidersHorizontal, X, Zap } from "lucide-react";
 import type { AddonStream, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, episodeCode } from "../lib/format";
@@ -68,6 +68,7 @@ export function StreamPicker({
   const downloads = useDownloads();
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
   const [tab, setTab] = useState<StreamKind>("stream");
+  const [showFilters, setShowFilters] = useState(false);
   const [quality, setQuality] = useState("");
   const [availability, setAvailability] = useState("");
   const [language, setLanguage] = useState("");
@@ -127,6 +128,9 @@ export function StreamPicker({
     return true;
   });
   const filtering = Boolean(quality || availability || language);
+  const activeFilters = [quality, availability, language].filter(Boolean).length;
+  /** With one quality and one language there is nothing a filter could narrow down. */
+  const canFilter = qualities.length > 1 || languages.length > 1 || active === "stream";
 
   const groups = new Map<string, StreamView[]>();
   for (const view of filtered) {
@@ -199,76 +203,102 @@ export function StreamPicker({
           </button>
         </div>
         {views.length ? (
-          <div className="flex flex-wrap items-center gap-2 px-6 pb-3">
-            {qualities.length > 1 ? (
-              <Select
-                label={t("filterQuality")}
-                value={quality}
-                onChange={setQuality}
-                className="h-9 min-w-[130px] text-[13px]"
-                options={[{ value: "", label: t("filterQuality") }, ...qualities.map((q) => ({ value: q, label: q }))]}
-              />
+          <div className="px-6 pb-3">
+            <div className="flex flex-wrap items-center gap-2">
+              {tabbed ? (
+                <div className="flex gap-2" role="tablist" aria-label={t("onlineSources")}>
+                  <Chip
+                    role="tab"
+                    aria-selected={active === "stream"}
+                    selected={active === "stream"}
+                    onClick={() => setTab("stream")}
+                  >
+                    {t("sourcesStreaming")}
+                    <span className="text-[11px] opacity-70 tabular">{streaming.length}</span>
+                  </Chip>
+                  <Chip
+                    role="tab"
+                    aria-selected={active === "download"}
+                    selected={active === "download"}
+                    onClick={() => setTab("download")}
+                  >
+                    {t("sourcesDownload")}
+                    <span className="text-[11px] opacity-70 tabular">{fetched.length}</span>
+                  </Chip>
+                </div>
+              ) : null}
+              <span className="ml-auto text-[12px] text-dim tabular">
+                {filtered.length === 1 ? t("sourceCountOne") : t("sourceCount", { count: String(filtered.length) })}
+              </span>
+              {canFilter ? (
+                <button
+                  type="button"
+                  aria-expanded={showFilters}
+                  aria-label={t("filters")}
+                  onClick={() => setShowFilters((v) => !v)}
+                  className={cn(
+                    "inline-flex h-9 items-center gap-1.5 rounded-pill px-3 text-[13px] transition-colors duration-150",
+                    showFilters || filtering ? "bg-white/12 text-text" : "text-dim hover:bg-white/8 hover:text-text",
+                  )}
+                >
+                  <SlidersHorizontal size={15} />
+                  {t("filters")}
+                  {activeFilters ? (
+                    <span className="grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[11px] font-semibold text-on-accent tabular">
+                      {activeFilters}
+                    </span>
+                  ) : null}
+                </button>
+              ) : null}
+            </div>
+            {canFilter && showFilters ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {qualities.length > 1 ? (
+                  <Select
+                    label={t("filterQuality")}
+                    value={quality}
+                    onChange={setQuality}
+                    className="h-9 min-w-[130px] text-[13px]"
+                    options={[{ value: "", label: t("filterQuality") }, ...qualities.map((q) => ({ value: q, label: q }))]}
+                  />
+                ) : null}
+                {active === "stream" ? (
+                  <Select
+                    label={t("filterAvailability")}
+                    value={availability}
+                    onChange={setAvailability}
+                    className="h-9 min-w-[150px] text-[13px]"
+                    options={[
+                      { value: "", label: t("filterAvailability") },
+                      { value: "instant", label: t("streamInstant") },
+                      { value: "fetch", label: t("streamNeedsFetch") },
+                    ]}
+                  />
+                ) : null}
+                {languages.length > 1 ? (
+                  <Select
+                    label={t("filterLanguage")}
+                    value={language}
+                    onChange={setLanguage}
+                    className="h-9 min-w-[140px] text-[13px]"
+                    options={[{ value: "", label: t("filterLanguage") }, ...languages.map((l) => ({ value: l, label: l }))]}
+                  />
+                ) : null}
+                {filtering ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuality("");
+                      setAvailability("");
+                      setLanguage("");
+                    }}
+                    className="h-9 rounded-pill px-3 text-[13px] text-dim hover:bg-white/8 hover:text-text"
+                  >
+                    {t("filterClear")}
+                  </button>
+                ) : null}
+              </div>
             ) : null}
-            {active === "stream" ? (
-              <Select
-                label={t("filterAvailability")}
-                value={availability}
-                onChange={setAvailability}
-                className="h-9 min-w-[150px] text-[13px]"
-                options={[
-                  { value: "", label: t("filterAvailability") },
-                  { value: "instant", label: t("streamInstant") },
-                  { value: "fetch", label: t("streamNeedsFetch") },
-                ]}
-              />
-            ) : null}
-            {languages.length > 1 ? (
-              <Select
-                label={t("filterLanguage")}
-                value={language}
-                onChange={setLanguage}
-                className="h-9 min-w-[140px] text-[13px]"
-                options={[{ value: "", label: t("filterLanguage") }, ...languages.map((l) => ({ value: l, label: l }))]}
-              />
-            ) : null}
-            {filtering ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setQuality("");
-                  setAvailability("");
-                  setLanguage("");
-                }}
-                className="h-9 rounded-pill px-3 text-[13px] text-dim hover:bg-white/8 hover:text-text"
-              >
-                {t("filterClear")}
-              </button>
-            ) : null}
-            <span className="ml-auto text-[12px] text-dim tabular">
-              {filtered.length === 1 ? t("sourceCountOne") : t("sourceCount", { count: String(filtered.length) })}
-            </span>
-          </div>
-        ) : null}
-        {tabbed ? (
-          <div className="flex gap-2 px-6 pb-3" role="tablist" aria-label={t("onlineSources")}>
-            <Chip
-              role="tab"
-              aria-selected={active === "stream"}
-              selected={active === "stream"}
-              onClick={() => setTab("stream")}
-            >
-              {t("sourcesStreaming")}
-              <span className="text-[11px] opacity-70 tabular">{streaming.length}</span>
-            </Chip>
-            <Chip
-              role="tab"
-              aria-selected={active === "download"}
-              selected={active === "download"}
-              onClick={() => setTab("download")}
-            >
-              {t("sourcesDownload")}
-              <span className="text-[11px] opacity-70 tabular">{fetched.length}</span>
-            </Chip>
           </div>
         ) : null}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
