@@ -227,4 +227,11 @@ Locked controls (padlock in the top-right) ignore every key until you click the 
 
 ## License
 
-Use and modify for your own Jellyfin server. Bundled mpv is subject to its own license.
+ejFlix is [MIT licensed](LICENSE): use it, change it and redistribute it, keeping the
+copyright notice.
+
+That covers this repository's own code. The installer also ships `mpv.exe`, which is
+not part of this project and keeps the licence of the build it came from (GPL or LGPL
+depending on how it was compiled); redistributing it means honouring those terms, so
+replace it with your own build if you repackage ejFlix. Jellyfin, Stremio addons and
+any IPTV list you point the app at are likewise none of this project's doing.
