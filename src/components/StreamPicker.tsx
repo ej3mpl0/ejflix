@@ -91,7 +91,10 @@ export function StreamPicker({
   const views = (streams ?? []).map(streamView).filter((v) => !v.label.failed);
   const streaming = views.filter((v) => v.kind === "stream");
   const fetched = views.filter((v) => v.kind === "download");
-  const shown = tab === "stream" ? streaming : fetched;
+  /** The tabs only earn their place once a usenet source has actually turned up. */
+  const tabbed = fetched.length > 0;
+  const active: StreamKind = tabbed ? tab : "stream";
+  const shown = active === "stream" ? streaming : fetched;
 
   const groups = new Map<string, StreamView[]>();
   for (const view of shown) {
@@ -158,16 +161,21 @@ export function StreamPicker({
             <X size={18} />
           </button>
         </div>
-        {views.length ? (
+        {tabbed ? (
           <div className="flex gap-2 px-6 pb-3" role="tablist" aria-label={t("onlineSources")}>
-            <Chip role="tab" aria-selected={tab === "stream"} selected={tab === "stream"} onClick={() => setTab("stream")}>
+            <Chip
+              role="tab"
+              aria-selected={active === "stream"}
+              selected={active === "stream"}
+              onClick={() => setTab("stream")}
+            >
               {t("sourcesStreaming")}
               <span className="text-[11px] opacity-70 tabular">{streaming.length}</span>
             </Chip>
             <Chip
               role="tab"
-              aria-selected={tab === "download"}
-              selected={tab === "download"}
+              aria-selected={active === "download"}
+              selected={active === "download"}
               onClick={() => setTab("download")}
             >
               {t("sourcesDownload")}
@@ -193,7 +201,7 @@ export function StreamPicker({
           ) : null}
           {views.length > 0 && !shown.length ? (
             <p className="px-2 py-10 text-center text-[13px] text-dim">
-              {tab === "stream" ? t("noStreamingSources") : t("noDownloadSources")}
+              {active === "stream" ? t("noStreamingSources") : t("noDownloadSources")}
             </p>
           ) : null}
           {[...groups.entries()].map(([source, list]) => (
