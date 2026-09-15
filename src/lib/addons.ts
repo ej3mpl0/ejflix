@@ -259,3 +259,116 @@ export function formatSize(bytes: number | null): string {
   if (gb >= 1) return `${gb.toFixed(2)} GB`;
   return `${Math.round(bytes / 1024 ** 2)} MB`;
 }
+
+// ---- reading AIOStreams-style stream labels ----
+
+/**
+ * How a source reaches the player: `stream` plays straight from a torrent/debrid
+ * link, `download` arrives as usenet and has to be fetched and cached first.
+ */
+export type StreamKind = "stream" | "download";
+
+/** Addons whose results are NZBs rather than direct streams. */
+const USENET = /newznab|usenet|nzbhydra|nzbdav|prowlarr|altmount|easynews|sabnzbd|\bnzb\b/i;
+
+const RESOLUTION = /^(\d{3,4}p|4k|8k)$/i;
+
+/** `"[TB⚡] Peerflix 2160p"` split into the parts worth drawing. */
+export type StreamLabel = {
+  addon: string | null;
+  resolution: string | null;
+  /** The service already holds the file, so it starts at once. */
+  cached: boolean;
+  /** The service has to fetch it before it plays. */
+  pending: boolean;
+  /** The addon reported a failure instead of a source. */
+  failed: boolean;
+};
+
+export function parseStreamLabel(name: string): StreamLabel {
+  const marked = /^\s*\[([^\]]*)\]\s*([\s\S]*)$/.exec(name);
+  const badge = marked?.[1] ?? "";
+  const words = (marked?.[2] ?? name).trim().split(/\s+/).filter(Boolean);
+  const resolution = words.find((w) => RESOLUTION.test(w)) ?? null;
+  return {
+    addon: words.filter((w) => w !== resolution).join(" ") || null,
+    resolution,
+    cached: badge.includes("⚡"),
+    pending: badge.includes("⏳"),
+    failed: badge.includes("❌"),
+  };
+}
+
+/**
+ * AIOStreams tags every field of a description with an emoji. Anything not listed
+ * here is dropped, including the size (📦), which `behaviorHints` already carries.
+ */
+const TAGS: Record<string, "quality" | "audio" | "languages" | "release" | "indexer"> = {
+  "\u{1F4FA}": "quality", // 📺 dynamic range
+  "\u{1F3A5}": "quality", // 🎥 source
+  "\u{1F39E}": "quality", // 🎞️ codec
+  "\u{1F3F7}": "quality", // 🏷️ tags
+  "\u{1F4E1}": "quality", // 📡 network
+  "\u{1F3A7}": "audio", // 🎧 audio codec
+  "\u{1F50A}": "audio", // 🔊 channels
+  "\u{1F30E}": "languages", // 🌎 languages
+  "\u{1F4C1}": "release", // 📁 file name
+  "\u{1F50D}": "indexer", // 🔍 indexer
+};
+
+const FIELD =
+  /((?:\u{1F4FA}|\u{1F3A5}|\u{1F39E}|\u{1F3A7}|\u{1F50A}|\u{1F4E6}|\u{1F465}|\u{1F50D}|\u{1F30E}|\u{1F4C1}|\u{1F3F7}|\u{1F4E1})\u{FE0F}?)/u;
+
+/** The parts of a stream description worth showing; the rest is emoji noise. */
+export type StreamMeta = {
+  release: string | null;
+  languages: string[];
+  quality: string[];
+  audio: string[];
+  indexer: string | null;
+};
+
+export function parseStreamMeta(description: string): StreamMeta {
+  const meta: StreamMeta = { release: null, languages: [], quality: [], audio: [], indexer: null };
+  if (!description) return meta;
+  const parts = description.split(FIELD);
+  for (let i = 1; i < parts.length; i += 2) {
+    const tag = TAGS[parts[i].replace(/\u{FE0F}/gu, "")];
+    const value = (parts[i + 1] ?? "").replace(/\s+/g, " ").trim();
+    if (!tag || !value) continue;
+    if (tag === "release") meta.release ??= value;
+    else if (tag === "indexer") meta.indexer ??= value;
+    else if (tag === "languages") meta.languages = value.split("|").map((l) => l.trim()).filter(Boolean);
+    else if (!meta[tag].includes(value)) meta[tag].push(value);
+  }
+  return meta;
+}
+
+/** A stream reduced to what the picker draws. */
+export type StreamView = {
+  stream: AddonStream;
+  kind: StreamKind;
+  label: StreamLabel;
+  meta: StreamMeta;
+  /** Release name: the clearest thing to put on the first line. */
+  title: string;
+  /** Short descriptors drawn next to the languages. */
+  chips: string[];
+  /** False when the addon did not tag its description: fall back to its raw text. */
+  parsed: boolean;
+};
+
+export function streamView(stream: AddonStream): StreamView {
+  const label = parseStreamLabel(stream.name);
+  const meta = parseStreamMeta(stream.title);
+  const audio = meta.audio.join(" ");
+  return {
+    stream,
+    kind: USENET.test(`${label.addon ?? ""} ${meta.indexer ?? ""}`) ? "download" : "stream",
+    label,
+    meta,
+    title: meta.release ?? stream.filename ?? stream.name,
+    chips: [label.resolution, ...meta.quality, audio].filter((c): c is string => Boolean(c)),
+    parsed: Boolean(meta.release || meta.languages.length || meta.quality.length || audio),
+  };
+}

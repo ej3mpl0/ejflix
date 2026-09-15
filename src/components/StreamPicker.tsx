@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
-import { Download, Globe, Link2, Link2Off, Play, X } from "lucide-react";
+import { Download, Globe, Link2, Link2Off, Play, X, Zap } from "lucide-react";
 import type { AddonStream, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, episodeCode } from "../lib/format";
-import { formatSize } from "../lib/addons";
+import { formatSize, streamView, type StreamKind, type StreamView } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
 import { useBackNavigation } from "../lib/use-back";
 import { useDownloads } from "../lib/downloads-context";
+import { Chip } from "./Chip";
 import { KebabMenu, type MenuAction } from "./KebabMenu";
 import { Shimmer } from "./Shimmer";
 
@@ -34,10 +35,10 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /**
- * Sheet listing the online sources (Stremio addon streams) of a title.
- * Picking one plays it; the three-dot menu saves it to the Downloads folder or copies
- * its link. Sources mpv cannot open (raw torrents, external links) are listed but
- * cannot be played.
+ * Sheet listing the online sources (Stremio addon streams) of a title, split into the
+ * ones that stream straight away (torrent/debrid) and the ones that have to be fetched
+ * first (usenet). Picking one plays it; the three-dot menu saves it to the Downloads
+ * folder or copies its link. Sources mpv cannot open are listed but cannot be played.
  */
 export function StreamPicker({
   movie,
@@ -53,6 +54,7 @@ export function StreamPicker({
   const { t } = useI18n();
   const downloads = useDownloads();
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
+  const [tab, setTab] = useState<StreamKind>("stream");
   const [error, setError] = useState("");
   const ext = movie.external;
 
@@ -85,11 +87,18 @@ export function StreamPicker({
     ? [movie.seriesName, episodeCode(movie, "S{s}E{e}"), movie.name].filter(Boolean).join(" - ")
     : [movie.name, movie.year ? `(${movie.year})` : null].filter(Boolean).join(" ");
 
-  const groups = new Map<string, AddonStream[]>();
-  for (const stream of streams ?? []) {
-    const list = groups.get(stream.addonName) ?? [];
-    list.push(stream);
-    groups.set(stream.addonName, list);
+  /** Addons that answered with an error report instead of a source are not worth a row. */
+  const views = (streams ?? []).map(streamView).filter((v) => !v.label.failed);
+  const streaming = views.filter((v) => v.kind === "stream");
+  const fetched = views.filter((v) => v.kind === "download");
+  const shown = tab === "stream" ? streaming : fetched;
+
+  const groups = new Map<string, StreamView[]>();
+  for (const view of shown) {
+    const key = view.label.addon ?? view.stream.addonName;
+    const list = groups.get(key) ?? [];
+    list.push(view);
+    groups.set(key, list);
   }
 
   const copy = async (link: string) => {
@@ -149,6 +158,23 @@ export function StreamPicker({
             <X size={18} />
           </button>
         </div>
+        {views.length ? (
+          <div className="flex gap-2 px-6 pb-3" role="tablist" aria-label={t("onlineSources")}>
+            <Chip role="tab" aria-selected={tab === "stream"} selected={tab === "stream"} onClick={() => setTab("stream")}>
+              {t("sourcesStreaming")}
+              <span className="text-[11px] opacity-70 tabular">{streaming.length}</span>
+            </Chip>
+            <Chip
+              role="tab"
+              aria-selected={tab === "download"}
+              selected={tab === "download"}
+              onClick={() => setTab("download")}
+            >
+              {t("sourcesDownload")}
+              <span className="text-[11px] opacity-70 tabular">{fetched.length}</span>
+            </Chip>
+          </div>
+        ) : null}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
           {error ? <p className="px-2 py-6 text-center text-sm text-muted">{error}</p> : null}
           {streams == null && !error ? (
@@ -159,22 +185,28 @@ export function StreamPicker({
               <p className="pt-2 text-center text-[13px] text-dim">{t("loadingStreams")}</p>
             </div>
           ) : null}
-          {streams && !streams.length ? (
+          {streams && !views.length ? (
             <div className="px-2 py-10 text-center">
               <p className="text-[15px] font-medium">{t("noStreams")}</p>
               <p className="mt-1 text-[13px] text-dim">{t("noStreamsHint")}</p>
             </div>
           ) : null}
-          {[...groups.entries()].map(([addonName, list]) => (
-            <section key={addonName} className="mb-3">
-              <p className="px-2 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{addonName}</p>
+          {views.length > 0 && !shown.length ? (
+            <p className="px-2 py-10 text-center text-[13px] text-dim">
+              {tab === "stream" ? t("noStreamingSources") : t("noDownloadSources")}
+            </p>
+          ) : null}
+          {[...groups.entries()].map(([source, list]) => (
+            <section key={source} className="mb-3">
+              <p className="px-2 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{source}</p>
               <div className="space-y-1">
-                {list.map((stream, i) => {
+                {list.map((view, i) => {
+                  const stream = view.stream;
                   const size = formatSize(stream.videoSize);
                   const actions = actionsFor(stream);
                   return (
                     <div
-                      key={`${stream.addonUrl}:${i}`}
+                      key={`${source}:${i}`}
                       className={cn(
                         "group/st flex items-center rounded-xl pr-1.5 transition-colors duration-150",
                         stream.playable ? "hover:bg-white/6" : "opacity-50",
@@ -197,10 +229,43 @@ export function StreamPicker({
                           {stream.playable ? <Play size={15} fill="currentColor" className="translate-x-px" /> : <Link2Off size={15} />}
                         </span>
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[14px] font-medium text-text">{stream.name}</span>
-                          <span className="line-clamp-2 text-[12px] leading-[1.4] whitespace-pre-line text-muted">
-                            {stream.playable ? stream.title || stream.filename || "" : t("streamUnsupported")}
-                          </span>
+                          <span className="block truncate text-[14px] font-medium text-text">{view.title}</span>
+                          {!stream.playable ? (
+                            <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">{t("streamUnsupported")}</span>
+                          ) : view.parsed ? (
+                            <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                              {view.label.cached ? (
+                                <span className="inline-flex h-[18px] items-center gap-0.5 rounded-md bg-success/15 px-1.5 text-[11px] font-medium text-success">
+                                  <Zap size={10} fill="currentColor" />
+                                  {t("streamInstant")}
+                                </span>
+                              ) : view.label.pending ? (
+                                <span className="inline-flex h-[18px] items-center rounded-md bg-warning/15 px-1.5 text-[11px] font-medium text-warning">
+                                  {t("streamNeedsFetch")}
+                                </span>
+                              ) : null}
+                              {view.meta.languages.map((lang) => (
+                                <span
+                                  key={lang}
+                                  className="inline-flex h-[18px] items-center rounded-md bg-accent-soft px-1.5 text-[11px] font-medium text-accent"
+                                >
+                                  {lang}
+                                </span>
+                              ))}
+                              {view.chips.map((chip) => (
+                                <span
+                                  key={chip}
+                                  className="inline-flex h-[18px] items-center rounded-md bg-white/8 px-1.5 text-[11px] text-muted"
+                                >
+                                  {chip}
+                                </span>
+                              ))}
+                            </span>
+                          ) : (
+                            <span className="line-clamp-2 text-[12px] leading-[1.4] whitespace-pre-line text-muted">
+                              {stream.title || stream.filename || ""}
+                            </span>
+                          )}
                         </span>
                         {size ? <span className="shrink-0 pl-2 text-[12px] text-dim tabular">{size}</span> : null}
                       </button>
