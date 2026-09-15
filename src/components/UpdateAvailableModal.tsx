@@ -46,9 +46,9 @@ export function UpdateAvailableModal() {
           : t("updateDownload");
 
   return (
-    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-6" role="dialog" aria-modal="true" aria-labelledby="update-title">
-      <div className="modal-enter w-[min(520px,92vw)] rounded-card bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]">
-        <div className="mb-6 text-center">
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-black/70 p-4 md:p-6" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <div className="modal-enter max-h-[calc(100vh-2rem)] w-[min(520px,92vw)] overflow-y-auto rounded-card bg-surface p-6 md:p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]">
+        <div className="mb-4 text-center md:mb-6">
           <Logo size="login" />
         </div>
         <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">{t("update")}</p>
@@ -60,7 +60,7 @@ export function UpdateAvailableModal() {
         </p>
 
         {blocks.length ? (
-          <div className="mb-6 max-h-[220px] overflow-y-auto rounded-btn bg-black/25 px-4 py-3 text-[14px] leading-[1.55] text-muted">
+          <div className="mb-6 max-h-[min(220px,30vh)] overflow-y-auto rounded-btn bg-black/25 px-4 py-3 text-[14px] leading-[1.55] text-muted">
             {blocks.map((block, i) =>
               block.kind === "heading" ? (
                 <p key={i} className={cn("text-[12px] font-semibold uppercase tracking-wide text-dim", i > 0 && "mt-3")}>
@@ -117,11 +117,11 @@ export function UpdateAvailableModal() {
           )}
         </p>
 
-        <div className="mt-5 flex items-center justify-between gap-3 text-[13px]">
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 text-[13px]">
           <button type="button" onClick={openRelease} className="text-muted hover:text-text">
             {t("updateViewGithub")}
           </button>
-          <div className="flex gap-4">
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
             <button type="button" disabled={working} onClick={() => void skipVersion()} className="text-dim hover:text-text disabled:opacity-50">
               {t("updateSkipVersion")}
             </button>
