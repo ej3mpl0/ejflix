@@ -28,8 +28,7 @@ Spanish and English, per profile, and it updates itself from GitHub Releases.
 ## Install
 
 Download `ejFlix_*_x64-setup.exe` from **[Releases](../../releases/latest)**. It installs
-per user, needs no admin rights, and every build comes from
-[GitHub Actions](.github/workflows/release.yml) rather than from anyone's laptop.
+per user and needs no admin rights.
 
 On first launch pick **"I have a Jellyfin server"** and enter its URL (say
 `http://192.168.1.10:8096`), or **"Watch online with addons"** and make a local profile.
@@ -39,21 +38,13 @@ On first launch pick **"I have a Jellyfin server"** and enter its URL (say
 
 <br>
 
-The installer is not signed, so SmartScreen warns about it and some antivirus engines
-flag it on sight. Nothing is wrong with the file: SmartScreen judges an executable by
-whether it carries a certificate and by how many people have already run it, and a new
-unsigned build scores zero on both. Click **More info → Run anyway**, or right-click the
-file → Properties → **Unblock**.
+The installer is not signed yet, so SmartScreen warns the first time you run it, and a
+new build is unknown to antivirus engines until enough people have run it. Click
+**More info → Run anyway**, or right-click the file → Properties → **Unblock**.
 
-Signing it costs money and identity checks, and there is no free route for a closed
-project — though [SignPath Foundation](https://signpath.org/) does issue free
-certificates to open-source ones, which is part of why this repository builds in CI.
-
-| | Cost | What it buys |
-| --- | --- | --- |
-| [Azure Trusted Signing](https://learn.microsoft.com/azure/trusted-signing/) | ~10 €/month | Cheapest paid option; individuals need a verifiable public history |
-| OV certificate | ~200–400 €/year | Drops "unknown publisher"; reputation still builds over the first downloads |
-| EV certificate | ~400–700 €/year | The only one SmartScreen trusts from the very first download |
+If you would rather check before trusting it: the installer is built by
+[GitHub Actions](.github/workflows/release.yml) on a clean runner, and the run log for
+each release shows exactly what went into it.
 
 </details>
 
