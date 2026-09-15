@@ -1,8 +1,12 @@
 import type { Movie } from "../lib/types";
+import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 
-/** Crew, studios and the technical line-up of the file. */
-export function ProductionInfo({ movie }: { movie: Movie }) {
+/**
+ * Crew, studios and the technical line-up of the file. `aside` is the narrow column
+ * beside the synopsis, where the two-column list would not fit.
+ */
+export function ProductionInfo({ movie, aside = false }: { movie: Movie; aside?: boolean }) {
   const { t } = useI18n();
   const rows: { label: string; value: string }[] = [
     { label: t("genres"), value: movie.genres.join(", ") },
@@ -17,11 +21,11 @@ export function ProductionInfo({ movie }: { movie: Movie }) {
 
   return (
     <section>
-      <h2 className="mb-4 text-[18px] font-semibold">{t("production")}</h2>
-      <dl className="grid gap-x-8 gap-y-3 text-[13px] md:grid-cols-2">
+      <h2 className={aside ? "mb-3 text-[15px] font-semibold" : "mb-4 text-[18px] font-semibold"}>{t("production")}</h2>
+      <dl className={cn("grid gap-x-8 gap-y-3 text-[13px]", !aside && "md:grid-cols-2")}>
         {rows.map((row) => (
           <div key={row.label} className="flex gap-3">
-            <dt className="w-24 shrink-0 text-dim">{row.label}</dt>
+            <dt className={cn("shrink-0 text-dim", aside ? "w-20" : "w-24")}>{row.label}</dt>
             <dd className="min-w-0 text-text">{row.value}</dd>
           </div>
         ))}

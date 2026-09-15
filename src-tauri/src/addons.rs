@@ -6,7 +6,7 @@
 //! fallback for titles whose addon does not serve `meta`.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ pub const CINEMETA_URL: &str = "https://v3-cinemeta.strem.io/manifest.json";
 const MANIFEST_TTL: Duration = Duration::from_secs(60 * 60);
 const STREAM_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_RESUME_ENTRIES: usize = 100;
+const MAX_LIBRARY_ENTRIES: usize = 500;
+const MAX_RELATED_LOOKUPS: usize = 16;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,14 +85,85 @@ pub struct AddonVideo {
     pub overview: Option<String>,
 }
 
+/// One name of the cast. Cinemeta lists plain names; the catalogs that wrap TMDB
+/// carry the character and a picture as well.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonPerson {
+    pub name: String,
+    pub role: Option<String>,
+    pub photo: Option<String>,
+}
+
+/// Another title this one is actually tied to: the rest of its collection, the saga
+/// it belongs to. Addons publish these as `links` pointing at `stremio:///detail/...`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddonRelated {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub name: String,
+    /// The heading the addon filed them under ("Halloween - Colección").
+    pub group: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddonMetaFull {
     #[serde(flatten)]
     pub meta: AddonMeta,
-    pub cast: Vec<String>,
+    pub cast: Vec<AddonPerson>,
     pub director: Vec<String>,
     pub videos: Vec<AddonVideo>,
+    pub related: Vec<AddonRelated>,
+}
+
+/// A title the user saved or ticked off. Online titles have no server to remember
+/// them, so the app keeps its own list next to the playback positions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct LibraryEntry {
+    /// Stremio video id: "tt123" for a film, "tt123:1:2" for an episode.
+    pub key: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub meta_id: String,
+    pub name: String,
+    pub series_name: Option<String>,
+    pub poster: Option<String>,
+    pub background: Option<String>,
+    pub logo: Option<String>,
+    pub year: Option<i32>,
+    pub season: Option<i32>,
+    pub episode: Option<i32>,
+    pub imdb: Option<String>,
+    /// In "My list".
+    pub saved: bool,
+    pub watched: bool,
+    pub updated_ms: u64,
+}
+
+impl Default for LibraryEntry {
+    fn default() -> Self {
+        Self {
+            key: String::new(),
+            kind: "movie".into(),
+            meta_id: String::new(),
+            name: String::new(),
+            series_name: None,
+            poster: None,
+            background: None,
+            logo: None,
+            year: None,
+            season: None,
+            episode: None,
+            imdb: None,
+            saved: false,
+            watched: false,
+            updated_ms: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -159,6 +232,8 @@ pub struct AddonClient {
     manifests: Mutex<HashMap<String, (Instant, AddonInfo)>>,
     /// Catalog pages by URL: Home, the hero and Discover ask for the same ones.
     catalogs: Mutex<HashMap<String, (Instant, Vec<AddonMeta>)>>,
+    /// `"movie/tmdb:610253"` -> the IMDb id of that title, `None` when it has none.
+    imdb_ids: Mutex<HashMap<String, Option<String>>>,
 }
 
 const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
@@ -174,6 +249,7 @@ impl AddonClient {
             http,
             manifests: Mutex::new(HashMap::new()),
             catalogs: Mutex::new(HashMap::new()),
+            imdb_ids: Mutex::new(HashMap::new()),
         }
     }
 
@@ -283,37 +359,97 @@ impl AddonClient {
         Err("No hay información para este título".into())
     }
 
-    /// Streams from every addon that serves them for this type/id, fetched concurrently.
-    pub async fn streams(&self, addons: &[AddonInfo], kind: &str, id: &str) -> Vec<AddonStream> {
+    /// The same title addressed by its IMDb id, when the given id is a catalog one.
+    ///
+    /// Torrent addons (Torrentio, Peerflix...) only index IMDb ids, so asking with a
+    /// catalog id such as `tmdb:610253` silently reaches barely half of the sources.
+    /// The metadata behind those ids carries `imdb_id`, which is what this digs out.
+    async fn imdb_alias(&self, addons: &[AddonInfo], kind: &str, id: &str) -> Option<String> {
+        let (base, suffix) = split_video_id(id);
+        if base.starts_with("tt") {
+            return None;
+        }
+        let key = format!("{kind}/{base}");
+        if let Some(cached) = self.imdb_ids.lock().unwrap().get(&key) {
+            return cached.clone().map(|imdb| format!("{imdb}{suffix}"));
+        }
+        let imdb = self
+            .meta(addons, kind, base)
+            .await
+            .ok()
+            .and_then(|full| full.meta.imdb)
+            .filter(|imdb| imdb.starts_with("tt"));
+        self.imdb_ids.lock().unwrap().insert(key, imdb.clone());
+        imdb.map(|imdb| format!("{imdb}{suffix}"))
+    }
+
+    /// The poster-card metadata of several titles at once, keeping the order asked for.
+    ///
+    /// A collection link carries a name and nothing else, so each title has to be
+    /// looked up before it can be drawn as a card.
+    pub async fn metas(self: &Arc<Self>, addons: &[AddonInfo], kind: &str, ids: &[String]) -> Vec<AddonMeta> {
         let mut handles = Vec::new();
-        for addon in addons.iter().filter(|a| supports(a, "stream", kind, id)).cloned() {
-            let http = self.http.clone();
-            let path = format!("{}/stream/{}/{}.json", base_of(&addon.url), enc(kind), enc(id));
+        for id in ids.iter().take(MAX_RELATED_LOOKUPS).cloned() {
+            let addons = addons.to_vec();
+            let kind = kind.to_string();
+            let me = Arc::clone(self);
             handles.push(tauri::async_runtime::spawn(async move {
-                let request = async {
-                    let res = http.get(&path).send().await.ok()?;
-                    if !res.status().is_success() {
-                        return None;
-                    }
-                    res.json::<Value>().await.ok()
-                };
-                let value = tokio::time::timeout(STREAM_TIMEOUT, request).await.ok().flatten();
-                let Some(value) = value else {
-                    return Vec::new();
-                };
-                value
-                    .get("streams")
-                    .and_then(|v| v.as_array())
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|s| parse_stream(&addon, s))
-                    .collect::<Vec<_>>()
+                me.meta(&addons, &kind, &id).await.ok().map(|full| full.meta)
             }));
         }
         let mut out = Vec::new();
         for handle in handles {
-            if let Ok(list) = handle.await {
-                out.extend(list);
+            if let Ok(Some(meta)) = handle.await {
+                out.push(meta);
+            }
+        }
+        out
+    }
+
+    /// Streams from every addon that serves them for this type/id, fetched concurrently.
+    ///
+    /// A catalog id is asked for twice, as itself and as its IMDb id, because each one
+    /// reaches a different half of the sources; both answers are merged.
+    pub async fn streams(&self, addons: &[AddonInfo], kind: &str, id: &str) -> Vec<AddonStream> {
+        let mut ids = vec![id.to_string()];
+        if let Some(alias) = self.imdb_alias(addons, kind, id).await {
+            ids.push(alias);
+        }
+        let mut handles = Vec::new();
+        for id in ids {
+            for addon in addons.iter().filter(|a| supports(a, "stream", kind, &id)).cloned() {
+                let http = self.http.clone();
+                let path = format!("{}/stream/{}/{}.json", base_of(&addon.url), enc(kind), enc(&id));
+                handles.push(tauri::async_runtime::spawn(async move {
+                    let request = async {
+                        let res = http.get(&path).send().await.ok()?;
+                        if !res.status().is_success() {
+                            return None;
+                        }
+                        res.json::<Value>().await.ok()
+                    };
+                    let value = tokio::time::timeout(STREAM_TIMEOUT, request).await.ok().flatten();
+                    let Some(value) = value else {
+                        return Vec::new();
+                    };
+                    value
+                        .get("streams")
+                        .and_then(|v| v.as_array())
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|s| parse_stream(&addon, s))
+                        .collect::<Vec<_>>()
+                }));
+            }
+        }
+        let mut out: Vec<AddonStream> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for handle in handles {
+            let Ok(list) = handle.await else { continue };
+            for stream in list {
+                if seen.insert(identity_of(&stream)) {
+                    out.push(stream);
+                }
             }
         }
         out
@@ -366,6 +502,66 @@ fn text(v: &Value, key: &str) -> Option<String> {
         .and_then(|x| x.as_str())
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
+}
+
+/// Categories of `links` that are not a title: everything else is a real relation.
+const LINK_NOISE: [&str; 6] = ["imdb", "share", "Genres", "Cast", "Directors", "Writers"];
+
+/// Titles named in `links` as `stremio:///detail/<type>/<id>`, which is how an addon
+/// publishes the collection a film belongs to.
+fn parse_related(v: &Value) -> Vec<AddonRelated> {
+    v.get("links")
+        .and_then(|x| x.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|link| {
+            let group = text(link, "category")?;
+            if LINK_NOISE.contains(&group.as_str()) {
+                return None;
+            }
+            let url = text(link, "url")?;
+            let rest = url.strip_prefix("stremio:///detail/")?;
+            let (kind, id) = rest.split_once('/')?;
+            let id = id.split('/').next().unwrap_or(id);
+            (!id.is_empty()).then(|| AddonRelated {
+                id: id.to_string(),
+                kind: kind.to_string(),
+                name: text(link, "name").unwrap_or_else(|| id.to_string()),
+                group,
+            })
+        })
+        .take(24)
+        .collect()
+}
+
+/// `["Jamie Lee Curtis"]` or `{ name, character, photo }` entries, whichever the
+/// addon wrote. The richer shape lives under `app_extras`, the plain one under `cast`.
+fn parse_cast(v: &Value) -> Vec<AddonPerson> {
+    let rich = v
+        .get("app_extras")
+        .and_then(|x| x.get("cast"))
+        .and_then(|x| x.as_array());
+    if let Some(list) = rich {
+        let people: Vec<AddonPerson> = list
+            .iter()
+            .filter_map(|person| {
+                Some(AddonPerson {
+                    name: text(person, "name")?,
+                    role: text(person, "character").or_else(|| text(person, "role")),
+                    photo: text(person, "photo").or_else(|| text(person, "profile")),
+                })
+            })
+            .take(20)
+            .collect();
+        if !people.is_empty() {
+            return people;
+        }
+    }
+    strings(v, "cast")
+        .into_iter()
+        .take(20)
+        .map(|name| AddonPerson { name, role: None, photo: None })
+        .collect()
 }
 
 fn strings(v: &Value, key: &str) -> Vec<String> {
@@ -444,6 +640,28 @@ fn parse_manifest(url: &str, value: Value, builtin: bool) -> Result<AddonInfo, S
         builtin,
         manifest: value,
     })
+}
+
+/// `"tmdb:610253:1:2"` -> `("tmdb:610253", ":1:2")`. A meta id carries colons of its
+/// own, so only a trailing `:season:episode` pair counts as the suffix.
+fn split_video_id(id: &str) -> (&str, &str) {
+    let mut colons = id.rmatch_indices(':');
+    if let (Some((episode, _)), Some((season, _))) = (colons.next(), colons.next()) {
+        let number = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        if number(&id[episode + 1..]) && number(&id[season + 1..episode]) {
+            return (&id[..season], &id[season..]);
+        }
+    }
+    (id, "")
+}
+
+/// What makes two rows the same file, so merging the two answers repeats nothing.
+fn identity_of(s: &AddonStream) -> String {
+    match (&s.url, &s.info_hash) {
+        (Some(url), _) => format!("u:{url}"),
+        (None, Some(hash)) => format!("h:{hash}:{}", s.filename.as_deref().unwrap_or_default()),
+        _ => format!("t:{}:{}", s.name, s.title),
+    }
 }
 
 /// Does the addon declare `resource` for this content type and id prefix?
@@ -540,9 +758,10 @@ fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {
         .collect();
     Some(AddonMetaFull {
         meta,
-        cast: strings(v, "cast"),
+        cast: parse_cast(v),
         director: strings(v, "director"),
         videos,
+        related: parse_related(v),
     })
 }
 
@@ -588,6 +807,54 @@ fn progress_key(user_id: &str) -> String {
     format!("addonProgress.{user_id}")
 }
 
+fn library_key(user_id: &str) -> String {
+    format!("addonLibrary.{user_id}")
+}
+
+pub fn load_library(app: &tauri::AppHandle, user_id: &str) -> Vec<LibraryEntry> {
+    let Ok(store) = app.store(crate::store_path()) else {
+        return vec![];
+    };
+    store
+        .get(library_key(user_id))
+        .and_then(|v| serde_json::from_value::<Vec<LibraryEntry>>(v).ok())
+        .unwrap_or_default()
+}
+
+/// Saves or clears the two flags of one title. An entry with neither flag left is
+/// dropped, so the list only ever holds what the user actually marked.
+pub fn set_library_flags(
+    app: &tauri::AppHandle,
+    user_id: &str,
+    mut entry: LibraryEntry,
+    saved: Option<bool>,
+    watched: Option<bool>,
+) -> Result<Vec<LibraryEntry>, String> {
+    if entry.key.is_empty() {
+        return Err("La entrada no tiene identificador".into());
+    }
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
+    let mut list = load_library(app, user_id);
+    if let Some(previous) = list.iter().find(|e| e.key == entry.key) {
+        entry.saved = previous.saved;
+        entry.watched = previous.watched;
+    }
+    entry.saved = saved.unwrap_or(entry.saved);
+    entry.watched = watched.unwrap_or(entry.watched);
+    entry.updated_ms = now_ms();
+    list.retain(|e| e.key != entry.key);
+    if entry.saved || entry.watched {
+        list.insert(0, entry);
+    }
+    list.truncate(MAX_LIBRARY_ENTRIES);
+    store.set(
+        library_key(user_id),
+        serde_json::to_value(&list).map_err(|e| e.to_string())?,
+    );
+    store.save().map_err(|e| e.to_string())?;
+    Ok(list)
+}
+
 pub fn load_progress(app: &tauri::AppHandle, user_id: &str) -> Vec<ResumeEntry> {
     let Ok(store) = app.store(crate::store_path()) else {
         return vec![];
@@ -631,4 +898,41 @@ pub fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn splits_video_ids() {
+        assert_eq!(split_video_id("tt10665338"), ("tt10665338", ""));
+        assert_eq!(split_video_id("tt0944947:1:2"), ("tt0944947", ":1:2"));
+        // The meta id keeps its own colon; only the episode pair is the suffix.
+        assert_eq!(split_video_id("tmdb:610253"), ("tmdb:610253", ""));
+        assert_eq!(split_video_id("tmdb:1399:1:2"), ("tmdb:1399", ":1:2"));
+        assert_eq!(split_video_id("kitsu:12"), ("kitsu:12", ""));
+    }
+
+    #[test]
+    fn merges_rows_by_what_they_point_at() {
+        let row = |url: Option<&str>, hash: Option<&str>| AddonStream {
+            addon_name: "A".into(),
+            addon_url: "u".into(),
+            name: "n".into(),
+            title: "t".into(),
+            url: url.map(str::to_string),
+            external_url: None,
+            info_hash: hash.map(str::to_string),
+            headers: Vec::new(),
+            binge_group: None,
+            filename: None,
+            video_size: None,
+            playable: url.is_some(),
+        };
+        // The same link from both ids is one row; a different one is not.
+        assert_eq!(identity_of(&row(Some("http://x/1"), None)), identity_of(&row(Some("http://x/1"), None)));
+        assert_ne!(identity_of(&row(Some("http://x/1"), None)), identity_of(&row(Some("http://x/2"), None)));
+        assert_eq!(identity_of(&row(None, Some("abc"))), identity_of(&row(None, Some("abc"))));
+    }
 }

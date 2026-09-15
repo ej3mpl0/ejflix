@@ -13,6 +13,9 @@ import { Pill } from "../components/Pill";
 import { Chip } from "../components/Chip";
 import { MetaChips } from "../components/MetaChips";
 import { CastRow } from "../components/CastRow";
+import { FavoriteButton } from "../components/FavoriteButton";
+import { WatchedButton } from "../components/WatchedButton";
+import { OnlineSimilarRail } from "../components/OnlineSimilarRail";
 import { ProductionInfo } from "../components/ProductionInfo";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
@@ -25,11 +28,14 @@ export function ExternalDetailsPage({
   route,
   top,
   onBack,
+  onOpen,
   onPlay,
 }: {
   route: DetailsRoute;
   top: boolean;
   onBack: () => void;
+  /** Opening another title from the "more like this" rail. */
+  onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
   const { t } = useI18n();
@@ -179,6 +185,8 @@ export function ExternalDetailsPage({
                   >
                     {playLabel}
                   </Pill>
+                  <FavoriteButton movie={movie} pill />
+                  <WatchedButton movie={movie} pill />
                 </div>
               </div>
             </section>
@@ -192,16 +200,22 @@ export function ExternalDetailsPage({
             >
               <MetaChips movie={movie} seasons={isSeries ? seasons.filter((s) => s !== 0).length : undefined} />
               {error ? <p className="text-sm text-muted">{error}</p> : null}
-              {movie.overview ? (
+              {/* Synopsis on the left, the production details in a column beside it. */}
+              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
                 <div className="max-w-[72ch]">
-                  <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>{movie.overview}</p>
-                  {movie.overview.length > 240 ? (
-                    <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-semibold text-text hover:underline">
-                      {expanded ? t("less") : t("more")}
-                    </button>
+                  {movie.overview ? (
+                    <>
+                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>{movie.overview}</p>
+                      {movie.overview.length > 240 ? (
+                        <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-semibold text-text hover:underline">
+                          {expanded ? t("less") : t("more")}
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
-              ) : null}
+                <ProductionInfo movie={movie} aside />
+              </div>
 
               {ext.type === "series" ? (
                 <section>
@@ -264,7 +278,9 @@ export function ExternalDetailsPage({
               ) : null}
 
               <CastRow people={movie.cast} />
-              <ProductionInfo movie={movie} />
+              <div className="-mx-page">
+                <OnlineSimilarRail meta={meta} movie={movie} onOpen={onOpen} onPlay={onPlay} />
+              </div>
             </div>
           </>
         )}

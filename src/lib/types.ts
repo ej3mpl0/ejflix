@@ -316,10 +316,46 @@ export type AddonVideo = {
   overview: string | null;
 };
 
+/** One name of the cast of an online title. */
+export type AddonPerson = {
+  name: string;
+  role: string | null;
+  photo: string | null;
+};
+
+/** A title this one is tied to: the rest of its collection or saga. */
+export type AddonRelated = {
+  id: string;
+  type: string;
+  name: string;
+  /** The heading the addon filed them under ("Halloween - Colección"). */
+  group: string;
+};
+
 export type AddonMetaFull = AddonMeta & {
-  cast: string[];
+  cast: AddonPerson[];
   director: string[];
   videos: AddonVideo[];
+  related: AddonRelated[];
+};
+
+/** An online title the user saved to their list or ticked off as watched. */
+export type LibraryEntry = {
+  key: string;
+  type: string;
+  metaId: string;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  background: string | null;
+  logo: string | null;
+  year: number | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  saved: boolean;
+  watched: boolean;
+  updatedMs: number;
 };
 
 /** Locally remembered position of an online title. */

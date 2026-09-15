@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { LANGUAGE_CODES, languageName } from "../../lib/languages";
 import { useI18n } from "../../lib/locale-context";
+import { Select, type SelectOption } from "../Select";
 
 export function LanguagePicker({
   value,
@@ -14,28 +15,14 @@ export function LanguagePicker({
   label: string;
 }) {
   const { t, locale } = useI18n();
-  const options = useMemo(
-    () =>
-      LANGUAGE_CODES.map((code) => ({ code, name: languageName(code, locale) })).sort((a, b) =>
-        a.name.localeCompare(b.name, locale),
-      ),
-    [locale],
-  );
+  const options = useMemo<SelectOption<string>[]>(() => {
+    const languages = LANGUAGE_CODES.map((code) => ({ value: code, label: languageName(code, locale) })).sort(
+      (a, b) => a.label.localeCompare(b.label, locale),
+    );
+    const head: SelectOption<string>[] = [{ value: "", label: t("langAuto") }];
+    if (kind === "subtitle") head.push({ value: "off", label: t("langOff") });
+    return [...head, ...languages];
+  }, [locale, kind, t]);
 
-  return (
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={label}
-      className="h-10 max-w-[260px] rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none focus:border-accent"
-    >
-      <option value="">{t("langAuto")}</option>
-      {kind === "subtitle" ? <option value="off">{t("langOff")}</option> : null}
-      {options.map((option) => (
-        <option key={option.code} value={option.code}>
-          {option.name}
-        </option>
-      ))}
-    </select>
-  );
+  return <Select value={value} options={options} onChange={onChange} label={label} className="max-w-[260px]" />;
 }

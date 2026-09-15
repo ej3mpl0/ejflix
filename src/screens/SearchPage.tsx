@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe, History, LoaderCircle, Search, Server, X } from "lucide-react";
+import { Globe, History, LoaderCircle, Server, X } from "lucide-react";
 import type { AddonCatalog, GenreRow, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
@@ -16,16 +16,47 @@ import { Chip } from "../components/Chip";
 import { Shimmer } from "../components/Shimmer";
 import { metaToMovie } from "../lib/addons";
 
-const MAX_SEARCH_CATALOGS = 4;
+const MAX_SEARCH_CATALOGS = 6;
 const DEBOUNCE_MS = 300;
 
+/** Accents, case and punctuation dropped, so "Juego de Tronos" answers "juego de tronos". */
+function fold(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /**
- * Search across the server and the addon catalogs that support it. Results stay on
- * screen while the next query loads; the history only remembers what was actually
- * opened or submitted with Enter.
+ * How well a title answers the query.
+ *
+ * Catalogs answer a search with whatever they have, and the wider ones pad the list
+ * with titles that merely share a word. Ranking keeps those below the real answer
+ * instead of dropping them, because a short query ("got") matches nothing exactly.
+ */
+function relevance(name: string, query: string): number {
+  const title = fold(name);
+  const wanted = fold(query);
+  if (!wanted) return 0;
+  if (title === wanted) return 4;
+  if (title.startsWith(wanted)) return 3;
+  if (wanted.split(" ").every((word) => title.split(" ").includes(word))) return 2;
+  return title.includes(wanted) ? 1 : 0;
+}
+
+/**
+ * Search across the server and the addon catalogs that support it. The box itself
+ * lives in the header, so this only renders what it types: results while there is a
+ * query, recent searches and genres while there is not. Results stay on screen while
+ * the next query loads; the history only remembers what was actually opened.
  */
 export function SearchPage({
   userId,
+  query,
+  onQuery,
   hasServer,
   genres,
   onOpen,
@@ -33,6 +64,9 @@ export function SearchPage({
   onError,
 }: {
   userId: string;
+  /** What the header's search box holds. */
+  query: string;
+  onQuery: (query: string) => void;
   hasServer: boolean;
   genres: GenreRow[];
   onOpen: (movie: Movie) => void;
@@ -42,8 +76,6 @@ export function SearchPage({
   const { t } = useI18n();
   const { settings } = useSettings();
   const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [query, setQuery] = useState("");
   const [results, setResults] = useState<Movie[]>([]);
   const [online, setOnline] = useState<Movie[]>([]);
   const [searched, setSearched] = useState("");
@@ -55,10 +87,6 @@ export function SearchPage({
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
   // Searchable addon catalogs, resolved once instead of on every keystroke.
   useEffect(() => {
     let alive = true;
@@ -66,12 +94,13 @@ export function SearchPage({
       .addonsList()
       .then((addons) => {
         if (!alive) return;
-        setCatalogs(
-          addons
-            .flatMap((addon) => addon.catalogs)
-            .filter((c) => c.searchable && (c.type === "movie" || c.type === "series"))
-            .slice(0, MAX_SEARCH_CATALOGS),
-        );
+        // The user's own catalogs lead: they rank better and answer in the user's own
+        // language. Cinemeta comes last, for the titles they do not carry.
+        const searchable = [...addons]
+          .sort((a, b) => Number(a.builtin) - Number(b.builtin))
+          .flatMap((addon) => addon.catalogs)
+          .filter((c) => c.searchable && (c.type === "movie" || c.type === "series"));
+        setCatalogs(searchable.slice(0, MAX_SEARCH_CATALOGS));
       })
       .catch(() => {
         if (alive) setCatalogs([]);
@@ -112,11 +141,22 @@ export function SearchPage({
       const known = new Set(server.map((m) => m.providerIds.Imdb).filter(Boolean));
       const seen = new Set<string>();
       const merged: Movie[] = [];
-      for (const meta of lists.flat()) {
-        if (seen.has(meta.id) || (meta.imdb && known.has(meta.imdb))) continue;
-        seen.add(meta.id);
-        merged.push(metaToMovie(meta));
+      for (const movie of lists.flat().map(metaToMovie)) {
+        const imdb = movie.external?.imdb;
+        if (seen.has(movie.id) || (imdb && known.has(imdb))) continue;
+        seen.add(movie.id);
+        merged.push(movie);
       }
+      // Catalogs answer a search of one type with everything they have of the other,
+      // so drop what does not answer the query at all -- unless nothing does, which is
+      // what happens with an abbreviation or a cast name.
+      const scored = merged.map((movie) => ({ movie, score: relevance(movie.name, trimmed) }));
+      const answering = scored.filter((entry) => entry.score > 0);
+      const ranked = answering.length ? answering : scored;
+      // Stable sort: catalogs that answered precisely keep their own order at the top.
+      ranked.sort((a, b) => b.score - a.score);
+      merged.length = 0;
+      merged.push(...ranked.map((entry) => entry.movie));
       setResults(server);
       setOnline(merged.slice(0, 40));
       setSearched(trimmed);
@@ -145,40 +185,14 @@ export function SearchPage({
 
   return (
     <div className="page-enter px-page pt-24 pb-16">
-      <form
-        className={cn(
-          "mx-auto mb-8 flex h-14 max-w-[720px] items-center gap-3 rounded-pill border border-white/10 bg-surface pr-2 pl-5 transition-colors duration-150",
-        )}
-        onSubmit={(e) => {
-          e.preventDefault();
-          remember();
-        }}
-      >
-        <Search size={20} className="shrink-0 text-dim" aria-hidden />
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("searchHint")}
-          aria-label={t("search")}
-          className="h-full min-w-0 flex-1 bg-transparent text-[16px] text-text outline-none placeholder:text-dim"
-        />
-        {loading ? <LoaderCircle size={18} className="shrink-0 animate-spin text-dim" aria-label={t("searching")} /> : null}
-        {query ? (
-          <button
-            type="button"
-            onClick={() => {
-              setQuery("");
-              inputRef.current?.focus();
-            }}
-            aria-label={t("close")}
-            className="icon-hit grid h-10 w-10 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
-          >
-            <X size={18} />
-          </button>
-        ) : null}
-      </form>
-
+      {showDiscover ? (
+        <h1 className="mb-6 text-[28px] font-semibold tracking-[-0.02em]">{t("search")}</h1>
+      ) : (
+        <h1 className="mb-6 flex items-center gap-3 text-[22px] font-semibold tracking-[-0.01em]">
+          <span className="truncate">{t("resultsFor", { query: searched || query })}</span>
+          {loading ? <LoaderCircle size={17} className="shrink-0 animate-spin text-dim" aria-label={t("searching")} /> : null}
+        </h1>
+      )}
       {showDiscover ? (
         <>
           {history.length ? (
@@ -201,7 +215,7 @@ export function SearchPage({
                   <span key={item} className="inline-flex h-9 items-stretch overflow-hidden rounded-pill bg-white/6">
                     <button
                       type="button"
-                      onClick={() => setQuery(item)}
+                      onClick={() => onQuery(item)}
                       className="btn-press inline-flex items-center pl-3.5 pr-2 text-[13px] font-medium text-text/80 hover:bg-white/8 hover:text-text"
                     >
                       {item}

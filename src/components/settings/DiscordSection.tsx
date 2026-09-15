@@ -27,15 +27,13 @@ export function DiscordSection() {
   const { settings, update } = useSettings();
   const prefs = settings.discord;
   const [status, setStatus] = useState<DiscordStatus | null>(null);
-  const [clientId, setClientId] = useState(prefs.clientId);
   const [details, setDetails] = useState(prefs.details);
   const [state, setState] = useState(prefs.state);
 
   useEffect(() => {
-    setClientId(prefs.clientId);
     setDetails(prefs.details);
     setState(prefs.state);
-  }, [prefs.clientId, prefs.details, prefs.state]);
+  }, [prefs.details, prefs.state]);
 
   useEffect(() => {
     if (!prefs.enabled) {
@@ -156,19 +154,6 @@ export function DiscordSection() {
                 </span>
               ))}
             </div>
-            <label className="block">
-              <span className="mb-1.5 block text-[13px] font-medium">{t("discordClientId")}</span>
-              <input
-                value={clientId}
-                inputMode="numeric"
-                maxLength={32}
-                placeholder="1280587438863028236"
-                onChange={(e) => setClientId(e.target.value.replace(/\D/g, ""))}
-                onBlur={() => clientId !== prefs.clientId && commit({ clientId })}
-                className={field}
-              />
-              <span className="mt-1.5 block text-[12px] text-dim">{t("discordClientIdHint")}</span>
-            </label>
           </div>
 
           {/* Discord-style card */}

@@ -257,23 +257,29 @@ export function DetailsPage({
             >
               <MetaChips movie={movie} seasons={isSeries ? seasons.length : undefined} />
 
-              {movie.overview ? (
+              {/* Synopsis on the left, the production details in a column beside it. */}
+              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
                 <div className="max-w-[72ch]">
-                  <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>
-                    {movie.overview}
-                  </p>
-                  {movie.overview.length > 240 ? (
-                    <button
-                      type="button"
-                      aria-expanded={expanded}
-                      onClick={() => setExpanded((v) => !v)}
-                      className="mt-1 text-[13px] font-semibold text-text hover:underline"
-                    >
-                      {expanded ? t("less") : t("more")}
-                    </button>
+                  {movie.overview ? (
+                    <>
+                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>
+                        {movie.overview}
+                      </p>
+                      {movie.overview.length > 240 ? (
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          onClick={() => setExpanded((v) => !v)}
+                          className="mt-1 text-[13px] font-semibold text-text hover:underline"
+                        >
+                          {expanded ? t("less") : t("more")}
+                        </button>
+                      ) : null}
+                    </>
                   ) : null}
                 </div>
-              ) : null}
+                <ProductionInfo movie={movie} aside />
+              </div>
 
               {isSeries ? (
                 <section>
@@ -348,8 +354,6 @@ export function DetailsPage({
               <div className="-mx-page">
                 <SimilarRail itemId={movie.id} onOpen={onPush} onPlay={onPlay} />
               </div>
-
-              <ProductionInfo movie={movie} />
             </div>
           </>
         )}

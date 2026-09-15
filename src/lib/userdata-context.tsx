@@ -2,13 +2,15 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { api } from "./api";
-import type { Movie } from "./types";
+import { libraryEntryOf, libraryToMovie } from "./addons";
+import type { LibraryEntry, Movie } from "./types";
 import { useI18n } from "./locale-context";
 
 export type ItemFlags = {
@@ -30,6 +32,8 @@ type UserDataContextValue = {
   version: number;
   /** Drop the overrides once fresh server data has been loaded. */
   clearOverrides: () => void;
+  /** Online titles saved to "My list", newest first. */
+  onlineList: Movie[];
 };
 
 const UserDataContext = createContext<UserDataContextValue | null>(null);
@@ -45,12 +49,27 @@ export function UserDataProvider({
   const [overrides, setOverrides] = useState<Record<string, Partial<ItemFlags>>>({});
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [version, setVersion] = useState(0);
+  // Online titles have no server behind them: their two flags live in the app's store.
+  const [library, setLibrary] = useState<LibraryEntry[]>([]);
   const overridesRef = useRef(overrides);
   overridesRef.current = overrides;
   const tRef = useRef(t);
   tRef.current = t;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .addonLibraryList()
+      .then((list) => {
+        if (alive) setLibrary(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const patch = useCallback((id: string, value: Partial<ItemFlags> | null) => {
     setOverrides((current) => {
@@ -70,8 +89,28 @@ export function UserDataProvider({
     });
   }, []);
 
+  /** Saves one flag of an online title; returns false when there was nothing to save. */
+  const setOnlineFlag = useCallback(
+    async (movie: Movie, flags: { saved?: boolean; watched?: boolean }, errorKey: "favoriteError" | "watchedError") => {
+      const entry = libraryEntryOf(movie);
+      if (!entry) return false;
+      mark(movie.id, true);
+      try {
+        setLibrary(await api.addonLibrarySet({ entry, ...flags }));
+        setVersion((n) => n + 1);
+      } catch {
+        onErrorRef.current(tRef.current(errorKey));
+      } finally {
+        mark(movie.id, false);
+      }
+      return true;
+    },
+    [mark],
+  );
+
   const setFavorite = useCallback(
     async (movie: Movie, favorite: boolean) => {
+      if (await setOnlineFlag(movie, { saved: favorite }, "favoriteError")) return;
       const previous = overridesRef.current[movie.id];
       patch(movie.id, { favorite });
       mark(movie.id, true);
@@ -86,11 +125,12 @@ export function UserDataProvider({
         mark(movie.id, false);
       }
     },
-    [patch, mark],
+    [patch, mark, setOnlineFlag],
   );
 
   const setPlayed = useCallback(
     async (movie: Movie, played: boolean) => {
+      if (await setOnlineFlag(movie, { watched: played }, "watchedError")) return;
       const previous = overridesRef.current[movie.id];
       patch(
         movie.id,
@@ -110,26 +150,30 @@ export function UserDataProvider({
         mark(movie.id, false);
       }
     },
-    [patch, mark],
+    [patch, mark, setOnlineFlag],
   );
 
   const value = useMemo<UserDataContextValue>(
     () => ({
-      flags: (movie) => ({
-        favorite: movie.favorite,
-        played: movie.played,
-        unplayedCount: movie.unplayedCount,
-        playedPercentage: movie.playedPercentage,
-        playbackPositionTicks: movie.playbackPositionTicks,
-        ...(overrides[movie.id] ?? {}),
-      }),
+      flags: (movie) => {
+        const entry = movie.external ? library.find((e) => e.key === movie.external?.videoId) : null;
+        return {
+          favorite: entry ? entry.saved : movie.favorite,
+          played: entry ? entry.watched : movie.played,
+          unplayedCount: movie.unplayedCount,
+          playedPercentage: movie.playedPercentage,
+          playbackPositionTicks: movie.playbackPositionTicks,
+          ...(movie.external ? {} : (overrides[movie.id] ?? {})),
+        };
+      },
       setFavorite,
       setPlayed,
       pending: (id) => pendingIds.has(id),
       version,
       clearOverrides: () => setOverrides({}),
+      onlineList: library.filter((entry) => entry.saved).map(libraryToMovie),
     }),
-    [overrides, pendingIds, version, setFavorite, setPlayed],
+    [overrides, pendingIds, version, setFavorite, setPlayed, library],
   );
 
   return <UserDataContext.Provider value={value}>{children}</UserDataContext.Provider>;

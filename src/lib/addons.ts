@@ -4,6 +4,7 @@ import type {
   AddonStream,
   AddonVideo,
   ExternalRef,
+  LibraryEntry,
   Movie,
   ResumeEntry,
 } from "./types";
@@ -82,16 +83,31 @@ function kindOf(type: string): "movie" | "series" {
   return type === "series" ? "series" : "movie";
 }
 
+/**
+ * The id every addon agrees on.
+ *
+ * A catalog that keys titles by its own database hands out ids like `tmdb:610253`
+ * while still reporting the IMDb id, and the torrent addons only index that one. So
+ * a title is identified and played by its IMDb id whenever it is known: that is what
+ * keeps one film from turning into two cards and what makes every source answer for
+ * it. Its metadata still comes from `metaId`, the catalog that served the title,
+ * because those catalogs carry a fuller cast than the IMDb one.
+ */
+function canonicalId(meta: AddonMeta): string {
+  return meta.imdb && !meta.id.startsWith("tt") ? meta.imdb : meta.id;
+}
+
 /** Catalog entry → poster card item. Series open their details; movies pick a stream. */
 export function metaToMovie(meta: AddonMeta): Movie {
   const type = kindOf(meta.type);
-  const base = emptyMovie(externalId(meta.id), type === "series" ? "Series" : "Movie", meta.name);
+  const id = canonicalId(meta);
+  const base = emptyMovie(externalId(id), type === "series" ? "Series" : "Movie", meta.name);
   return {
     ...base,
     external: {
       type,
       metaId: meta.id,
-      videoId: meta.id,
+      videoId: id,
       imdb: meta.imdb,
       season: null,
       episode: null,
@@ -113,7 +129,13 @@ export function metaFullToMovie(meta: AddonMetaFull): Movie {
   return {
     ...movie,
     directors: meta.director,
-    cast: meta.cast.map((name, i) => ({ id: `${meta.id}:cast:${i}`, name, role: null, kind: "Actor", imageUrl: null })),
+    cast: meta.cast.map((person, i) => ({
+      id: `${meta.id}:cast:${i}`,
+      name: person.name,
+      role: person.role,
+      kind: "Actor",
+      imageUrl: person.photo,
+    })),
     status: null,
   };
 }
@@ -221,6 +243,52 @@ export function resumeEntryOf(movie: Movie): Omit<ResumeEntry, "positionSeconds"
   };
 }
 
+/** Identity stored when an online title is saved to the list or ticked off. */
+export function libraryEntryOf(movie: Movie): Omit<LibraryEntry, "saved" | "watched" | "updatedMs"> | null {
+  const ext = movie.external;
+  if (!ext) return null;
+  return {
+    key: ext.videoId,
+    type: ext.type,
+    metaId: ext.metaId,
+    name: movie.name,
+    seriesName: movie.seriesName,
+    poster: movie.posterUrl,
+    background: movie.backdropUrl,
+    logo: movie.logoUrl,
+    year: movie.year,
+    season: ext.season,
+    episode: ext.episode,
+    imdb: ext.imdb,
+  };
+}
+
+/** A saved online title → poster card item. */
+export function libraryToMovie(entry: LibraryEntry): Movie {
+  const isEpisode = entry.type === "series" && entry.season != null;
+  const base = emptyMovie(externalId(entry.key), isEpisode ? "Episode" : entry.type === "series" ? "Series" : "Movie", entry.name);
+  return {
+    ...base,
+    external: {
+      type: kindOf(entry.type),
+      metaId: entry.metaId,
+      videoId: entry.key,
+      imdb: entry.imdb,
+      season: entry.season,
+      episode: entry.episode,
+    },
+    seriesName: entry.seriesName,
+    seasonNumber: entry.season,
+    episodeNumber: entry.episode,
+    year: entry.year,
+    posterUrl: entry.poster,
+    backdropUrl: entry.background ?? entry.poster,
+    logoUrl: entry.logo,
+    favorite: entry.saved,
+    played: entry.watched,
+  };
+}
+
 /** Online sources for a Jellyfin item that carries an IMDb id (movies and episodes). */
 export function externalRefForJellyfin(movie: Movie, seriesImdb?: string | null): ExternalRef | null {
   if (movie.kind === "Episode") {
@@ -317,7 +385,7 @@ const TAGS: Record<string, "quality" | "audio" | "languages" | "release" | "inde
 };
 
 const FIELD =
-  /((?:\u{1F4FA}|\u{1F3A5}|\u{1F39E}|\u{1F3A7}|\u{1F50A}|\u{1F4E6}|\u{1F465}|\u{1F50D}|\u{1F30E}|\u{1F4C1}|\u{1F3F7}|\u{1F4E1})\u{FE0F}?)/u;
+  /((?:\u{1F4FA}|\u{1F3A5}|\u{1F39E}|\u{1F3A7}|\u{1F50A}|\u{1F4E6}|\u{1F465}|\u{1F50D}|\u{1F30E}|\u{1F4C1}|\u{1F3F7}|\u{1F4E1}|\u{1F4DD}|\u{1F3C6})\u{FE0F}?)/u;
 
 /** The parts of a stream description worth showing; the rest is emoji noise. */
 export type StreamMeta = {
@@ -344,14 +412,68 @@ export function parseStreamMeta(description: string): StreamMeta {
   return meta;
 }
 
+/** File extensions a release name drags along. */
+const EXTENSION = /\.(mkv|mp4|avi|m4v|mov|ts|wmv|flv|webm|iso)$/i;
+
+/** A word that starts the technical tail of a release name. */
+const TECH =
+  /^(\d{3,4}p|[48]k|uhd|sdr|hdr\d*|hdr10\+?|dv|bluray|blu-ray|bdrip|bdremux|bd|brrip|bdrip|remux|microhd|web-?dl|web-?rip|hdtv|dvdrip|dvd|hdrip|tvrip|cam|screener|x26[45]|h\.?26[45]|hevc|avc|xvid|divx|ac3|eac3|dts|dts-hd|truehd|atmos|aac|opus|flac|mp3|dd|ddp|\d\.\d|dual|multi|castellano|latino|spanish|espanol|español|english|ingles|inglés|subs?|vose|vo|extendida|extended|unrated|remastered|remasterizada|proper|repack|imax|complete|completa|season|temporada|s\d{1,2}(e\d{1,2})?|cap|\d{4}|4k\S*|[a-z]*uhd\S*|[a-z]*remux|[a-z]*rip\d*|\d+(en|in)\d+|www\.\S*|\S+\.(com|net|org|to|tv|top|me|io)|es-en)$/i;
+
+/** The tracker or site that stamped its name on the file. */
+const SITE = /\b[\w-]+\.(com|net|org|to|tv|top|me|io|es|cc|info)\b/gi;
+
+/** A resolution glued into a word, as in `BD1080` or `4Krip2160`. */
+const GLUED_RESOLUTION = /(?:^|\D)(?:480|540|576|720|1080|2160|4320)(?:\D|$)/;
+
+/** Edition wording, dropped from the title because it comes back as a badge. */
+const EDITION_PHRASE = /\b(v\.?\s?extendida|extended|unrated|director'?s\s?cut|remaster(ed|izada)|imax)\b/gi;
+
+/** Editions worth a badge; the rest of the technical tail is already charted. */
+const EDITIONS: [RegExp, string][] = [
+  [/\b(v\.?\s?extendida|extended)\b/i, "Extended"],
+  [/\bunrated\b/i, "Unrated"],
+  [/\bdirector'?s\s?cut\b/i, "Director's Cut"],
+  [/\b(remastered|remasterizada)\b/i, "Remastered"],
+  [/\bimax\b/i, "IMAX"],
+  [/\bdual\b/i, "Dual"],
+];
+
+/**
+ * `"Halloween Kills [MicroHD 1080p][AC3 5.1-Castellano]"` -> `"Halloween Kills"`.
+ *
+ * Everything from the first technical word on is dropped, because the picker draws
+ * those as badges. A name that is technical from the start keeps its raw text: a bad
+ * title is still better than an empty row.
+ */
+export function cleanReleaseName(raw: string): string {
+  const noExtension = raw.replace(EXTENSION, "");
+  const named = noExtension.includes(" ") ? noExtension : noExtension.replace(/[._]+/g, " ");
+  const spaced = named.replace(SITE, " ");
+  const words = spaced
+    .replace(EDITION_PHRASE, " ")
+    .replace(/[[\]()_+]/g, " ")
+    .split(/[\s.]+/)
+    .filter(Boolean);
+  const tail = words.findIndex((w) => TECH.test(w) || GLUED_RESOLUTION.test(w));
+  const title = (tail < 0 ? words : words.slice(0, tail)).join(" ").replace(/[-–—:,]+$/, "").trim();
+  return title.length > 1 ? title : spaced.trim();
+}
+
+/** Edition markers hidden in a release name, as badge labels. */
+export function editionsOf(raw: string): string[] {
+  return EDITIONS.filter(([pattern]) => pattern.test(raw)).map(([, label]) => label);
+}
+
 /** A stream reduced to what the picker draws. */
 export type StreamView = {
   stream: AddonStream;
   kind: StreamKind;
   label: StreamLabel;
   meta: StreamMeta;
-  /** Release name: the clearest thing to put on the first line. */
+  /** Just the title of the release: the technical part of it lives in `chips`. */
   title: string;
+  /** The release name as the addon wrote it, for the rows nothing could be read from. */
+  raw: string;
   /** Short descriptors drawn next to the languages. */
   chips: string[];
   /** False when the addon did not tag its description: fall back to its raw text. */
@@ -362,13 +484,19 @@ export function streamView(stream: AddonStream): StreamView {
   const label = parseStreamLabel(stream.name);
   const meta = parseStreamMeta(stream.title);
   const audio = meta.audio.join(" ");
+  const raw = meta.release ?? stream.filename ?? stream.name;
+  const chips = [label.resolution, ...meta.quality, audio].filter((c): c is string => Boolean(c));
+  for (const edition of editionsOf(raw)) {
+    if (!chips.some((chip) => chip.toLowerCase().includes(edition.toLowerCase()))) chips.push(edition);
+  }
   return {
     stream,
     kind: USENET.test(`${label.addon ?? ""} ${meta.indexer ?? ""}`) ? "download" : "stream",
     label,
     meta,
-    title: meta.release ?? stream.filename ?? stream.name,
-    chips: [label.resolution, ...meta.quality, audio].filter((c): c is string => Boolean(c)),
+    title: cleanReleaseName(raw),
+    raw,
+    chips,
     parsed: Boolean(meta.release || meta.languages.length || meta.quality.length || audio),
   };
 }

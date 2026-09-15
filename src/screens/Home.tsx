@@ -71,13 +71,15 @@ export function Home({
   onLogout: () => void;
 }) {
   const { t } = useI18n();
-  const { version: userDataVersion, clearOverrides } = useUserData();
+  const { version: userDataVersion, clearOverrides, onlineList } = useUserData();
   const hasServer = sessionHasServer(session);
   const [data, setData] = useState<HomeData | null>(null);
   const [favorites, setFavorites] = useState<Movie[] | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<NavView>("home");
+  /** The header owns the search box; the search view only renders what it types. */
+  const [search, setSearch] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>(undefined);
   /** IPTV lists of the profile (the TV tab shows up when there is at least one). */
   const [tvSources, setTvSources] = useState<IptvSource[]>([]);
@@ -218,7 +220,7 @@ export function Home({
 
   // Server tabs vanish when the server goes away (unlinked): fall back to Home.
   useEffect(() => {
-    if (!hasServer && (view === "myserver" || view === "mylist" || view.startsWith("lib:"))) setView("home");
+    if (!hasServer && (view === "myserver" || view.startsWith("lib:"))) setView("home");
   }, [hasServer, view]);
 
   // The TV tab disappears with the last IPTV list.
@@ -258,9 +260,14 @@ export function Home({
 
   const hero = useMemo(() => mixFeatured(data?.featured ?? [], addonFeatured), [data, addonFeatured]);
 
+  /** "My list" is the server's favourites plus the online titles saved locally. */
+  const myList = useMemo(() => [...onlineList, ...(favorites ?? [])], [onlineList, favorites]);
+
   const openView = (next: NavView) => {
     setStack([]);
     if (next !== "settings") setSettingsSection(undefined);
+    // Leaving the search view empties the box, so the header stops showing a stale query.
+    if (next !== "search") setSearch("");
     if (next === view) return;
     history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
     setView(next);
@@ -269,7 +276,18 @@ export function Home({
 
   const back = () => {
     const previous = history.current.pop() ?? "home";
+    if (previous !== "search") setSearch("");
     setView(previous);
+  };
+
+  /** Switching to the search view without wiping what is being typed. */
+  const openSearch = () => {
+    if (view === "search") return;
+    setStack([]);
+    setSettingsSection(undefined);
+    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    setView("search");
+    scroller.current?.scrollTo({ top: 0 });
   };
 
   /** Settings opened on a given section (e.g. the TV tab's "configure IPTV"). */
@@ -334,11 +352,6 @@ export function Home({
       return;
     }
     onPlay(movie);
-  };
-
-  const addLibrary = (library: Library) => {
-    if (!added.includes(library.id)) setAdded([...added, library.id]);
-    openView(libraryView(library.id));
   };
 
   const removeLibrary = (id: string) => {
@@ -426,9 +439,13 @@ export function Home({
         view={view}
         onView={openView}
         libraries={pinned}
-        available={libraries}
-        onAddLibrary={addLibrary}
         onRemoveLibrary={removeLibrary}
+        search={search}
+        onSearch={(query) => {
+          setSearch(query);
+          if (query && view !== "search") openSearch();
+        }}
+        onSearchFocus={openSearch}
         scrolled={scrolled}
         hidden={hasStack}
         onSwitchProfile={onSwitchProfile}
@@ -465,6 +482,8 @@ export function Home({
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}
+            query={search}
+            onQuery={setSearch}
             hasServer={hasServer}
             genres={data?.genres ?? []}
             onOpen={openDetails}
@@ -478,7 +497,7 @@ export function Home({
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
-          grid(t("myList"), favorites ?? [], { text: t("emptyList"), hint: t("emptyListHint") })
+          grid(t("myList"), myList, { text: t("emptyList"), hint: t("emptyListHint") })
         ) : view === "myserver" && data ? (
           <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
@@ -517,6 +536,7 @@ export function Home({
             route={route}
             top={i === stack.length - 1 && !picker}
             onBack={popDetails}
+            onOpen={openDetails}
             onPlay={play}
           />
         ) : (

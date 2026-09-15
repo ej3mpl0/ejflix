@@ -992,10 +992,11 @@ async fn update_install(
 /// the ones the UI links to.
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
-    const ALLOWED: [&str; 3] = [
+    const ALLOWED: [&str; 4] = [
         "https://github.com/",
         "https://discord.com/developers/",
         "https://introdb.app/",
+        "https://x.com/",
     ];
     if !ALLOWED.iter().any(|p| url.starts_with(p)) || url.chars().any(|c| c.is_control() || c == '"') {
         return Err("Enlace no permitido".into());
@@ -1517,6 +1518,56 @@ async fn addon_progress_remove(app: tauri::AppHandle, state: State<'_, AppState>
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MetasArgs {
+    kind: String,
+    ids: Vec<String>,
+}
+
+#[tauri::command]
+async fn addon_metas(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: MetasArgs,
+) -> Result<Vec<AddonMeta>, String> {
+    let addons = loaded_addons(&app, &state).await;
+    Ok(state.addons.metas(&addons, &args.kind, &args.ids).await)
+}
+
+#[tauri::command]
+async fn addon_library_list(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Vec<addons::LibraryEntry>, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => addons::load_library(&app, &uid),
+        None => vec![],
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LibraryFlagArgs {
+    entry: addons::LibraryEntry,
+    #[serde(default)]
+    saved: Option<bool>,
+    #[serde(default)]
+    watched: Option<bool>,
+}
+
+#[tauri::command]
+async fn addon_library_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: LibraryFlagArgs,
+) -> Result<Vec<addons::LibraryEntry>, String> {
+    match settings_user(&app, &state).await {
+        Some(uid) => addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched),
+        None => Err("No hay ningún perfil activo".into()),
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ExternalPlayArgs {
     url: String,
     title: String,
@@ -1902,6 +1953,9 @@ pub fn run() {
             addon_streams,
             addon_progress_list,
             addon_progress_remove,
+            addon_metas,
+            addon_library_list,
+            addon_library_set,
             iptv_status,
             iptv_source_save,
             iptv_source_import,

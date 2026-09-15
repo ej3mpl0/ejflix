@@ -1,15 +1,14 @@
+import wordmark from "../assets/ejflix-wordmark.png";
 import { cn } from "../lib/format";
 
+/** The ejFlix wordmark. `nav` sits in the header bar, `login` heads the sign-in screens. */
 export function Logo({ size = "nav" }: { size?: "nav" | "login" }) {
   return (
-    <span
-      className={cn(
-        "font-brand tracking-[0.04em] bg-clip-text text-transparent",
-        size === "nav" ? "text-[24px] leading-none" : "text-[40px] leading-none",
-      )}
-      style={{ backgroundImage: "var(--brand-gradient)" }}
-    >
-      EJFLIX
-    </span>
+    <img
+      src={wordmark}
+      alt="ejFlix"
+      draggable={false}
+      className={cn("w-auto select-none object-contain", size === "nav" ? "h-[22px]" : "h-[38px]")}
+    />
   );
 }

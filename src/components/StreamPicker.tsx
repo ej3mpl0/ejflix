@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Globe, Link2, Link2Off, Play, X, Zap } from "lucide-react";
 import type { AddonStream, Movie } from "../lib/types";
 import { api } from "../lib/api";
@@ -9,7 +9,19 @@ import { useBackNavigation } from "../lib/use-back";
 import { useDownloads } from "../lib/downloads-context";
 import { Chip } from "./Chip";
 import { KebabMenu, type MenuAction } from "./KebabMenu";
+import { Select } from "./Select";
 import { Shimmer } from "./Shimmer";
+
+/** Resolutions from best to worst, so the filter reads like a quality ladder. */
+const QUALITY_ORDER = ["2160p", "1440p", "1080p", "720p", "576p", "480p", "360p"];
+
+function byQuality(a: string, b: string): number {
+  const rank = (q: string) => {
+    const index = QUALITY_ORDER.indexOf(q.toLowerCase());
+    return index < 0 ? QUALITY_ORDER.length : index;
+  };
+  return rank(a) - rank(b) || a.localeCompare(b);
+}
 
 /** Clipboard, with the old command as a fallback when WebView2 refuses the async API. */
 async function copyText(text: string): Promise<boolean> {
@@ -37,8 +49,9 @@ async function copyText(text: string): Promise<boolean> {
 /**
  * Sheet listing the online sources (Stremio addon streams) of a title, split into the
  * ones that stream straight away (torrent/debrid) and the ones that have to be fetched
- * first (usenet). Picking one plays it; the three-dot menu saves it to the Downloads
- * folder or copies its link. Sources mpv cannot open are listed but cannot be played.
+ * first (usenet). In the Streaming tab a row plays and the three-dot menu downloads or
+ * copies the link; in the Downloads tab a row can only download, because usenet is
+ * fetched before it can be watched. Sources mpv cannot open are listed but disabled.
  */
 export function StreamPicker({
   movie,
@@ -55,6 +68,9 @@ export function StreamPicker({
   const downloads = useDownloads();
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
   const [tab, setTab] = useState<StreamKind>("stream");
+  const [quality, setQuality] = useState("");
+  const [availability, setAvailability] = useState("");
+  const [language, setLanguage] = useState("");
   const [error, setError] = useState("");
   const ext = movie.external;
 
@@ -87,8 +103,7 @@ export function StreamPicker({
     ? [movie.seriesName, episodeCode(movie, "S{s}E{e}"), movie.name].filter(Boolean).join(" - ")
     : [movie.name, movie.year ? `(${movie.year})` : null].filter(Boolean).join(" ");
 
-  /** Addons that answered with an error report instead of a source are not worth a row. */
-  const views = (streams ?? []).map(streamView).filter((v) => !v.label.failed);
+  const views = (streams ?? []).map(streamView);
   const streaming = views.filter((v) => v.kind === "stream");
   const fetched = views.filter((v) => v.kind === "download");
   /** The tabs only earn their place once a usenet source has actually turned up. */
@@ -96,8 +111,25 @@ export function StreamPicker({
   const active: StreamKind = tabbed ? tab : "stream";
   const shown = active === "stream" ? streaming : fetched;
 
+  const qualities = useMemo(
+    () => [...new Set(shown.map((v) => v.label.resolution).filter((q): q is string => Boolean(q)))].sort(byQuality),
+    [shown],
+  );
+  const languages = useMemo(
+    () => [...new Set(shown.flatMap((v) => v.meta.languages))].sort((a, b) => a.localeCompare(b)),
+    [shown],
+  );
+  const filtered = shown.filter((view) => {
+    if (quality && view.label.resolution !== quality) return false;
+    if (availability === "instant" && !view.label.cached) return false;
+    if (availability === "fetch" && view.label.cached) return false;
+    if (language && !view.meta.languages.includes(language)) return false;
+    return true;
+  });
+  const filtering = Boolean(quality || availability || language);
+
   const groups = new Map<string, StreamView[]>();
-  for (const view of shown) {
+  for (const view of filtered) {
     const key = view.label.addon ?? view.stream.addonName;
     const list = groups.get(key) ?? [];
     list.push(view);
@@ -108,23 +140,28 @@ export function StreamPicker({
     onToast((await copyText(link)) ? t("linkCopied") : t("copyFailed"));
   };
 
-  const actionsFor = (stream: AddonStream): MenuAction[] => {
+  const startDownload = (stream: AddonStream) =>
+    void downloads.start({
+      url: stream.url ?? "",
+      headers: stream.headers,
+      title: downloadTitle,
+      fileName: stream.filename ?? "",
+      source: stream.addonName,
+      size: stream.videoSize,
+    });
+
+  const actionsFor = (view: StreamView): MenuAction[] => {
+    const stream = view.stream;
     const actions: MenuAction[] = [];
-    if (stream.url) {
+    if (view.label.failed) return actions;
+    // In the Downloads tab the row itself downloads, so the menu would only repeat it.
+    if (stream.url && active !== "download") {
       actions.push({
         id: "download",
         label: t("download"),
         icon: <Download size={15} />,
         hint: formatSize(stream.videoSize) || undefined,
-        onSelect: () =>
-          void downloads.start({
-            url: stream.url ?? "",
-            headers: stream.headers,
-            title: downloadTitle,
-            fileName: stream.filename ?? "",
-            source: stream.addonName,
-            size: stream.videoSize,
-          }),
+        onSelect: () => startDownload(stream),
       });
     }
     const link = stream.url ?? stream.externalUrl;
@@ -161,6 +198,57 @@ export function StreamPicker({
             <X size={18} />
           </button>
         </div>
+        {views.length ? (
+          <div className="flex flex-wrap items-center gap-2 px-6 pb-3">
+            {qualities.length > 1 ? (
+              <Select
+                label={t("filterQuality")}
+                value={quality}
+                onChange={setQuality}
+                className="h-9 min-w-[130px] text-[13px]"
+                options={[{ value: "", label: t("filterQuality") }, ...qualities.map((q) => ({ value: q, label: q }))]}
+              />
+            ) : null}
+            {active === "stream" ? (
+              <Select
+                label={t("filterAvailability")}
+                value={availability}
+                onChange={setAvailability}
+                className="h-9 min-w-[150px] text-[13px]"
+                options={[
+                  { value: "", label: t("filterAvailability") },
+                  { value: "instant", label: t("streamInstant") },
+                  { value: "fetch", label: t("streamNeedsFetch") },
+                ]}
+              />
+            ) : null}
+            {languages.length > 1 ? (
+              <Select
+                label={t("filterLanguage")}
+                value={language}
+                onChange={setLanguage}
+                className="h-9 min-w-[140px] text-[13px]"
+                options={[{ value: "", label: t("filterLanguage") }, ...languages.map((l) => ({ value: l, label: l }))]}
+              />
+            ) : null}
+            {filtering ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQuality("");
+                  setAvailability("");
+                  setLanguage("");
+                }}
+                className="h-9 rounded-pill px-3 text-[13px] text-dim hover:bg-white/8 hover:text-text"
+              >
+                {t("filterClear")}
+              </button>
+            ) : null}
+            <span className="ml-auto text-[12px] text-dim tabular">
+              {filtered.length === 1 ? t("sourceCountOne") : t("sourceCount", { count: String(filtered.length) })}
+            </span>
+          </div>
+        ) : null}
         {tabbed ? (
           <div className="flex gap-2 px-6 pb-3" role="tablist" aria-label={t("onlineSources")}>
             <Chip
@@ -204,6 +292,9 @@ export function StreamPicker({
               {active === "stream" ? t("noStreamingSources") : t("noDownloadSources")}
             </p>
           ) : null}
+          {shown.length > 0 && !filtered.length ? (
+            <p className="px-2 py-10 text-center text-[13px] text-dim">{t("noSourcesMatch")}</p>
+          ) : null}
           {[...groups.entries()].map(([source, list]) => (
             <section key={source} className="mb-3">
               <p className="px-2 pb-1.5 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{source}</p>
@@ -211,34 +302,55 @@ export function StreamPicker({
                 {list.map((view, i) => {
                   const stream = view.stream;
                   const size = formatSize(stream.videoSize);
-                  const actions = actionsFor(stream);
+                  const actions = actionsFor(view);
+                  const failed = view.label.failed;
+                  // Usenet sources are fetched, not streamed: in that tab the row downloads.
+                  const downloadOnly = active === "download";
+                  const enabled = failed ? false : downloadOnly ? Boolean(stream.url) : stream.playable;
                   return (
                     <div
                       key={`${source}:${i}`}
                       className={cn(
                         "group/st flex items-center rounded-xl pr-1.5 transition-colors duration-150",
-                        stream.playable ? "hover:bg-white/6" : "opacity-50",
+                        enabled ? "hover:bg-white/6" : "opacity-50",
                       )}
                     >
                       <button
                         type="button"
-                        disabled={!stream.playable}
-                        onClick={() => stream.playable && onPlay(movie, stream)}
+                        disabled={!enabled}
+                        aria-label={downloadOnly ? `${t("download")} ${view.title}` : undefined}
+                        onClick={() => {
+                          if (!enabled) return;
+                          if (downloadOnly) startDownload(stream);
+                          else onPlay(movie, stream);
+                        }}
                         className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left"
                       >
                         <span
                           className={cn(
                             "grid h-9 w-9 shrink-0 place-items-center rounded-full",
-                            stream.playable
+                            enabled
                               ? "bg-white/10 text-white group-hover/st:bg-accent group-hover/st:text-on-accent"
                               : "bg-white/5 text-dim",
                           )}
                         >
-                          {stream.playable ? <Play size={15} fill="currentColor" className="translate-x-px" /> : <Link2Off size={15} />}
+                          {failed ? (
+                            <Link2Off size={15} />
+                          ) : downloadOnly ? (
+                            <Download size={15} />
+                          ) : stream.playable ? (
+                            <Play size={15} fill="currentColor" className="translate-x-px" />
+                          ) : (
+                            <Link2Off size={15} />
+                          )}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[14px] font-medium text-text">{view.title}</span>
-                          {!stream.playable ? (
+                          {failed ? (
+                            <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">
+                              {stream.title || t("streamFailed")}
+                            </span>
+                          ) : !stream.playable && !downloadOnly ? (
                             <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">{t("streamUnsupported")}</span>
                           ) : view.parsed ? (
                             <span className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -248,7 +360,10 @@ export function StreamPicker({
                                   {t("streamInstant")}
                                 </span>
                               ) : view.label.pending ? (
-                                <span className="inline-flex h-[18px] items-center rounded-md bg-warning/15 px-1.5 text-[11px] font-medium text-warning">
+                                <span
+                                  title={t("streamNeedsFetchHint")}
+                                  className="inline-flex h-[18px] items-center rounded-md bg-warning/15 px-1.5 text-[11px] font-medium text-warning"
+                                >
                                   {t("streamNeedsFetch")}
                                 </span>
                               ) : null}
@@ -271,7 +386,7 @@ export function StreamPicker({
                             </span>
                           ) : (
                             <span className="line-clamp-2 text-[12px] leading-[1.4] whitespace-pre-line text-muted">
-                              {stream.title || stream.filename || ""}
+                              {stream.title || view.raw}
                             </span>
                           )}
                         </span>

@@ -55,7 +55,9 @@ impl Default for IptvPrefs {
 #[serde(rename_all = "camelCase", default)]
 pub struct DiscordPrefs {
     pub enabled: bool,
-    /// Discord application id; empty falls back to the built-in one.
+    /// Kept for stores written by older versions; the app always uses its own
+    /// application id, so that Discord shows the ejFlix name and artwork.
+    #[serde(skip_serializing)]
     pub client_id: String,
     pub details: String,
     pub state: String,
@@ -208,14 +210,8 @@ impl Settings {
         let mut seen_urls = std::collections::HashSet::new();
         self.addons.urls.retain(|u| seen_urls.insert(u.clone()));
         self.addons.urls.truncate(30);
-        self.discord.client_id = self
-            .discord
-            .client_id
-            .trim()
-            .chars()
-            .filter(|c| c.is_ascii_digit())
-            .take(32)
-            .collect();
+        // Always ejFlix's own application, whatever an older store may hold.
+        self.discord.client_id = String::new();
         self.discord.details = self.discord.details.chars().take(128).collect();
         self.discord.state = self.discord.state.chars().take(128).collect();
         if !["name", "details", "state"].contains(&self.discord.header.as_str()) {

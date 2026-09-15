@@ -10,6 +10,7 @@ import {
   Pencil,
   Play,
   Puzzle,
+  Info,
   Server,
   Tv,
   Unlink,
@@ -19,7 +20,7 @@ import {
 import { AddonsSection } from "../components/settings/AddonsSection";
 import { IptvSection } from "../components/settings/IptvSection";
 import { DiscordSection } from "../components/settings/DiscordSection";
-import { UpdatesSection } from "../components/settings/UpdatesSection";
+import { AboutSection } from "../components/settings/AboutSection";
 import { hasServer as sessionHasServer, type SavedServer, type Session, type SkipMode, type Countdown } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
@@ -34,7 +35,7 @@ import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 
-type Section = "appearance" | "playback" | "addons" | "iptv" | "discord" | "language" | "account";
+type Section = "appearance" | "playback" | "addons" | "iptv" | "discord" | "language" | "account" | "about";
 export type SettingsSectionId = Section;
 
 const field =
@@ -264,6 +265,7 @@ export function Settings({
     { id: "discord", label: t("discord"), icon: MessageCircle },
     { id: "language", label: t("language"), icon: LanguagesIcon },
     { id: "account", label: t("account"), icon: Users },
+    { id: "about", label: t("about"), icon: Info },
   ];
 
   return (
@@ -453,9 +455,10 @@ export function Settings({
                   </div>
                 </SettingsSection>
               )}
-              <UpdatesSection version={version} />
             </>
           ) : null}
+
+          {section === "about" ? <AboutSection version={version} /> : null}
         </div>
       </div>
     </div>

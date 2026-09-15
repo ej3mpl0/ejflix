@@ -203,6 +203,12 @@ button {
   outline-offset: 2px;
 }
 
+/* Fields that draw their own focus state. This rule is unlayered like the one above,
+   because a Tailwind utility lives in a layer and would lose to it. */
+.field-own-focus:focus-visible {
+  outline: none;
+}
+
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

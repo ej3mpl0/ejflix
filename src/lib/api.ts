@@ -30,6 +30,7 @@ import type {
   ProfilePatch,
   PublicInfo,
   PublicUser,
+  LibraryEntry,
   ResumeEntry,
   SavedServer,
   Session,
@@ -97,10 +98,19 @@ export const api = {
     skip?: number;
   }) => invoke<AddonMeta[]>("addon_catalog", { args }),
   addonMeta: (type: string, id: string) => invoke<AddonMetaFull>("addon_meta", { kind: type, id }),
+  /** Poster-card metadata of several titles at once (a collection names them only). */
+  addonMetas: (type: string, ids: string[]) => invoke<AddonMeta[]>("addon_metas", { args: { kind: type, ids } }),
   addonStreams: (type: string, id: string) =>
     invoke<AddonStream[]>("addon_streams", { kind: type, id }),
   addonProgressList: () => invoke<ResumeEntry[]>("addon_progress_list"),
   addonProgressRemove: (key: string) => invoke<void>("addon_progress_remove", { key }),
+  addonLibraryList: () => invoke<LibraryEntry[]>("addon_library_list"),
+  /** Saves or clears "in my list" / "watched" for an online title; returns the whole list. */
+  addonLibrarySet: (args: {
+    entry: Omit<LibraryEntry, "saved" | "watched" | "updatedMs">;
+    saved?: boolean;
+    watched?: boolean;
+  }) => invoke<LibraryEntry[]>("addon_library_set", { args }),
   /** Plays an online stream; `entry` identifies the title for the local progress. */
   playerStartUrl: (args: {
     url: string;

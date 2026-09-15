@@ -1,6 +1,6 @@
 # ejFlix
 
-A lightweight Jellyfin client for Windows 11 that also works without a server. Netflix-style browsing and native Direct Play through mpv: 4K, HDR, and the original codec, without transcoding. Online mode plays Stremio addon sources (AIOStreams, Torrentio with debrid…) straight in mpv.
+A lightweight Jellyfin client for Windows 11 that also works without a server. Video plays natively in mpv with Direct Play: 4K, HDR and the original codec, no transcoding. Online mode plays Stremio addon sources (AIOStreams, Torrentio with debrid…) in the same player, and live TV comes from your own IPTV lists.
 
 The interface is available in **Spanish** and **English** (ES / EN control on the welcome, sign-in and profile screens, and in Settings › Language). Installed copies check GitHub Releases on launch and update themselves in one click.
 
@@ -26,20 +26,22 @@ The interface is available in **Spanish** and **English** (ES / EN control on th
 - Local profiles have a name, a picture (preset gradient or an uploaded photo) and an optional 4-digit PIN; they can link a Jellyfin account later from Settings › Account and keep their own settings and progress
 - Saved server, profiles, and session (the access token is encrypted with Windows DPAPI)
 - Home with a hero carousel (parallax, auto-advance, drag or arrow keys) that mixes your server's newest titles with the addon catalogs, continue watching, next up, My list, recently added (with a "New" tag for the last 14 days), addon rows and genre rows
-- Glass header with springy tabs: Home, My server (server content only), your pinned Jellyfin libraries (add them with the "+"), Discover and My list
+- Glass header with springy tabs — Home, Discover, My list, My server and TV — a search box that answers as you type, and the account menu (settings, switch profile, sign out) behind your picture
 - Discover tab: movies or series, filtered by genre and year, across the server (with popular / newest / year / name sorting) and every addon catalog that supports the genre filter; server copies win over online duplicates
-- Full details page for movies and series: backdrop tinted with its dominant colour, logo, meta chips, expandable synopsis, season chips with the episode list, circular cast avatars, chapters, "More like this" and production info; pages stack so you can browse from one title to another and come back
+- Full details page for movies and series: backdrop tinted with its dominant colour, logo, meta chips, synopsis with the production details beside it, season chips with the episode list, circular cast avatars, chapters, and a rail of what to watch next; pages stack so you can browse from one title to another and come back
+- That rail is the title's own collection when it has one — the whole saga, under its name — and otherwise more of its first genre, said plainly rather than dressed up as a recommendation
 - Skip intro / recap / credits: data from the Jellyfin media segments (10.10+, filled by the Intro Skipper or TheIntroDB plugins) with the public IntroDB community database as a fallback for series with an IMDb id; each kind can be "ask", "automatic" or "off"
 - Next-episode card at the start of the credits (or in the last 30 s) with a configurable countdown (manual, 5, 10 or 15 s)
-- Player chrome in the Nuvio style: centred pill toolbar (aspect ratio, speed, subtitles, audio, episodes), lockable controls, paused-state info card, episode and version panel inside the player
-- Netflix-style timeline: scene previews on hover (Jellyfin trickplay or chapter images), drag to scrub, buffered indicator, chapter markers and intro/credits bands
+- Player chrome: centred pill toolbar (aspect ratio, speed, subtitles, audio, episodes), lockable controls, paused-state info card, episode and version panel inside the player
+- Timeline with scene previews on hover (Jellyfin trickplay or chapter images), drag to scrub, buffered indicator, chapter markers and intro/credits bands
 - Preferred audio and subtitle language, remembered playback speed, remaining-time toggle
-- My list (Jellyfin favourites) and mark as watched / unwatched for movies, series, seasons and episodes
-- Settings per profile: 12 accent themes (Crimson, White, Gold, Jade, Rose gold, Arctic, Graphite, Ocean, Violet, Emerald, Amber, Rose), AMOLED black, poster size, playback preferences, app language, account
+- My list and mark as watched / unwatched, for movies, series, seasons and episodes on the server (Jellyfin favourites) and for online titles too, which the app remembers per profile
+- Settings per profile: 12 accent themes (Crimson, White, Gold, Jade, Rose gold, Arctic, Graphite, Ocean, Violet, Emerald, Amber, Rose), AMOLED black, poster size, playback preferences, app language, account, and an About page with the version and the updates
 - Stremio addons: load any `manifest.json` (AIOStreams, Torrentio…) to get catalog rows on Home and online sources played straight in mpv, with local resume and automatic next episode
+- Online sources listed by the addon that found them, with the release name on its own and the technical part as badges, and filters for quality, availability and language
 - Download online sources: the three-dot menu of every source saves it to `Downloads/ejFlix` with progress, cancel and a shortcut to its folder, or copies its link
 - Live TV (IPTV): M3U playlists by URL or file and Xtream Codes accounts (Settings › IPTV), with the XMLTV programme guide, groups, favorites, recently watched channels, a channels panel and zapping inside the player
-- Search across the server and the searchable addon catalogs, results grouped as "My server" and "Online", with recent queries
+- Search from the header across the server and the searchable addon catalogs, results grouped as "My server" and "Online", ranked by how well they answer the query and with one card per title, with recent queries
 - Discord Rich Presence (Settings › Discord): shows what you are watching with poster, time remaining and paused state; the two text lines are templates
 - Language selector: Spanish and English
 - Native playback: Direct Play, hardware decode, HDR when Windows HDR is on
@@ -59,11 +61,11 @@ Pick "Watch online with addons" on the welcome screen and create a profile. Home
 
 ### Discord Rich Presence
 
-Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. While a live channel plays, `{title}` is the channel, `{episode}` the programme on air (from the guide), `{type}` reads "Live TV" and the time shown is the programme's own window. It ships with ejFlix's own Discord application, so the card reads "ejFlix" and the status line "Watching <title>" (configurable: title, second line or app name); paste another Application ID in Settings › Discord if you want a different name or icon. Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
+Settings › Discord turns it on. The app talks to the Discord client on this PC through its local IPC pipe (no SDK, no extra process) and shows "Watching ejFlix" with the title, episode, poster and time remaining. The two lines are templates with `{title}`, `{episode}`, `{year}`, `{type}` and `{source}`; you can hide the poster or the time and decide whether the presence stays while paused. While a live channel plays, `{title}` is the channel, `{episode}` the programme on air (from the guide), `{type}` reads "Live TV" and the time shown is the programme's own window. It uses ejFlix's own Discord application, so the card always reads "ejFlix" and the status line "Watching <title>" (configurable: title, second line or app name). Posters are fetched by Discord itself, so a server that is only reachable on your LAN will not show its images (online titles do).
 
 ### Updates
 
-On launch (four seconds after boot, and only if "Check for updates on launch" is on in Settings › Account) the app asks the public GitHub API for the latest release of this repository. If the tag is newer than the running version, a dialog shows the release notes and offers "Download and install": the `*-setup.exe` asset is downloaded to `%TEMP%\ejflix-update\` with a progress bar, then launched in passive mode (`/P /R /UPDATE`), which closes ejFlix, installs and reopens it. "Skip this version" silences that release; "Check now" in Settings always asks again. Nothing is sent to GitHub besides the request itself, and no token is involved.
+On launch (four seconds after boot, and only if "Check for updates on launch" is on in Settings › About) the app asks the public GitHub API for the latest release of this repository. If the tag is newer than the running version, a dialog shows the release notes and offers "Download and install": the `*-setup.exe` asset is downloaded to `%TEMP%\ejflix-update\` with a progress bar, then launched in passive mode (`/P /R /UPDATE`), which closes ejFlix, installs and reopens it. "Skip this version" silences that release; "Check now" in Settings always asks again. Nothing is sent to GitHub besides the request itself, and no token is involved.
 
 ### Stremio addons (online sources)
 
