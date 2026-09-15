@@ -47,6 +47,7 @@ export function Home({
   version,
   hidden = false,
   refreshToken = 0,
+  playFailed = 0,
   onPlay,
   onToast,
   onSessionChange,
@@ -60,6 +61,8 @@ export function Home({
   hidden?: boolean;
   /** Bump to refresh the data in the background (e.g. after playback). */
   refreshToken?: number;
+  /** Bumped when the player failed to start: bring the sources sheet back. */
+  playFailed?: number;
   onPlay: (movie: Movie) => void;
   onToast: (message: string) => void;
   /** The account changed (profile edited, server linked or unlinked). */
@@ -83,12 +86,22 @@ export function Home({
   const [stack, setStack] = useState<DetailsRoute[]>([]);
   /** Online title waiting for a stream to be chosen. */
   const [picker, setPicker] = useState<Movie | null>(null);
+  /** The sheet a stream was launched from, so a failed start can reopen it. */
+  const lastPicker = useRef<Movie | null>(null);
   const [onlineResume, setOnlineResume] = useState<Movie[]>([]);
   const [scrolled, setScrolled] = useState(false);
   const scrolledRef = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
+
+  // The player could not start: put the user back in front of the other sources.
+  useEffect(() => {
+    if (!playFailed) return;
+    const movie = lastPicker.current;
+    lastPicker.current = null;
+    if (movie) setPicker(movie);
+  }, [playFailed]);
 
   // Libraries: everything on the server, and the ids the user pinned to the header
   // (persisted with the profile settings).
@@ -524,6 +537,7 @@ export function Home({
           onToast={onToast}
           onClose={() => setPicker(null)}
           onPlay={(movie, stream) => {
+            lastPicker.current = picker;
             setPicker(null);
             if (!movie.external) return;
             onPlay({ ...movie, external: { ...movie.external, stream } });

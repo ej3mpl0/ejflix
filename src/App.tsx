@@ -40,6 +40,8 @@ function AppInner() {
   const [hasLocal, setHasLocal] = useState(false);
   const [playing, setPlaying] = useState<Movie | null>(null);
   const [homeRefresh, setHomeRefresh] = useState(0);
+  // Bumped when the player could not start, so Home can bring the sources sheet back.
+  const [playFailed, setPlayFailed] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [version, setVersion] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
@@ -130,6 +132,7 @@ function AppInner() {
                 version={version}
                 hidden={playing != null}
                 refreshToken={homeRefresh}
+                playFailed={playFailed}
                 onPlay={setPlaying}
                 onToast={toast}
                 onSessionChange={(next) => {
@@ -140,7 +143,17 @@ function AppInner() {
                 onSwitchProfile={() => void switchProfile()}
                 onLogout={() => void logoutServer()}
               />
-              {playing ? <Player movie={playing} mode="engine" onExit={stopPlaying} onError={toast} /> : null}
+              {playing ? (
+                <Player
+                  movie={playing}
+                  mode="engine"
+                  onExit={stopPlaying}
+                  onError={(message) => {
+                    toast(message);
+                    setPlayFailed((n) => n + 1);
+                  }}
+                />
+              ) : null}
             </DownloadsProvider>
           </UserDataProvider>
         </SettingsProvider>

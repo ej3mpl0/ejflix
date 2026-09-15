@@ -147,7 +147,7 @@ export function SearchPage({
     <div className="page-enter px-page pt-24 pb-16">
       <form
         className={cn(
-          "mx-auto mb-8 flex h-14 max-w-[720px] items-center gap-3 rounded-pill border border-white/10 bg-surface pr-2 pl-5 transition-colors duration-150 focus-within:border-accent",
+          "mx-auto mb-8 flex h-14 max-w-[720px] items-center gap-3 rounded-pill border border-white/10 bg-surface pr-2 pl-5 transition-colors duration-150",
         )}
         onSubmit={(e) => {
           e.preventDefault();
