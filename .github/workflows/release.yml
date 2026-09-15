@@ -1,0 +1,81 @@
+## Builds the Windows installer on a clean runner and attaches it to the release of
+## the tag that triggered it, so a published build never depends on one laptop.
+##
+##   git tag v0.5.2 && git push origin v0.5.2
+##
+## Running it by hand instead (workflow_dispatch) builds the installer and leaves it as
+## a workflow artifact, touching no release.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # mpv is not in this repository (the executable is 118 MB), so it is fetched here.
+  # Pinned to one build and checked against its hash: what ships has to be the binary
+  # this line names and nothing else. The plain x86_64 build, not -v3, because -v3
+  # needs AVX2 and would not start on older processors.
+  MPV_RELEASE: "20260903"
+  MPV_ASSET: "mpv-x86_64-20260903-git-69e63f425a.7z"
+  MPV_SHA256: "418dbfb5feb851cbed33d6c05d8481ba71802621bfd6efe8974522b28d42ac97"
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Fetch mpv
+        shell: pwsh
+        run: |
+          $url = "https://github.com/shinchiro/mpv-winbuild-cmake/releases/download/$env:MPV_RELEASE/$env:MPV_ASSET"
+          Write-Host "Downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile mpv.7z
+          $hash = (Get-FileHash mpv.7z -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $env:MPV_SHA256) {
+            throw "mpv checksum mismatch: expected $env:MPV_SHA256, got $hash"
+          }
+          7z x mpv.7z -ompv-unpacked mpv.exe
+          Move-Item mpv-unpacked\mpv.exe src-tauri\resources\mpv.exe -Force
+          Remove-Item mpv.7z, mpv-unpacked -Recurse -Force
+          & src-tauri\resources\mpv.exe --version | Select-Object -First 1
+
+      - run: npm ci
+
+      - name: Build the installer
+        run: npm run tauri build
+
+      - name: Attach it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $installer = Get-ChildItem src-tauri\target\release\bundle\nsis\*-setup.exe | Select-Object -First 1
+          if (-not $installer) { throw "no installer was produced" }
+          # The release may already exist with its notes written by hand: only add the
+          # file to it, and create it with generated notes when it does not.
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "ejFlix $($tag.TrimStart('v'))" --generate-notes
+          }
+          gh release upload $tag $installer.FullName --clobber
+
+      - name: Keep the installer as an artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ejflix-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe

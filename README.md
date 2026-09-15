@@ -119,7 +119,7 @@ To develop from source you also need:
 
 ## Install
 
-Use the NSIS installer from [Releases](../../releases) (`ejFlix_*_x64-setup.exe`). It installs per-user and does not require admin.
+Use the NSIS installer from [Releases](../../releases) (`ejFlix_*_x64-setup.exe`). It installs per-user and does not require admin. Every release is built by [GitHub Actions](.github/workflows/release.yml) on a clean runner, from the tag it is named after.
 
 After install, choose "I have a Jellyfin server" and enter its URL (for example `http://192.168.1.10:8096`), or "Watch online with addons" and create a profile.
 
@@ -225,13 +225,46 @@ Locked controls (padlock in the top-right) ignore every key until you click the 
 - HTTPS certificates are validated on the public internet. Self-signed certificates are accepted only for localhost and private LAN addresses.
 - The WebView cannot read the session store directly.
 
+## Built on
+
+ejFlix is a thin shell around other people's work, and none of it would exist without
+these:
+
+- **[mpv](https://mpv.io/)** ([GitHub](https://github.com/mpv-player/mpv)) does all the
+  playing. Every frame you see, the HDR, the seeking, the subtitle rendering and the
+  audio downmix are mpv, driven through its IPC socket in a child window. The installer
+  ships a Windows build from
+  [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake),
+  which bundles **[FFmpeg](https://ffmpeg.org/)** and
+  **[libplacebo](https://code.videolan.org/videolan/libplacebo)**. mpv is licensed
+  GPLv2+ / LGPLv2.1+ depending on how it was compiled, and that binary keeps its own
+  licence: it is redistributed unmodified, and its source is at the links above.
+- **[Tauri](https://tauri.app/)** for the window, the webview bridge and the installer;
+  **[Rust](https://www.rust-lang.org/)** with
+  [reqwest](https://github.com/seanmonstar/reqwest), [tokio](https://tokio.rs/),
+  [serde](https://serde.rs/) and [rustls](https://github.com/rustls/rustls) behind it.
+- **[React](https://react.dev/)**, **[TypeScript](https://www.typescriptlang.org/)**,
+  **[Vite](https://vite.dev/)** and **[Tailwind CSS](https://tailwindcss.com/)** for the
+  interface, with **[Lucide](https://lucide.dev/)** icons and the
+  **[Inter](https://rsms.me/inter/)** and **[Bebas Neue](https://fonts.google.com/specimen/Bebas+Neue)**
+  typefaces.
+- **[Jellyfin](https://jellyfin.org/)** is the server this client talks to, and its
+  HTTP API is what makes the library, the playback reporting and the trickplay
+  previews possible.
+- The **[Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk)** and
+  **Cinemeta** for online catalogs and metadata; **[IntroDB](https://introdb.app)** and
+  the [Intro Skipper](https://github.com/intro-skipper/intro-skipper) plugin for the
+  intro and credits ranges.
+
+Thanks to all of them. Bugs in ejFlix are ejFlix's own.
+
 ## License
 
 ejFlix is [MIT licensed](LICENSE): use it, change it and redistribute it, keeping the
 copyright notice.
 
-That covers this repository's own code. The installer also ships `mpv.exe`, which is
-not part of this project and keeps the licence of the build it came from (GPL or LGPL
-depending on how it was compiled); redistributing it means honouring those terms, so
-replace it with your own build if you repackage ejFlix. Jellyfin, Stremio addons and
-any IPTV list you point the app at are likewise none of this project's doing.
+That covers this repository's own code, not what it bundles. `mpv.exe` is not part of
+this project and keeps the licence of the build it came from, so repackaging ejFlix
+means honouring those terms — see "Built on" above. Jellyfin, the Stremio addons you
+load and any IPTV list you point the app at are likewise none of this project's doing,
+and it is on you to have the right to the content you play through them.
