@@ -113,7 +113,7 @@ Scene previews need trickplay images generated on the Jellyfin server (Jellyfin 
 
 To develop from source you also need:
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 22+
 - [Rust](https://rustup.rs/) with the MSVC toolchain
 - Visual Studio Build Tools or Community with C++
 
