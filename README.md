@@ -68,6 +68,11 @@ availability and language, or downloaded to disk.
 **Live TV** — M3U playlists and Xtream Codes accounts with their XMLTV guide, groups,
 favourites and zapping from inside the player.
 
+**Your account** — Optional. Sign up from the app or at [ejflix.xyz](https://ejflix.xyz)
+(email confirmation, two-step verification, password recovery) and your servers,
+addons, IPTV lists, My list, watched titles and progress follow you from one PC to the
+next. The website manages all of it, plus your devices. Local profiles work without it.
+
 **The rest** — Twelve accent themes plus AMOLED black, Discord Rich Presence, and
 updates that install themselves in one click.
 

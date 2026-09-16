@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AccountStatus,
+  MfaEnrollment,
+  SyncReport,
   AddonInfo,
   AddonMeta,
   AddonMetaFull,
@@ -205,4 +208,25 @@ export const api = {
   settingsSet: (patch: SettingsPatch) => invoke<Settings>("settings_set", { patch }),
   onSettingsChanged: (handler: (settings: Settings) => void): Promise<UnlistenFn> =>
     listen<Settings>("settings://changed", (event) => handler(event.payload)),
+  // ejFlix account (Supabase, driven from Rust; errors come back as "auth:<code>")
+  accountStatus: () => invoke<AccountStatus>("account_status"),
+  accountSignUp: (email: string, password: string, language: string) =>
+    invoke<{ confirmEmail: boolean }>("account_sign_up", { email, password, language }),
+  accountSignIn: (email: string, password: string) =>
+    invoke<{ mfaRequired: boolean }>("account_sign_in", { email, password }),
+  accountMfaVerify: (code: string) => invoke<AccountStatus>("account_mfa_verify", { code }),
+  accountMfaEnroll: () => invoke<MfaEnrollment>("account_mfa_enroll"),
+  accountMfaConfirm: (factorId: string, code: string) =>
+    invoke<AccountStatus>("account_mfa_confirm", { factorId, code }),
+  accountMfaDisable: (code: string) => invoke<AccountStatus>("account_mfa_disable", { code }),
+  accountResendConfirmation: (email: string) => invoke<void>("account_resend_confirmation", { email }),
+  accountResetPassword: (email: string, language: string) =>
+    invoke<void>("account_reset_password", { email, language }),
+  accountSignOut: () => invoke<AccountStatus>("account_sign_out"),
+  accountDelete: () => invoke<AccountStatus>("account_delete"),
+  accountSetCredentials: (enabled: boolean) => invoke<AccountStatus>("account_set_credentials", { enabled }),
+  accountDismissPrompt: () => invoke<void>("account_dismiss_prompt"),
+  accountSyncNow: () => invoke<SyncReport>("account_sync_now"),
+  onAccountChanged: (handler: (status: AccountStatus) => void): Promise<UnlistenFn> =>
+    listen<AccountStatus>("account://changed", (event) => handler(event.payload)),
 };

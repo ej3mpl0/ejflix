@@ -1,6 +1,6 @@
 [package]
 name = "ejflix"
-version = "0.5.2"
+version = "0.6.0"
 description = "Cliente Jellyfin ligero para Windows 11"
 license = "MIT"
 repository = "https://github.com/ej3mpl0/ejflix"
@@ -23,6 +23,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
+base64 = "0.22"
 raw-window-handle = "0.6"
 
 [profile.release]

@@ -21,6 +21,7 @@ import { AddonsSection } from "../components/settings/AddonsSection";
 import { IptvSection } from "../components/settings/IptvSection";
 import { DiscordSection } from "../components/settings/DiscordSection";
 import { AboutSection } from "../components/settings/AboutSection";
+import { AccountSettings } from "../components/account/AccountSettings";
 import { hasServer as sessionHasServer, type SavedServer, type Session, type SkipMode, type Countdown } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
@@ -424,6 +425,7 @@ export function Settings({
 
           {section === "account" ? (
             <>
+              <AccountSettings onToast={onToast} />
               {session.mode === "local" ? (
                 <LocalAccount
                   session={session}

@@ -73,3 +73,6 @@ Desktop.ini
 
 # Cursor local state (keep committed project skills in .agents/)
 .cursor/
+
+# Website (separate project, lives in its own repo)
+web/

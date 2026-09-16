@@ -604,6 +604,30 @@ export type ChannelPage = { items: Channel[]; total: number };
 
 export type SettingsPatch = { [K in keyof Settings]?: Partial<Settings[K]> };
 
+/** ejFlix account of the active profile (Rust holds the tokens). */
+export type AccountStatus = {
+  signedIn: boolean;
+  email: string | null;
+  mfaEnabled: boolean;
+  /** Signed in, but the code of the second factor is still due. */
+  mfaRequired: boolean;
+  syncCredentials: boolean;
+  lastSyncMs: number;
+  syncing: boolean;
+  lastError: string | null;
+  promptDismissed: boolean;
+};
+
+export type MfaEnrollment = {
+  factorId: string;
+  /** `data:image/svg+xml;utf-8,...` */
+  qrCode: string;
+  secret: string;
+  uri: string;
+};
+
+export type SyncReport = { pushed: string[]; pulled: string[]; skipped: string | null };
+
 export const DEFAULT_SETTINGS: Settings = {
   appearance: { theme: "crimson", amoled: false, posterSize: "medium" },
   playback: {

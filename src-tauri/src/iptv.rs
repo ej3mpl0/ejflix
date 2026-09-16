@@ -425,6 +425,105 @@ pub fn push_recent(app: &tauri::AppHandle, user_id: &str, channel_id: &str) -> R
     save_ids(app, &recent_key(user_id), &list)
 }
 
+/// A source as the ejFlix account stores it (`m3uFile` sources never leave the PC).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncedSource {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub kind: SourceKind,
+    pub name: String,
+    pub url: String,
+    pub username: String,
+    /// Plain text; empty keeps whatever this PC already has.
+    pub password: String,
+    pub epg_url: String,
+    pub output: String,
+    pub user_agent: String,
+    pub include_vod: bool,
+    pub enabled: bool,
+    pub created_ms: u64,
+}
+
+impl Default for SyncedSource {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            kind: SourceKind::M3uUrl,
+            name: String::new(),
+            url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            epg_url: String::new(),
+            output: "ts".into(),
+            user_agent: String::new(),
+            include_vod: false,
+            enabled: true,
+            created_ms: 0,
+        }
+    }
+}
+
+/// Makes the profile's URL and Xtream sources match the account, keeping local file
+/// playlists as they are. Returns true when anything changed.
+pub fn apply_synced(app: &tauri::AppHandle, user_id: &str, items: Vec<SyncedSource>) -> Result<bool, String> {
+    let before = list_sources(app, user_id);
+    let mut list: Vec<IptvSource> = before
+        .iter()
+        .filter(|s| matches!(s.kind, SourceKind::M3uFile))
+        .cloned()
+        .collect();
+    for item in items {
+        if matches!(item.kind, SourceKind::M3uFile) || !valid_source_id(&item.id) {
+            continue;
+        }
+        if list.len() >= MAX_SOURCES {
+            break;
+        }
+        let mut source = before.iter().find(|s| s.id == item.id).cloned().unwrap_or_else(|| IptvSource {
+            id: item.id.clone(),
+            created_ms: if item.created_ms > 0 { item.created_ms } else { crate::addons::now_ms() },
+            ..IptvSource::default()
+        });
+        source.kind = item.kind;
+        source.name = item.name.trim().chars().take(60).collect();
+        source.url = item.url.trim().chars().take(2000).collect();
+        source.path = String::new();
+        source.imported = false;
+        source.username = item.username.trim().chars().take(200).collect();
+        if !item.password.is_empty() && item.password.len() <= 200 {
+            let sealed = crate::protect::protect(item.password.as_bytes())?;
+            source.password = crate::protect::to_hex(&sealed);
+        }
+        source.epg_url = item.epg_url.trim().chars().take(2000).collect();
+        source.output = if item.output == "m3u8" { "m3u8".into() } else { "ts".into() };
+        source.user_agent = item.user_agent.trim().chars().take(200).collect();
+        source.include_vod = item.include_vod;
+        source.enabled = item.enabled;
+        list.push(source);
+    }
+    list.sort_by_key(|s| s.created_ms);
+    let mut sorted_before = before.clone();
+    sorted_before.sort_by_key(|s| s.created_ms);
+    let changed = serde_json::to_string(&sorted_before).ok() != serde_json::to_string(&list).ok();
+    if !changed {
+        return Ok(false);
+    }
+    for gone in before.iter().filter(|s| !list.iter().any(|k| k.id == s.id)) {
+        let _ = std::fs::remove_file(cache_file(app, &gone.id));
+    }
+    save_sources(app, user_id, &list)?;
+    Ok(true)
+}
+
+/// Replaces the favourite channels with the account's list.
+pub fn set_favorites_list(app: &tauri::AppHandle, user_id: &str, ids: Vec<String>) -> Result<(), String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut list: Vec<String> = ids.into_iter().filter(|id| seen.insert(id.clone())).collect();
+    list.truncate(MAX_FAVORITES);
+    save_ids(app, &favorites_key(user_id), &list)
+}
+
 /// Drops every IPTV record of a profile (its sources, favorites, recents and caches).
 pub fn delete_profile_data(app: &tauri::AppHandle, user_id: &str) {
     for source in list_sources(app, user_id) {

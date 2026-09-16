@@ -4,6 +4,7 @@ import { Login } from "./screens/Login";
 import { Profiles } from "./screens/Profiles";
 import { Home } from "./screens/Home";
 import { Player } from "./screens/Player";
+import { AccountStep } from "./screens/AccountStep";
 import { ToastStack } from "./components/Toast";
 import { Logo } from "./components/Logo";
 import { UpdateModal } from "./components/UpdateModal";
@@ -45,6 +46,25 @@ function AppInner() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [version, setVersion] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
+  // The ejFlix account is offered once per profile; "not now" is remembered by Rust.
+  const [accountStep, setAccountStep] = useState(false);
+
+  useEffect(() => {
+    if (!session) {
+      setAccountStep(false);
+      return;
+    }
+    let alive = true;
+    api
+      .accountStatus()
+      .then((status) => {
+        if (alive) setAccountStep(!status.signedIn && !status.promptDismissed);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [session?.userId]);
 
   const toast = (message: string) => {
     const id = Date.now();
@@ -125,12 +145,13 @@ function AppInner() {
         <SettingsProvider key={session.userId} userId={session.userId} migrate onError={toast}>
           <UserDataProvider onError={toast}>
             <DownloadsProvider onToast={toast}>
+              {accountStep ? <AccountStep onDone={() => setAccountStep(false)} onToast={toast} /> : null}
               {/* Home stays mounted while playing so the view and scroll survive the trip. */}
               <Home
                 session={session}
                 server={server}
                 version={version}
-                hidden={playing != null}
+                hidden={playing != null || accountStep}
                 refreshToken={homeRefresh}
                 playFailed={playFailed}
                 onPlay={setPlaying}

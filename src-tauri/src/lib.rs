@@ -1,3 +1,4 @@
+mod account;
 mod addons;
 mod discord;
 mod downloads;
@@ -53,6 +54,8 @@ pub struct AppState {
     pub iptv: Arc<IptvState>,
     /// Online sources saved to disk.
     pub downloads: Arc<downloads::Downloads>,
+    /// ejFlix account of the active profile (sign-in, 2FA, sync).
+    pub account: account::AccountState,
 }
 
 impl AppState {
@@ -68,6 +71,7 @@ impl AppState {
             discord: discord::Discord::new(),
             iptv: Arc::new(IptvState::new()),
             downloads: Arc::new(downloads::Downloads::new()),
+            account: account::AccountState::new(),
         }
     }
 }
@@ -345,6 +349,7 @@ async fn login(
     save_session(&app, &session)?;
     save_server(&app, &session.server_url, "")?;
     save_device_id(&app, &session.device_id)?;
+    state.account.activate(&app, &session.user_id).await;
     upsert_profile(
         &app,
         PublicUser {
@@ -403,7 +408,9 @@ async fn local_profile_delete(
         let _ = state.player.stop().await;
         *state.local.write().await = None;
         state.jellyfin.set_session(None).await;
+        state.account.deactivate().await;
     }
+    account::forget_profile(&app, &id);
     profiles::delete(&app, &id)
 }
 
@@ -427,6 +434,7 @@ async fn local_profile_enter(
     profiles::set_active(&app, Some(&profile.id))?;
     *state.local.write().await = Some(profile.clone());
     restore_linked_session(&app, &state, &profile.id).await;
+    state.account.activate(&app, &profile.id).await;
     account_view(&app, &state)
         .await
         .ok_or_else(|| "No hay sesión activa".to_string())
@@ -525,6 +533,7 @@ async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> R
             Some(profile) => {
                 *state.local.write().await = Some(profile.clone());
                 restore_linked_session(&app, &state, &profile.id).await;
+                state.account.activate(&app, &profile.id).await;
                 return Ok(account_view(&app, &state).await);
             }
             None => {
@@ -550,6 +559,7 @@ async fn session_restore(app: tauri::AppHandle, state: State<'_, AppState>) -> R
                     avatar_url: valid.avatar_url.clone(),
                 },
             );
+            state.account.activate(&app, &valid.user_id).await;
             Ok(account_view(&app, &state).await)
         }
         Err(_) => {
@@ -566,6 +576,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(),
     let _ = state.player.stop().await;
     let was_local = state.local.write().await.take().is_some();
     state.jellyfin.set_session(None).await;
+    state.account.deactivate().await;
     state.segments.clear().await;
     state.iptv.clear().await;
     profiles::set_active(&app, None)?;
@@ -581,6 +592,7 @@ async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     let _ = state.player.stop().await;
     *state.local.write().await = None;
     state.jellyfin.set_session(None).await;
+    state.account.deactivate().await;
     state.segments.clear().await;
     profiles::set_active(&app, None)?;
     clear_session(&app)?;
@@ -1999,6 +2011,20 @@ pub fn run() {
             locale_set,
             settings_get,
             settings_set,
+            account::account_status,
+            account::account_sign_up,
+            account::account_sign_in,
+            account::account_mfa_verify,
+            account::account_mfa_enroll,
+            account::account_mfa_confirm,
+            account::account_mfa_disable,
+            account::account_resend_confirmation,
+            account::account_reset_password,
+            account::account_sign_out,
+            account::account_delete,
+            account::account_set_credentials,
+            account::account_dismiss_prompt,
+            account::account_sync_now,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
@@ -2024,6 +2050,7 @@ pub fn run() {
             }
             state.downloads.load(&handle);
             state.discord.spawn();
+            account::start_sync_loop(handle.clone());
             start_progress_loop(handle, state.player.clone(), state.jellyfin.clone());
             Ok(())
         })

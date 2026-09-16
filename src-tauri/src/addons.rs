@@ -893,6 +893,36 @@ pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Resu
     store.save().map_err(|e| e.to_string())
 }
 
+/// Replaces the whole list with what the account holds (newest first).
+pub fn replace_library(app: &tauri::AppHandle, user_id: &str, mut list: Vec<LibraryEntry>) -> Result<(), String> {
+    list.retain(|e| !e.key.is_empty() && (e.saved || e.watched));
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|e| seen.insert(e.key.clone()));
+    list.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms));
+    list.truncate(MAX_LIBRARY_ENTRIES);
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
+    store.set(
+        library_key(user_id),
+        serde_json::to_value(&list).map_err(|e| e.to_string())?,
+    );
+    store.save().map_err(|e| e.to_string())
+}
+
+/// Replaces every remembered position with the merged set from the account.
+pub fn replace_progress(app: &tauri::AppHandle, user_id: &str, mut list: Vec<ResumeEntry>) -> Result<(), String> {
+    list.retain(|e| !e.key.is_empty());
+    let mut seen = std::collections::HashSet::new();
+    list.retain(|e| seen.insert(e.key.clone()));
+    list.sort_by(|a, b| b.updated_ms.cmp(&a.updated_ms));
+    list.truncate(MAX_RESUME_ENTRIES);
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
+    store.set(
+        progress_key(user_id),
+        serde_json::to_value(&list).map_err(|e| e.to_string())?,
+    );
+    store.save().map_err(|e| e.to_string())
+}
+
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
