@@ -385,7 +385,14 @@ export function Home({
       {items.length ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
           {items.map((movie, i) => (
-            <PosterCard key={movie.id} movie={movie} onOpen={openDetails} onPlay={play} delay={i * 20} />
+            <PosterCard
+              key={movie.id}
+              movie={movie}
+              onOpen={openDetails}
+              onPlay={play}
+              layout="grid"
+              delay={i * 20}
+            />
           ))}
         </div>
       ) : empty ? (

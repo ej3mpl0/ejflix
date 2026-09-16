@@ -246,7 +246,7 @@ export function SearchPage({
               {active ? (
                 <div className={grid}>
                   {active.items.map((movie, i) => (
-                    <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} delay={i * 20} />
+                    <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} layout="grid" delay={i * 20} />
                   ))}
                 </div>
               ) : null}
@@ -271,7 +271,7 @@ export function SearchPage({
               </h2>
               <div className={grid}>
                 {results.map((movie, i) => (
-                  <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} delay={i * 20} />
+                  <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
             </>
@@ -285,7 +285,7 @@ export function SearchPage({
               </h2>
               <div className={grid}>
                 {online.map((movie, i) => (
-                  <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} delay={i * 20} />
+                  <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
             </>

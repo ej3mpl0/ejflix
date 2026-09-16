@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Compass, LoaderCircle } from "lucide-react";
+import { Compass, LoaderCircle } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -7,7 +7,7 @@ import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
-import { Chip } from "../components/Chip";
+import { Select } from "../components/Select";
 import { Shimmer } from "../components/Shimmer";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 
@@ -23,10 +23,20 @@ function sameGenre(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
+/** Some addons list their years as genre options ("1998", "2010s"). Those are not genres. */
+function isYearLike(name: string): boolean {
+  return /^\d{4}s?$/.test(name.trim());
+}
+
+/** Last-resort identity for a title an addon serves without an IMDb id. */
+function titleKey(movie: Movie): string {
+  return `${movie.name.trim().toLowerCase()}|${movie.year ?? ""}`;
+}
+
 /**
- * Discover tab: browse by type, genre, year and (server only) sort order across the
- * Jellyfin library and every addon catalog that supports the genre filter. Server
- * copies win over online duplicates of the same IMDb id.
+ * Discover tab: one filter bar — type, source, year, order and genre — over a wall of
+ * posters. The same filters apply to the Jellyfin library and to every addon catalog
+ * that supports them; server copies win over online duplicates of the same IMDb id.
  */
 export function Discover({
   hasServer,
@@ -107,7 +117,8 @@ export function Discover({
   const genres = useMemo(() => {
     const out: string[] = [];
     const push = (name: string) => {
-      if (name && !out.some((g) => sameGenre(g, name))) out.push(name);
+      if (!name || isYearLike(name)) return;
+      if (!out.some((g) => sameGenre(g, name))) out.push(name);
     };
     if (useServer) serverGenres.forEach(push);
     if (useOnline && addons) {
@@ -124,6 +135,24 @@ export function Discover({
     for (let y = now; y >= FIRST_YEAR; y--) list.push(y);
     return list;
   }, []);
+
+  const yearOptions = useMemo(
+    () => [{ value: "", label: t("anyYear") }, ...years.map((y) => ({ value: String(y), label: String(y) }))],
+    [years, t],
+  );
+
+  const sortOptions = useMemo(() => {
+    const list: { value: BrowseSort; label: string }[] = [{ value: "popular", label: t("sortPopular") }];
+    // "Recently added" is a library notion: an addon catalog carries no date to sort by.
+    if (useServer) list.push({ value: "newest", label: t("sortNewest") });
+    list.push({ value: "year", label: t("sortYear") }, { value: "name", label: t("sortName") });
+    return list;
+  }, [useServer, t]);
+
+  const genreOptions = useMemo(
+    () => [{ value: "", label: t("anyGenre") }, ...genres.map((name) => ({ value: name, label: name }))],
+    [genres, t],
+  );
 
   const fetchPage = useCallback(
     async (first: boolean) => {
@@ -179,11 +208,14 @@ export function Discover({
         const base = first ? [] : previous;
         const seenIds = new Set(base.map((m) => m.id));
         const seenImdb = new Set(base.map((m) => m.providerIds.Imdb ?? m.external?.imdb).filter(Boolean));
+        const seenTitles = new Set(base.map(titleKey));
         const out = [...base];
         const push = (movie: Movie) => {
           const imdb = movie.providerIds.Imdb ?? movie.external?.imdb ?? null;
-          if (seenIds.has(movie.id) || (imdb && seenImdb.has(imdb))) return;
+          const title = titleKey(movie);
+          if (seenIds.has(movie.id) || (imdb && seenImdb.has(imdb)) || seenTitles.has(title)) return;
           seenIds.add(movie.id);
+          seenTitles.add(title);
           if (imdb) seenImdb.add(imdb);
           out.push(movie);
         };
@@ -214,30 +246,18 @@ export function Discover({
     void fetchPage(true);
   }, [fetchPage, addons]);
 
-  const select = (
-    value: string,
-    onChange: (value: string) => void,
-    label: string,
-    options: { value: string; label: string }[],
-  ) => (
-    <label className="relative inline-flex items-center">
-      <span className="sr-only">{label}</span>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="h-10 appearance-none rounded-pill bg-white/6 pr-9 pl-4 text-[13px] font-medium text-text outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
-      >
-        {options.map((o) => (
-          <option key={o.value} value={o.value} className="bg-panel text-text">
-            {o.label}
-          </option>
-        ))}
-      </select>
-      <ChevronDown size={15} className="pointer-events-none absolute right-3 text-dim" />
-    </label>
-  );
+  // The server hands back its page already ordered; the addon catalogs arrive in their
+  // own order, so anything but "popular" has to be arranged here for the merged list to
+  // read straight. Loading another page can reshuffle it — the price of two sources.
+  const visible = useMemo(() => {
+    if (sort === "popular" || sort === "newest") return items;
+    const list = [...items];
+    if (sort === "name") list.sort((a, b) => a.name.localeCompare(b.name));
+    else list.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
+    return list;
+  }, [items, sort]);
 
-  const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail";
+  const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-2";
 
   return (
     <div className="page-enter px-page pt-24 pb-16">
@@ -251,19 +271,7 @@ export function Discover({
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        {hasServer && hasAddons ? (
-          <SegmentedControl<Source>
-            label={t("discover")}
-            value={source}
-            options={[
-              { value: "all", label: t("sourceAll") },
-              { value: "server", label: t("sourceServer") },
-              { value: "online", label: t("sourceOnline") },
-            ]}
-            onChange={setSource}
-          />
-        ) : null}
+      <div className="mb-6 flex flex-wrap items-center gap-2.5">
         <SegmentedControl<Kind>
           label={t("discover")}
           value={kind}
@@ -276,34 +284,36 @@ export function Discover({
             setGenre(null);
           }}
         />
-        {select(year == null ? "" : String(year), (v) => setYear(v ? Number(v) : null), t("anyYear"), [
-          { value: "", label: t("anyYear") },
-          ...years.map((y) => ({ value: String(y), label: String(y) })),
-        ])}
-        {useServer
-          ? select(sort, (v) => setSort(v as BrowseSort), t("sortPopular"), [
-              { value: "popular", label: t("sortPopular") },
-              { value: "newest", label: t("sortNewest") },
-              { value: "year", label: t("sortYear") },
-              { value: "name", label: t("sortName") },
-            ])
-          : null}
+        {hasServer && hasAddons ? (
+          <SegmentedControl<Source>
+            label={t("discover")}
+            value={source}
+            options={[
+              { value: "all", label: t("sourceAll") },
+              { value: "server", label: t("sourceServer") },
+              { value: "online", label: t("sourceOnline") },
+            ]}
+            onChange={(next) => {
+              setSource(next);
+              // Without the library there is nothing to sort by date added.
+              if (next === "online" && sort === "newest") setSort("popular");
+            }}
+          />
+        ) : null}
+        <Select
+          value={year == null ? "" : String(year)}
+          options={yearOptions}
+          onChange={(v) => setYear(v ? Number(v) : null)}
+          label={t("anyYear")}
+        />
+        <Select value={sort} options={sortOptions} onChange={setSort} label={t("sortPopular")} />
+        <Select
+          value={genre ?? ""}
+          options={genreOptions}
+          onChange={(v) => setGenre(v || null)}
+          label={t("anyGenre")}
+        />
       </div>
-
-      {genres.length ? (
-        <div className="no-scrollbar mb-8 flex gap-2 overflow-x-auto pb-1">
-          <Chip selected={genre == null} onClick={() => setGenre(null)}>
-            {t("anyGenre")}
-          </Chip>
-          {genres.map((name) => (
-            <Chip key={name} selected={genre != null && sameGenre(genre, name)} onClick={() => setGenre(name)}>
-              {name}
-            </Chip>
-          ))}
-        </div>
-      ) : (
-        <div className="mb-8" />
-      )}
 
       {loading ? (
         <div className={grid}>
@@ -311,11 +321,18 @@ export function Discover({
             <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
           ))}
         </div>
-      ) : items.length ? (
+      ) : visible.length ? (
         <>
           <div className={grid}>
-            {items.map((movie, i) => (
-              <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} delay={Math.min(i, 24) * 20} />
+            {visible.map((movie, i) => (
+              <PosterCard
+                key={movie.id}
+                movie={movie}
+                onOpen={onOpen}
+                onPlay={onPlay}
+                layout="wall"
+                delay={Math.min(i, 24) * 20}
+              />
             ))}
           </div>
           {more ? (

@@ -9,29 +9,43 @@ import { useI18n } from "../lib/locale-context";
 import { useItemFlags } from "../lib/userdata-context";
 
 /**
- * 2:3 poster with the title under it (Nuvio style). The hover overlay carries the
- * runtime/quality line, the play button and the "My list" heart.
+ * 2:3 poster card in one of three shapes:
+ *
+ * - `row`  fixed width with the title under it, for the horizontal rails.
+ * - `grid` the same card, but filling its grid column so the last column does not
+ *          leave a ragged margin on the right of the page.
+ * - `wall` art only: no text under the poster, the title appears over it on hover.
+ *
+ * The hover overlay carries the quality badges, the play button and the "My list" heart.
  */
 export function PosterCard({
   movie,
   onOpen,
   onPlay,
   delay = 0,
+  layout = "row",
 }: {
   movie: Movie;
   onOpen: (movie: Movie) => void;
   onPlay?: (movie: Movie) => void;
   delay?: number;
+  layout?: "row" | "grid" | "wall";
 }) {
   const { t } = useI18n();
   const flags = useItemFlags(movie);
   const [loaded, setLoaded] = useState(false);
   const runtime = formatRuntime(movie.runtimeTicks);
   const meta = [movie.year ? String(movie.year) : null, runtime || null].filter(Boolean).join(" • ");
+  const wall = layout === "wall";
 
   return (
     <div
-      className="group relative w-[var(--poster-w)] shrink-0 snap-start"
+      className={cn(
+        // Lifted over its neighbours: in a tight grid the hover scale would otherwise
+        // slide under the card that comes after it in the DOM.
+        "group relative z-0 shrink-0 snap-start hover:z-10 focus-within:z-10",
+        layout === "row" ? "w-[var(--poster-w)]" : "w-full",
+      )}
       style={{ animationDelay: `${delay}ms` }}
       data-item-id={movie.id}
     >
@@ -77,7 +91,10 @@ export function PosterCard({
             />
           </div>
         )}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent p-2.5 pt-12 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent p-2.5 pt-14 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+          {wall ? (
+            <p className="mb-1 line-clamp-2 text-[12.5px] leading-tight font-semibold text-white">{movie.name}</p>
+          ) : null}
           {movie.badges.length ? (
             <QualityBadges
               badges={movie.badges.slice(0, 2)}
@@ -101,10 +118,12 @@ export function PosterCard({
           </button>
         ) : null}
       </div>
-      <button type="button" onClick={() => onOpen(movie)} className="mt-2 block w-full text-left" tabIndex={-1}>
-        <p className="truncate text-[13px] font-medium text-text group-hover:text-white">{movie.name}</p>
-        {meta ? <p className="truncate text-[11px] text-dim tabular">{meta}</p> : null}
-      </button>
+      {wall ? null : (
+        <button type="button" onClick={() => onOpen(movie)} className="mt-2 block w-full text-left" tabIndex={-1}>
+          <p className="truncate text-[13px] font-medium text-text group-hover:text-white">{movie.name}</p>
+          {meta ? <p className="truncate text-[11px] text-dim tabular">{meta}</p> : null}
+        </button>
+      )}
     </div>
   );
 }
