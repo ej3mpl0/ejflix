@@ -73,6 +73,17 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
             onSignedIn={() => void reload()}
             onToast={onToast}
           />
+          {status.mfaRequired ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void run(async () => setStatus(await api.accountSignOut()))}
+              className={`${tonal} mt-4`}
+            >
+              <LogOut size={16} />
+              {t("accountSignOutAccount")}
+            </button>
+          ) : null}
         </div>
       </SettingsSection>
     );
@@ -92,6 +103,10 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
       const report = await api.accountSyncNow();
       if (report.skipped === "mfa_required") {
         setNote(t("accountSyncSkippedMfa"));
+        return;
+      }
+      if (report.skipped?.endsWith(":too_large")) {
+        setNote(t("authErrDocTooLarge"));
         return;
       }
       setNote(
@@ -148,7 +163,7 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
   return (
     <>
       <SettingsSection title={t("accountEjflix")} description={`${t("accountSignedInAs")} ${status.email ?? ""}`}>
-        <SettingsRow label={lastSync} hint={note || status.lastError || undefined}>
+        <SettingsRow label={lastSync} hint={note || (status.lastError ? authErrorText(status.lastError, t) : undefined)}>
           <button type="button" disabled={busy || status.syncing} onClick={() => void syncNow()} className={tonal}>
             {busy || status.syncing ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
             {status.syncing ? t("accountSyncing") : t("accountSyncNow")}

@@ -258,6 +258,18 @@ export function Home({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userDataVersion]);
 
+  // Lists or progress pulled from another PC by the account: refresh in the background.
+  const refreshRef = useRef(refreshAll);
+  refreshRef.current = refreshAll;
+  useEffect(() => {
+    const unlisten = api.onAccountSynced((report) => {
+      if (report.pulled.some((kind) => kind === "progress" || kind === "lists")) void refreshRef.current();
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+
   const hero = useMemo(() => mixFeatured(data?.featured ?? [], addonFeatured), [data, addonFeatured]);
 
   /** "My list" is the server's favourites plus the online titles saved locally. */

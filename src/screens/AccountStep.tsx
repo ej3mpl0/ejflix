@@ -1,30 +1,56 @@
 import { useState } from "react";
-import { ArrowLeft, CloudUpload } from "lucide-react";
+import { ArrowLeft, CloudUpload, LogOut, ShieldCheck } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { AccountPanel } from "../components/account/AccountPanel";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
+import { authErrorText } from "../lib/account-errors";
 
 /**
- * Shown once per profile before Home: create an ejFlix account, sign in to one, or
- * skip it (Settings › Account keeps the door open).
+ * Shown before Home: once per profile, to create an ejFlix account, sign in to one or
+ * skip it (Settings › Account keeps the door open); and whenever the account needs
+ * the code of a second factor that was enrolled elsewhere.
  */
-export function AccountStep({ onDone, onToast }: { onDone: () => void; onToast: (message: string) => void }) {
+export function AccountStep({
+  mode = "intro",
+  onDone,
+  onToast,
+}: {
+  mode?: "intro" | "mfa";
+  /** "done" when signed in (or out); "later" when the person put it off. */
+  onDone: (reason: "done" | "later") => void;
+  onToast: (message: string) => void;
+}) {
   const { t } = useI18n();
   const [view, setView] = useState<"intro" | "signup" | "signin">("intro");
+  const [busy, setBusy] = useState(false);
 
   const skip = () => {
     void api.accountDismissPrompt().catch(() => undefined);
-    onDone();
+    onDone("later");
   };
+
+  const signOut = async () => {
+    setBusy(true);
+    try {
+      await api.accountSignOut();
+      onDone("done");
+    } catch (err) {
+      onToast(authErrorText(err, t));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const home = mode === "mfa" ? () => onDone("later") : skip;
 
   return (
     <div className="grain relative flex h-full flex-col bg-base">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
       <div className="relative z-10 flex h-[60px] items-center justify-between px-6">
-        <button type="button" onClick={skip} aria-label={t("home")} className="btn-press inline-flex items-center">
+        <button type="button" onClick={home} aria-label={t("home")} className="btn-press inline-flex items-center">
           <Logo />
         </button>
         <div className="flex items-center gap-2">
@@ -34,7 +60,34 @@ export function AccountStep({ onDone, onToast }: { onDone: () => void; onToast: 
       </div>
       <div className="relative z-10 flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
         <div className="modal-enter w-[460px] max-w-full rounded-card bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]">
-          {view === "intro" ? (
+          {mode === "mfa" ? (
+            <div className="flex flex-col">
+              <span className="mb-5 grid h-14 w-14 place-items-center self-center rounded-2xl bg-accent-soft text-accent">
+                <ShieldCheck size={26} />
+              </span>
+              <h1 className="mb-1 text-center text-[24px] font-semibold tracking-tight [text-wrap:balance]">{t("accountMfaTitle")}</h1>
+              <p className="mb-6 text-center text-[13px] leading-[1.5] text-dim">{t("accountMfaPending")}</p>
+              <AccountPanel initialMode="mfa" onSignedIn={() => onDone("done")} onToast={onToast} />
+              <div className="mt-3 flex flex-col gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void signOut()}
+                  className="btn-press inline-flex h-11 items-center justify-center gap-2 rounded-btn bg-white/10 px-5 text-[14px] font-semibold hover:bg-white/16 disabled:opacity-60"
+                >
+                  <LogOut size={16} />
+                  {t("accountSignOutAccount")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDone("later")}
+                  className="btn-press inline-flex h-11 items-center justify-center rounded-btn px-5 text-[14px] font-medium text-muted hover:bg-white/8 hover:text-text"
+                >
+                  {t("accountNotNow")}
+                </button>
+              </div>
+            </div>
+          ) : view === "intro" ? (
             <div className="flex flex-col items-center text-center">
               <span className="mb-5 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent">
                 <CloudUpload size={26} />
@@ -80,7 +133,7 @@ export function AccountStep({ onDone, onToast }: { onDone: () => void; onToast: 
                 {view === "signup" ? t("accountCreate") : t("accountSignIn")}
               </h1>
               <p className="mb-6 text-[13px] text-dim">{t("accountEjflix")}</p>
-              <AccountPanel initialMode={view} onSignedIn={onDone} onToast={onToast} />
+              <AccountPanel initialMode={view} onSignedIn={() => onDone("done")} onToast={onToast} />
             </>
           )}
         </div>

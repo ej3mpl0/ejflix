@@ -19,6 +19,8 @@ const CODES: Record<string, MessageKey> = {
   password_mismatch: "authErrPasswordMismatch",
   signup_disabled: "authErrSignupClosed",
   email_provider_disabled: "authErrSignupClosed",
+  mfa_required: "accountSyncSkippedMfa",
+  doc_too_large: "authErrDocTooLarge",
 };
 
 export function authErrorText(

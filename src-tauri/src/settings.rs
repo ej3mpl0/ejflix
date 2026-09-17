@@ -6,7 +6,7 @@
 //! valid `Settings` value.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
 pub const THEME_IDS: &[&str] = &[
@@ -262,12 +262,16 @@ pub fn merge_and_save(
         return Err("Ajustes demasiado grandes".into());
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
-    let mut current = store.get(key(user_id)).unwrap_or_else(|| json!({}));
-    if !current.is_object() {
-        current = json!({});
-    }
+    // Start from what the store holds as the app reads it (a damaged file falls back
+    // to the defaults, as `load` does), then apply the patch; one it cannot read is
+    // refused rather than resetting every setting.
+    let stored: Settings = store
+        .get(key(user_id))
+        .and_then(|v| serde_json::from_value(v).ok())
+        .unwrap_or_default();
+    let mut current = serde_json::to_value(&stored).map_err(|e| e.to_string())?;
     deep_merge(&mut current, patch);
-    let settings: Settings = serde_json::from_value(current).unwrap_or_default();
+    let settings: Settings = serde_json::from_value(current).map_err(|_| "Ajustes no válidos".to_string())?;
     let settings = settings.sanitized();
     store.set(
         key(user_id),

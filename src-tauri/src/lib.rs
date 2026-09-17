@@ -595,9 +595,24 @@ async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     state.account.deactivate().await;
     state.segments.clear().await;
     profiles::set_active(&app, None)?;
+    // The ejFlix accounts those users signed into go with them: nothing would be
+    // left on screen to sign them out, and a later login must not pick them up.
+    for user in load_profiles(&app).unwrap_or_default() {
+        account::forget_profile(&app, &user.id);
+    }
+    if let Ok(Some(session)) = load_session(&app) {
+        account::forget_profile(&app, &session.user_id);
+    }
     clear_session(&app)?;
     clear_profiles(&app)?;
     clear_server(&app)
+}
+
+/// The active session as the frontend sees it, with no side effects (the account
+/// sync may have linked a server since the profile was opened).
+#[tauri::command]
+async fn session_current(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<AccountView>, String> {
+    Ok(account_view(&app, &state).await)
 }
 
 #[tauri::command]
@@ -1179,6 +1194,17 @@ fn existing_device_id(app: &tauri::AppHandle) -> Option<String> {
         .ok()
         .flatten()
         .map(|s| s.device_id)
+}
+
+/// The device id, minted and kept on first use (a PC with only local profiles never
+/// logged into a server, so it had none).
+pub fn device_id_or_create(app: &tauri::AppHandle) -> String {
+    if let Some(id) = existing_device_id(app) {
+        return id;
+    }
+    let id = Uuid::new_v4().to_string();
+    let _ = save_device_id(app, &id);
+    id
 }
 
 fn load_device_id(app: &tauri::AppHandle) -> Option<String> {
@@ -2025,6 +2051,7 @@ pub fn run() {
             account::account_set_credentials,
             account::account_dismiss_prompt,
             account::account_sync_now,
+            session_current,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

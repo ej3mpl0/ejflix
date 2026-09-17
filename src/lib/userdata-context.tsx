@@ -60,14 +60,21 @@ export function UserDataProvider({
 
   useEffect(() => {
     let alive = true;
-    api
-      .addonLibraryList()
-      .then((list) => {
-        if (alive) setLibrary(list);
-      })
-      .catch(() => undefined);
+    const load = () =>
+      api
+        .addonLibraryList()
+        .then((list) => {
+          if (alive) setLibrary(list);
+        })
+        .catch(() => undefined);
+    void load();
+    // The account pulled My list from another PC.
+    const unlisten = api.onAccountSynced((report) => {
+      if (report.pulled.includes("lists")) void load();
+    });
     return () => {
       alive = false;
+      void unlisten.then((fn) => fn());
     };
   }, []);
 

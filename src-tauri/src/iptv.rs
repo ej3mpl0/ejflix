@@ -477,9 +477,25 @@ pub fn apply_synced(app: &tauri::AppHandle, user_id: &str, items: Vec<SyncedSour
         if matches!(item.kind, SourceKind::M3uFile) || !valid_source_id(&item.id) {
             continue;
         }
+        if list.iter().any(|s| s.id == item.id) {
+            // A local file playlist already uses that id.
+            continue;
+        }
         if list.len() >= MAX_SOURCES {
             break;
         }
+        // The website only checks that a URL looks like http(s): read it the way a
+        // typed one is, so a get.php link becomes a server base plus its credentials.
+        let (url, url_user, url_pass) = match item.kind {
+            SourceKind::Xtream => match parse_xtream_url(&item.url) {
+                Ok(parsed) => parsed,
+                Err(_) => continue,
+            },
+            _ => match normalize_http_url(&item.url) {
+                Ok(url) => (url, None, None),
+                Err(_) => continue,
+            },
+        };
         let mut source = before.iter().find(|s| s.id == item.id).cloned().unwrap_or_else(|| IptvSource {
             id: item.id.clone(),
             created_ms: if item.created_ms > 0 { item.created_ms } else { crate::addons::now_ms() },
@@ -487,15 +503,20 @@ pub fn apply_synced(app: &tauri::AppHandle, user_id: &str, items: Vec<SyncedSour
         });
         source.kind = item.kind;
         source.name = item.name.trim().chars().take(60).collect();
-        source.url = item.url.trim().chars().take(2000).collect();
+        source.url = url.chars().take(2000).collect();
         source.path = String::new();
         source.imported = false;
-        source.username = item.username.trim().chars().take(200).collect();
-        if !item.password.is_empty() && item.password.len() <= 200 {
-            let sealed = crate::protect::protect(item.password.as_bytes())?;
+        let username: String = item.username.trim().chars().take(200).collect();
+        source.username = if username.is_empty() { url_user.unwrap_or_default() } else { username };
+        let password = if item.password.is_empty() { url_pass.unwrap_or_default() } else { item.password.clone() };
+        if !password.is_empty() && password.len() <= 200 {
+            let sealed = crate::protect::protect(password.as_bytes())?;
             source.password = crate::protect::to_hex(&sealed);
         }
-        source.epg_url = item.epg_url.trim().chars().take(2000).collect();
+        source.epg_url = match item.epg_url.trim() {
+            "" => String::new(),
+            epg => normalize_http_url(epg).unwrap_or_default().chars().take(2000).collect(),
+        };
         source.output = if item.output == "m3u8" { "m3u8".into() } else { "ts".into() };
         source.user_agent = item.user_agent.trim().chars().take(200).collect();
         source.include_vod = item.include_vod;

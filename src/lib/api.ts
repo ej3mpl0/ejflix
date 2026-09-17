@@ -46,6 +46,8 @@ export const api = {
   login: (url: string, username: string, password: string) =>
     invoke<Session>("login", { url, username, password }),
   sessionRestore: () => invoke<Session | null>("session_restore"),
+  /** The active session as it is now, with no side effects (a sync may have linked a server). */
+  sessionCurrent: () => invoke<Session | null>("session_current"),
   savedServer: () => invoke<SavedServer | null>("saved_server"),
   listPublicUsers: (url: string) => invoke<PublicUser[]>("list_public_users", { url }),
   logout: () => invoke<void>("logout"),
@@ -229,4 +231,7 @@ export const api = {
   accountSyncNow: () => invoke<SyncReport>("account_sync_now"),
   onAccountChanged: (handler: (status: AccountStatus) => void): Promise<UnlistenFn> =>
     listen<AccountStatus>("account://changed", (event) => handler(event.payload)),
+  /** A sync finished; `pulled` names the kinds this PC took from the account. */
+  onAccountSynced: (handler: (report: SyncReport) => void): Promise<UnlistenFn> =>
+    listen<SyncReport>("account://synced", (event) => handler(event.payload)),
 };

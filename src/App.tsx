@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Welcome } from "./screens/Welcome";
 import { Login } from "./screens/Login";
 import { Profiles } from "./screens/Profiles";
@@ -18,10 +18,13 @@ import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { DownloadsProvider } from "./lib/downloads-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
-import type { Movie, SavedServer, Session, Toast } from "./lib/types";
+import type { AccountStatus, Movie, SavedServer, Session, Toast } from "./lib/types";
 
 /** Screens shown while there is no session. */
 type Gate = "welcome" | "login" | "profiles" | "create";
+
+/** What stands between a fresh session and Home: the account offer, or its second factor. */
+type AccountGate = "checking" | "none" | "intro" | "mfa";
 
 export default function App() {
   return (
@@ -46,23 +49,61 @@ function AppInner() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [version, setVersion] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
-  // The ejFlix account is offered once per profile; "not now" is remembered by Rust.
-  const [accountStep, setAccountStep] = useState(false);
+  // The ejFlix account is offered once per profile ("not now" is remembered by Rust),
+  // and the code of a second factor enrolled elsewhere is asked for when it shows up.
+  const [accountGate, setAccountGate] = useState<AccountGate>("checking");
+  const mfaLater = useRef(false);
 
   useEffect(() => {
     if (!session) {
-      setAccountStep(false);
+      setAccountGate("none");
       return;
     }
     let alive = true;
+    mfaLater.current = false;
+    setAccountGate("checking");
+    const gateOf = (status: AccountStatus): AccountGate =>
+      status.mfaRequired ? "mfa" : !status.signedIn && !status.promptDismissed ? "intro" : "none";
     api
       .accountStatus()
       .then((status) => {
-        if (alive) setAccountStep(!status.signedIn && !status.promptDismissed);
+        if (alive) setAccountGate(gateOf(status));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (alive) setAccountGate("none");
+      });
+    const unlisten = api.onAccountChanged((status) => {
+      if (!alive) return;
+      if (status.mfaRequired) {
+        // The sign-in panel handles its own second step; only an idle Home is gated.
+        if (!mfaLater.current) setAccountGate((gate) => (gate === "none" || gate === "checking" ? "mfa" : gate));
+      } else {
+        setAccountGate((gate) => (gate === "mfa" ? "none" : gate));
+      }
+    });
     return () => {
       alive = false;
+      void unlisten.then((fn) => fn());
+    };
+  }, [session?.userId]);
+
+  // The account pulled a server linked on another PC: the session gains it.
+  useEffect(() => {
+    if (!session) return;
+    const unlisten = api.onAccountSynced((report) => {
+      if (!report.pulled.includes("servers")) return;
+      api
+        .sessionCurrent()
+        .then((next) => {
+          if (!next) return;
+          setSession(next);
+          void api.savedServer().then(setServer).catch(() => undefined);
+          setHomeRefresh((n) => n + 1);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
     };
   }, [session?.userId]);
 
@@ -145,13 +186,22 @@ function AppInner() {
         <SettingsProvider key={session.userId} userId={session.userId} migrate onError={toast}>
           <UserDataProvider onError={toast}>
             <DownloadsProvider onToast={toast}>
-              {accountStep ? <AccountStep onDone={() => setAccountStep(false)} onToast={toast} /> : null}
+              {accountGate === "intro" || accountGate === "mfa" ? (
+                <AccountStep
+                  mode={accountGate}
+                  onDone={(reason) => {
+                    if (reason === "later" && accountGate === "mfa") mfaLater.current = true;
+                    setAccountGate("none");
+                  }}
+                  onToast={toast}
+                />
+              ) : null}
               {/* Home stays mounted while playing so the view and scroll survive the trip. */}
               <Home
                 session={session}
                 server={server}
                 version={version}
-                hidden={playing != null || accountStep}
+                hidden={playing != null || accountGate !== "none"}
                 refreshToken={homeRefresh}
                 playFailed={playFailed}
                 onPlay={setPlaying}

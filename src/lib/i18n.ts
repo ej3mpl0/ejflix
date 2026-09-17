@@ -341,6 +341,7 @@ const es = {
   copyLink: "Copiar enlace",
   linkCopied: "Enlace copiado",
   copyFailed: "No se pudo copiar el enlace",
+  note14: "Sincronización más sólida: la sesión de la cuenta ya no caduca al cabo de una hora ni se cierra cuando falla la red; cambiar de perfil con una sincronización en marcha no mezcla nada; borrar el último addon, lista IPTV o título, o desvincular el servidor, llega a los demás equipos; cuando dos PCs cambian lo mismo gana el cambio más reciente y lo borrado no vuelve; un PC que no comparte contraseñas ya no borra las que subió otro; lo que llega de otro equipo se ve al momento; y si activas la verificación en dos pasos en la web, la app te pide el código.",
   note13: "Cuenta ejFlix: crea tu cuenta desde la app o en ejflix.xyz, con confirmación por correo, verificación en dos pasos y recuperación de contraseña. Tus servidores, addons, listas IPTV, Mi lista, lo visto y el progreso se sincronizan entre tus equipos, y en la web puedes gestionarlos junto a tus dispositivos.",
   note12: "Descubrir redise\u00f1ado: una sola fila de filtros con a\u00f1o, orden y g\u00e9nero en nuestros desplegables, tanto para tu servidor como para tus addons, y los resultados en un muro de p\u00f3steres, sin a\u00f1os sueltos debajo ni m\u00e1rgenes descuadrados.",
   note11: "Cabecera nueva con el buscador dentro, tus títulos online en Mi lista y marcados como vistos, filtros de calidad, disponibilidad e idioma en las fuentes, y una página Acerca de con la versión.",
@@ -469,6 +470,7 @@ const es = {
   accountSynced: "Sincronizado.",
   accountSyncedDetail: "Subido: {pushed} · Descargado: {pulled}",
   accountSyncSkippedMfa: "Falta el código de verificación para sincronizar.",
+  accountMfaPending: "Has activado la verificación en dos pasos en otro sitio. Este perfil no sincroniza hasta que escribas el código.",
   accountCredentials: "Incluir contraseñas de IPTV y el token del servidor",
   accountCredentialsHint: "Sin esto, en otro PC tendrás que volver a escribirlas.",
   accountTwoFactor: "Verificación en dos pasos",
@@ -505,6 +507,7 @@ const es = {
   authErrPasswordMismatch: "Las contraseñas no coinciden.",
   authErrGeneric: "Algo ha fallado. Inténtalo de nuevo.",
   authErrSignupClosed: "El registro está cerrado por ahora. Pronto podrás crear tu cuenta.",
+  authErrDocTooLarge: "Una de las listas es demasiado grande para sincronizarla.",
 };
 
 const en: typeof es = {
@@ -848,6 +851,7 @@ const en: typeof es = {
   copyLink: "Copy link",
   linkCopied: "Link copied",
   copyFailed: "Could not copy the link",
+  note14: "Sturdier sync: the account session no longer expires after an hour or drops when the network fails; switching profiles mid-sync mixes nothing up; removing the last addon, IPTV list or title, or unlinking the server, reaches your other PCs; when two PCs change the same thing the newer change wins and nothing removed comes back; a PC that keeps its passwords to itself no longer blanks the ones another uploaded; what arrives from another PC shows up right away; and if you turn on two-step verification on the website, the app asks for the code.",
   note13: "ejFlix account: create it from the app or at ejflix.xyz, with email confirmation, two-step verification and password recovery. Your servers, addons, IPTV lists, My list, watched titles and progress sync between your PCs, and the website lets you manage them along with your devices.",
   note12: "Discover redesigned: one row of filters with year, order and genre in the app's own dropdowns, for your server and your addons alike, and the results as a wall of posters, with no stray years underneath and no ragged margins.",
   note11: "A new header with the search box in it, your online titles in My list and marked as watched, quality, availability and language filters on the sources, and an About page with the version.",
@@ -976,6 +980,7 @@ const en: typeof es = {
   accountSynced: "Synced.",
   accountSyncedDetail: "Uploaded: {pushed} · Downloaded: {pulled}",
   accountSyncSkippedMfa: "The verification code is needed before syncing.",
+  accountMfaPending: "Two-step verification was turned on elsewhere. This profile does not sync until you enter the code.",
   accountCredentials: "Include IPTV passwords and the server token",
   accountCredentialsHint: "Without this you will have to type them again on another PC.",
   accountTwoFactor: "Two-step verification",
@@ -1012,6 +1017,7 @@ const en: typeof es = {
   authErrPasswordMismatch: "The passwords do not match.",
   authErrGeneric: "Something went wrong. Please try again.",
   authErrSignupClosed: "Registration is closed for now. You will be able to create your account soon.",
+  authErrDocTooLarge: "One of the lists is too large to sync.",
 };
 
 export const dictionaries = { es, en };
