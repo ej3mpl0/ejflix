@@ -125,9 +125,18 @@ export type AddonStream = {
   bingeGroup: string | null;
   filename: string | null;
   videoSize: number | null;
-  /** True when mpv can open it directly (an http(s) url). */
+  /** True when mpv can open it directly (an http(s) url). A bare torrent (infoHash, no url) plays through the built-in engine. */
   playable: boolean;
+  /** Which file of the torrent, when the addon says. */
+  fileIdx: number | null;
+  /** Trackers the addon named for the torrent. */
+  sources: string[];
 };
+
+/** A torrent turned into a local URL by the built-in engine. */
+export type TorrentResolved = { url: string; fileName: string; size: number };
+
+export type TorrentCacheInfo = { bytes: number; torrents: number; dir: string };
 
 /** Identity of an online (addon) title carried inside a Movie. */
 export type ExternalRef = {
@@ -288,6 +297,8 @@ export type AddonInfo = {
   resources: string[];
   catalogs: AddonCatalog[];
   builtin: boolean;
+  /** The addon's own settings page (debrid keys and the like), when it has one. */
+  configureUrl: string | null;
 };
 
 export type AddonMeta = {
@@ -444,6 +455,14 @@ export type Settings = {
     epg: boolean;
     /** Mouse wheel over the video changes channel instead of volume. */
     wheelZap: boolean;
+  };
+  /** Built-in torrent playback for addon sources that come as a bare info hash. */
+  torrents: {
+    enabled: boolean;
+    /** Upload to other peers while watching (applies when the engine next starts). */
+    share: boolean;
+    /** Disk the downloaded files may take before the oldest are dropped. */
+    cacheGb: number;
   };
 };
 
@@ -654,4 +673,5 @@ export const DEFAULT_SETTINGS: Settings = {
     header: "details",
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
+  torrents: { enabled: true, share: true, cacheGb: 5 },
 };

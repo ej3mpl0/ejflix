@@ -56,7 +56,11 @@ export function Player({
 }) {
   const { t } = useI18n();
   const { settings, update: updateSettings } = useSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const [state, setState] = useState<PlayerState>(emptyState);
+  /** What the splash says while a source is still being prepared (torrent peers). */
+  const [startHint, setStartHint] = useState("");
   const [detail, setDetail] = useState<Movie | null>(null);
   // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
   const [visible, setVisible] = useState(false);
@@ -180,12 +184,26 @@ export function Player({
             // Online title: resolve the stream (chosen in the picker, or auto-picked when
             // chaining episodes), work out the next episode and start by URL.
             const ext = movie.external;
+            const torrents = settingsRef.current.torrents.enabled;
             let stream = ext.stream ?? null;
             if (!stream) {
-              stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null);
+              stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null, torrents);
             }
             if (cancelled) return;
-            if (!stream?.url) throw new Error(tRef.current("noStreams"));
+            let url = stream?.url ?? null;
+            if (!url && stream?.infoHash && torrents) {
+              // A bare torrent: the built-in engine turns it into a local URL first.
+              setStartHint(tRef.current("torrentConnecting"));
+              const resolved = await api.torrentResolve({
+                infoHash: stream.infoHash,
+                fileIdx: stream.fileIdx,
+                sources: stream.sources,
+              });
+              if (cancelled) return;
+              setStartHint("");
+              url = resolved.url;
+            }
+            if (!stream || !url) throw new Error(tRef.current("noStreams"));
             const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
             let nextMovie: Movie | null = null;
             if (ext.type === "series") {
@@ -205,7 +223,7 @@ export function Player({
             const entry = resumeEntryOf(full);
             if (!entry) throw new Error(tRef.current("playerStartError"));
             const next = await api.playerStartUrl({
-              url: stream.url,
+              url,
               title,
               headers: stream.headers,
               startSeconds: start > 5 ? start : 0,
@@ -658,6 +676,7 @@ export function Player({
                 <QualityBadges badges={movie.badges.slice(0, 4)} />
               </div>
               <div className="mt-2 h-10 w-10 rounded-full border-2 border-white/15 border-t-accent animate-spin" />
+              {startHint ? <p className="text-[13px] text-muted">{startHint}</p> : null}
             </div>
           </div>
         </div>

@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  TorrentCacheInfo,
+  TorrentResolved,
   AccountStatus,
   MfaEnrollment,
   SyncReport,
@@ -124,6 +126,11 @@ export const api = {
     startSeconds?: number;
     entry: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs">;
   }) => invoke<PlayerState>("player_start_url", { args }),
+  /** A bare torrent from an addon becomes a local URL (waits for its file list). */
+  torrentResolve: (args: { infoHash: string; fileIdx: number | null; sources: string[] }) =>
+    invoke<TorrentResolved>("torrent_resolve", { args }),
+  torrentCacheInfo: () => invoke<TorrentCacheInfo>("torrent_cache_info"),
+  torrentCacheClear: () => invoke<TorrentCacheInfo>("torrent_cache_clear"),
   playerStart: (args: {
     itemId: string;
     title: string;

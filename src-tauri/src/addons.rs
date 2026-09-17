@@ -49,6 +49,8 @@ pub struct AddonInfo {
     pub resources: Vec<String>,
     pub catalogs: Vec<AddonCatalog>,
     pub builtin: bool,
+    /// The addon's own settings page (debrid keys and the like), when it has one.
+    pub configure_url: Option<String>,
     #[serde(skip)]
     manifest: Value,
 }
@@ -180,8 +182,13 @@ pub struct AddonStream {
     pub binge_group: Option<String>,
     pub filename: Option<String>,
     pub video_size: Option<u64>,
-    /// True when mpv can open it directly (an http(s) `url`).
+    /// True when mpv can open it directly (an http(s) `url`). A bare torrent (an
+    /// `info_hash` without `url`) plays through the built-in engine instead.
     pub playable: bool,
+    /// Which file of the torrent, when the addon says.
+    pub file_idx: Option<usize>,
+    /// Trackers the addon named for the torrent.
+    pub sources: Vec<String>,
 }
 
 /// Locally remembered playback position of an online title.
@@ -627,6 +634,12 @@ fn parse_manifest(url: &str, value: Value, builtin: bool) -> Result<AddonInfo, S
             })
         })
         .collect();
+    // Stremio convention: a configurable addon serves its page at <base>/configure.
+    let configurable = value
+        .get("behaviorHints")
+        .and_then(|h| h.get("configurable"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     Ok(AddonInfo {
         url: url.to_string(),
         id: text(&value, "id").unwrap_or_else(|| url.to_string()),
@@ -638,6 +651,7 @@ fn parse_manifest(url: &str, value: Value, builtin: bool) -> Result<AddonInfo, S
         resources,
         catalogs,
         builtin,
+        configure_url: (configurable && !builtin).then(|| format!("{}/configure", base_of(url))),
         manifest: value,
     })
 }
@@ -765,10 +779,49 @@ fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {
     })
 }
 
+/// The info hash and trackers of a `magnet:` link, when the addon sent one instead of
+/// the `infoHash` field.
+fn magnet_parts(link: &str) -> Option<(String, Vec<String>)> {
+    let query = link.strip_prefix("magnet:?")?;
+    let mut hash = None;
+    let mut trackers = Vec::new();
+    for pair in query.split('&') {
+        let Some((key, value)) = pair.split_once('=') else { continue };
+        let value = crate::iptv::percent_decode(value);
+        match key {
+            "xt" => {
+                let candidate = value.strip_prefix("urn:btih:").unwrap_or_default().to_ascii_lowercase();
+                if candidate.len() == 40 && candidate.bytes().all(|b| b.is_ascii_hexdigit()) {
+                    hash = Some(candidate);
+                }
+            }
+            "tr" => trackers.push(value),
+            _ => {}
+        }
+    }
+    hash.map(|h| (h, trackers))
+}
+
 fn parse_stream(addon: &AddonInfo, s: &Value) -> Option<AddonStream> {
-    let url = text(s, "url").filter(|u| u.starts_with("http://") || u.starts_with("https://"));
-    let external_url = text(s, "externalUrl");
-    let info_hash = text(s, "infoHash");
+    let raw_url = text(s, "url");
+    let url = raw_url.clone().filter(|u| u.starts_with("http://") || u.starts_with("https://"));
+    let mut external_url = text(s, "externalUrl");
+    let mut info_hash = text(s, "infoHash")
+        .map(|h| h.to_ascii_lowercase())
+        .filter(|h| h.len() == 40 && h.bytes().all(|b| b.is_ascii_hexdigit()));
+    let mut sources: Vec<String> = strings(s, "sources")
+        .into_iter()
+        .filter_map(|src| src.strip_prefix("tracker:").map(str::to_string))
+        .collect();
+    // Some addons hand out a magnet link where others put the info hash.
+    if info_hash.is_none() {
+        let magnet = raw_url.as_deref().filter(|u| u.starts_with("magnet:")).or(external_url.as_deref().filter(|u| u.starts_with("magnet:")));
+        if let Some((hash, trackers)) = magnet.and_then(magnet_parts) {
+            info_hash = Some(hash);
+            sources.extend(trackers);
+            external_url = external_url.filter(|u| !u.starts_with("magnet:"));
+        }
+    }
     if url.is_none() && external_url.is_none() && info_hash.is_none() {
         return None;
     }
@@ -798,6 +851,8 @@ fn parse_stream(addon: &AddonInfo, s: &Value) -> Option<AddonStream> {
         binge_group: hints.and_then(|h| text(h, "bingeGroup")),
         filename: hints.and_then(|h| text(h, "filename")),
         video_size: hints.and_then(|h| h.get("videoSize")).and_then(|v| v.as_u64()),
+        file_idx: s.get("fileIdx").and_then(|v| v.as_u64()).map(|v| v as usize),
+        sources,
     })
 }
 
@@ -959,10 +1014,48 @@ mod tests {
             filename: None,
             video_size: None,
             playable: url.is_some(),
+            file_idx: None,
+            sources: Vec::new(),
         };
         // The same link from both ids is one row; a different one is not.
         assert_eq!(identity_of(&row(Some("http://x/1"), None)), identity_of(&row(Some("http://x/1"), None)));
         assert_ne!(identity_of(&row(Some("http://x/1"), None)), identity_of(&row(Some("http://x/2"), None)));
         assert_eq!(identity_of(&row(None, Some("abc"))), identity_of(&row(None, Some("abc"))));
+    }
+
+    #[test]
+    fn reads_torrent_streams() {
+        let addon = AddonInfo {
+            url: "http://a/manifest.json".into(),
+            id: "a".into(),
+            name: "A".into(),
+            version: String::new(),
+            description: String::new(),
+            logo: None,
+            types: vec![],
+            resources: vec![],
+            catalogs: vec![],
+            builtin: false,
+            configure_url: None,
+            manifest: Value::Null,
+        };
+        // Peerflix / Torrentio: a bare info hash with a file index and trackers.
+        let s = parse_stream(&addon, &serde_json::json!({
+            "name": "Peerflix 1080p", "title": "Film", "infoHash": "814978F980297CC7CD42BE9D60B37B928A5E7CDC", "fileIdx": 5,
+            "sources": ["tracker:udp://t.example:1337/announce", "dht:814978f980297cc7cd42be9d60b37b928a5e7cdc"]
+        })).unwrap();
+        assert_eq!(s.info_hash.as_deref(), Some("814978f980297cc7cd42be9d60b37b928a5e7cdc"));
+        assert_eq!(s.file_idx, Some(5));
+        assert_eq!(s.sources, vec!["udp://t.example:1337/announce".to_string()]);
+        assert!(!s.playable && s.url.is_none());
+        // A magnet link in `url` counts as the same thing.
+        let s = parse_stream(&addon, &serde_json::json!({
+            "name": "X", "url": "magnet:?xt=urn:btih:814978f980297cc7cd42be9d60b37b928a5e7cdc&dn=Film&tr=udp%3A%2F%2Ft.example%3A1337%2Fannounce"
+        })).unwrap();
+        assert_eq!(s.info_hash.as_deref(), Some("814978f980297cc7cd42be9d60b37b928a5e7cdc"));
+        assert_eq!(s.sources, vec!["udp://t.example:1337/announce".to_string()]);
+        assert!(s.url.is_none() && s.external_url.is_none());
+        // Nothing usable at all is dropped.
+        assert!(parse_stream(&addon, &serde_json::json!({ "name": "X", "ytId": "abc" })).is_none());
     }
 }

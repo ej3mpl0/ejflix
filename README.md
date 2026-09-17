@@ -114,13 +114,16 @@ Two server-side settings are worth turning on:
 
 Pick *Watch online with addons* on the welcome screen and create a profile. Cinemeta is
 built in for the popular rows and the metadata; add your own `manifest.json` in
-**Settings › Addons** (an AIOStreams or Torrentio configuration carrying your debrid
-key, for example) to get sources.
+**Settings › Addons** (Peerflix, Torrentio, Comet, AIOStreams... with or without a
+debrid key) to get sources.
 
 - The addon's catalogs become rows on Home and feed Discover and search.
-- Opening a title lists the streams of every addon that serves it. Only http(s) streams
-  play directly: raw torrents (`infoHash`) are listed but disabled, which is not a
-  problem with a debrid-backed addon.
+- Opening a title lists the streams of every addon that serves it. http(s) streams (a
+  debrid link, say) play directly. A raw torrent (an `infoHash`, what a free Peerflix or
+  Torrentio returns) plays through the built-in BitTorrent engine (librqbit): the file
+  streams to mpv from a local URL as it downloads, seeking included, and stays in a
+  disk cache with a size cap (Settings › Addons › Torrents, where uploading and the
+  cache size can be changed). An addon with a `/configure` page gets a button to it.
 - A title is carried by its IMDb id whenever one is known, and asked for under both its
   own id and that one, because torrent addons only index IMDb. Without this, a title
   from a TMDB catalog reaches barely half of the sources.

@@ -775,7 +775,7 @@ pub fn parse_xtream_url(raw: &str) -> Result<(String, Option<String>, Option<Str
     Ok((base, user.filter(|s| !s.is_empty()), pass.filter(|s| !s.is_empty())))
 }
 
-fn percent_decode(s: &str) -> String {
+pub(crate) fn percent_decode(s: &str) -> String {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;

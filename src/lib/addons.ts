@@ -308,9 +308,14 @@ export function externalRefForJellyfin(movie: Movie, seriesImdb?: string | null)
   return { type: "movie", metaId: imdb, videoId: imdb, imdb, season: null, episode: null };
 }
 
+/** A bare torrent (info hash, no link): what a debrid-less addon such as Peerflix returns. */
+export function isTorrentOnly(stream: AddonStream): boolean {
+  return Boolean(stream.infoHash) && !stream.url && !stream.externalUrl;
+}
+
 /** Picks the stream to play automatically when chaining episodes. */
-export function pickStream(streams: AddonStream[], prefer: ExternalRef["prefer"]): AddonStream | null {
-  const playable = streams.filter((s) => s.playable && s.url);
+export function pickStream(streams: AddonStream[], prefer: ExternalRef["prefer"], torrents = false): AddonStream | null {
+  const playable = streams.filter((s) => (s.playable && s.url) || (torrents && isTorrentOnly(s)));
   if (!playable.length) return null;
   if (prefer) {
     const same =

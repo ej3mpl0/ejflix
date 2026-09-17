@@ -10,6 +10,7 @@ mod profiles;
 mod protect;
 mod segments;
 mod settings;
+mod torrent;
 mod update;
 
 use std::sync::Arc;
@@ -56,6 +57,8 @@ pub struct AppState {
     pub downloads: Arc<downloads::Downloads>,
     /// ejFlix account of the active profile (sign-in, 2FA, sync).
     pub account: account::AccountState,
+    /// Built-in BitTorrent engine for addon sources that come as a bare info hash.
+    pub torrents: Arc<torrent::TorrentEngine>,
 }
 
 impl AppState {
@@ -72,6 +75,7 @@ impl AppState {
             iptv: Arc::new(IptvState::new()),
             downloads: Arc::new(downloads::Downloads::new()),
             account: account::AccountState::new(),
+            torrents: Arc::new(torrent::TorrentEngine::new()),
         }
     }
 }
@@ -613,6 +617,49 @@ async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
 #[tauri::command]
 async fn session_current(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Option<AccountView>, String> {
     Ok(account_view(&app, &state).await)
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct TorrentResolveArgs {
+    info_hash: String,
+    file_idx: Option<usize>,
+    sources: Vec<String>,
+}
+
+/// Turns an addon's bare torrent into a local URL the player can open. Waits for the
+/// torrent's file list, so it can take a while on a poorly seeded one.
+#[tauri::command]
+async fn torrent_resolve(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: TorrentResolveArgs,
+) -> Result<torrent::Resolved, String> {
+    let prefs = match settings_user(&app, &state).await {
+        Some(uid) => settings::load(&app, &uid).unwrap_or_default().torrents,
+        None => settings::TorrentPrefs::default(),
+    };
+    if !prefs.enabled {
+        return Err("Los torrents están desactivados en Ajustes › Addons".into());
+    }
+    let limit = u64::from(prefs.cache_gb) * 1024 * 1024 * 1024;
+    let dir = torrent::cache_dir(&app);
+    state
+        .torrents
+        .resolve(&dir, &args.info_hash, args.file_idx, &args.sources, limit, torrent::EngineOptions { share: prefs.share })
+        .await
+}
+
+#[tauri::command]
+async fn torrent_cache_info(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<torrent::CacheInfo, String> {
+    Ok(state.torrents.cache_info(&torrent::cache_dir(&app)))
+}
+
+#[tauri::command]
+async fn torrent_cache_clear(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<torrent::CacheInfo, String> {
+    let dir = torrent::cache_dir(&app);
+    state.torrents.cache_clear(&dir).await;
+    Ok(state.torrents.cache_info(&dir))
 }
 
 #[tauri::command]
@@ -2052,6 +2099,9 @@ pub fn run() {
             account::account_dismiss_prompt,
             account::account_sync_now,
             session_current,
+            torrent_resolve,
+            torrent_cache_info,
+            torrent_cache_clear,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

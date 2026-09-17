@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, Globe, Link2, Link2Off, Play, SlidersHorizontal, X, Zap } from "lucide-react";
+import { Download, Globe, Link2, Link2Off, Magnet, Play, Settings2, SlidersHorizontal, X, Zap } from "lucide-react";
 import type { AddonStream, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn, episodeCode } from "../lib/format";
-import { formatSize, streamView, type StreamKind, type StreamView } from "../lib/addons";
+import { formatSize, isTorrentOnly, streamView, type StreamKind, type StreamView } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { useSettings } from "../lib/settings-context";
 import { useBackNavigation } from "../lib/use-back";
 import { useDownloads } from "../lib/downloads-context";
 import { Chip } from "./Chip";
@@ -52,6 +53,9 @@ async function copyText(text: string): Promise<boolean> {
  * first (usenet). In the Streaming tab a row plays and the three-dot menu downloads or
  * copies the link; in the Downloads tab a row can only download, because usenet is
  * fetched before it can be watched. Sources mpv cannot open are listed but disabled.
+ * Bare torrents play through the built-in engine; with that switched off they fold
+ * into one notice per addon that offers to turn it on or to set up a debrid key in
+ * the addon, which is what turns them into plain links.
  */
 export function StreamPicker({
   movie,
@@ -66,6 +70,8 @@ export function StreamPicker({
 }) {
   const { t } = useI18n();
   const downloads = useDownloads();
+  const { settings, update: updateSettings } = useSettings();
+  const torrentsOn = settings.torrents.enabled;
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
   const [tab, setTab] = useState<StreamKind>("stream");
   const [showFilters, setShowFilters] = useState(false);
@@ -73,9 +79,27 @@ export function StreamPicker({
   const [availability, setAvailability] = useState("");
   const [language, setLanguage] = useState("");
   const [error, setError] = useState("");
+  /** Manifest URL -> the addon's settings page, for the torrent-only notices. */
+  const [configure, setConfigure] = useState<Record<string, string>>({});
   const ext = movie.external;
 
   useBackNavigation(onClose);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .addonsList()
+      .then((list) => {
+        if (!alive) return;
+        const map: Record<string, string> = {};
+        for (const addon of list) if (addon.configureUrl) map[addon.url] = addon.configureUrl;
+        setConfigure(map);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!ext) return;
@@ -104,7 +128,21 @@ export function StreamPicker({
     ? [movie.seriesName, episodeCode(movie, "S{s}E{e}"), movie.name].filter(Boolean).join(" - ")
     : [movie.name, movie.year ? `(${movie.year})` : null].filter(Boolean).join(" ");
 
-  const views = (streams ?? []).map(streamView);
+  const all = (streams ?? []).map(streamView);
+  const views = all.filter((v) => torrentsOn || !isTorrentOnly(v.stream));
+  /** With torrents off: one notice per addon that answered with bare torrents. */
+  const notices = useMemo(() => {
+    if (torrentsOn) return [];
+    const map = new Map<string, { name: string; url: string; count: number }>();
+    for (const view of all) {
+      if (!isTorrentOnly(view.stream)) continue;
+      const entry = map.get(view.stream.addonUrl) ?? { name: view.stream.addonName, url: view.stream.addonUrl, count: 0 };
+      entry.count += 1;
+      map.set(view.stream.addonUrl, entry);
+    }
+    return [...map.values()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streams, torrentsOn]);
   const streaming = views.filter((v) => v.kind === "stream");
   const fetched = views.filter((v) => v.kind === "download");
   /** The tabs only earn their place once a usenet source has actually turned up. */
@@ -311,7 +349,7 @@ export function StreamPicker({
               <p className="pt-2 text-center text-[13px] text-dim">{t("loadingStreams")}</p>
             </div>
           ) : null}
-          {streams && !views.length ? (
+          {streams && !views.length && !notices.length ? (
             <div className="px-2 py-10 text-center">
               <p className="text-[15px] font-medium">{t("noStreams")}</p>
               <p className="mt-1 text-[13px] text-dim">{t("noStreamsHint")}</p>
@@ -336,7 +374,9 @@ export function StreamPicker({
                   const failed = view.label.failed;
                   // Usenet sources are fetched, not streamed: in that tab the row downloads.
                   const downloadOnly = active === "download";
-                  const enabled = failed ? false : downloadOnly ? Boolean(stream.url) : stream.playable;
+                  const torrent = isTorrentOnly(stream);
+                  const plays = stream.playable || (torrent && torrentsOn);
+                  const enabled = failed ? false : downloadOnly ? Boolean(stream.url) : plays;
                   return (
                     <div
                       key={`${source}:${i}`}
@@ -368,7 +408,7 @@ export function StreamPicker({
                             <Link2Off size={15} />
                           ) : downloadOnly ? (
                             <Download size={15} />
-                          ) : stream.playable ? (
+                          ) : plays ? (
                             <Play size={15} fill="currentColor" className="translate-x-px" />
                           ) : (
                             <Link2Off size={15} />
@@ -380,7 +420,7 @@ export function StreamPicker({
                             <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">
                               {stream.title || t("streamFailed")}
                             </span>
-                          ) : !stream.playable && !downloadOnly ? (
+                          ) : !plays && !downloadOnly ? (
                             <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">{t("streamUnsupported")}</span>
                           ) : view.parsed ? (
                             <span className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -420,6 +460,12 @@ export function StreamPicker({
                             </span>
                           )}
                         </span>
+                        {torrent ? (
+                          <span className="inline-flex h-[18px] shrink-0 items-center gap-1 rounded-md bg-warning/15 px-1.5 text-[11px] font-medium text-warning">
+                            <Magnet size={10} />
+                            {t("torrentBadge")}
+                          </span>
+                        ) : null}
                         {size ? <span className="shrink-0 pl-2 text-[12px] text-dim tabular">{size}</span> : null}
                       </button>
                       {actions.length ? <KebabMenu actions={actions} label={t("moreOptions")} className="ml-1" /> : null}
@@ -429,6 +475,42 @@ export function StreamPicker({
               </div>
             </section>
           ))}
+          {notices.map((notice) => {
+            const page = configure[notice.url];
+            return (
+              <div key={notice.url} className={cn("flex items-start gap-3 rounded-xl bg-white/5 px-4 py-3", views.length ? "mt-1 mb-3" : "mx-2 my-6")}>
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-warning/15 text-warning">
+                  <Magnet size={15} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-medium text-text">
+                    {t("torrentOnlyTitle", { addon: notice.name, count: String(notice.count) })}
+                  </p>
+                  <p className="mt-0.5 text-[12px] leading-[1.45] text-muted">{t("torrentOnlyText")}</p>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void updateSettings({ torrents: { enabled: true } })}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-pill bg-accent px-3 text-[12px] font-semibold text-on-accent hover:bg-accent-hover"
+                    >
+                      <Magnet size={13} />
+                      {t("torrentsEnable")}
+                    </button>
+                    {page ? (
+                      <button
+                        type="button"
+                        onClick={() => void api.openExternal(page).catch(() => undefined)}
+                        className="inline-flex h-8 items-center gap-1.5 rounded-pill bg-white/10 px-3 text-[12px] font-medium text-text hover:bg-white/16"
+                      >
+                        <Settings2 size={13} />
+                        {t("configureAddon")}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

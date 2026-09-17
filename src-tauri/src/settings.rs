@@ -25,6 +25,28 @@ pub struct Settings {
     pub addons: AddonPrefs,
     pub discord: DiscordPrefs,
     pub iptv: IptvPrefs,
+    pub torrents: TorrentPrefs,
+}
+
+/// Built-in torrent playback (addon sources that come as a bare info hash).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct TorrentPrefs {
+    pub enabled: bool,
+    /// Upload to other peers while watching (applies when the engine next starts).
+    pub share: bool,
+    /// Disk the downloaded files may take before the oldest are dropped.
+    pub cache_gb: u32,
+}
+
+impl Default for TorrentPrefs {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            share: true,
+            cache_gb: 5,
+        }
+    }
 }
 
 /// Live TV (IPTV lists).
@@ -217,6 +239,7 @@ impl Settings {
         if !["name", "details", "state"].contains(&self.discord.header.as_str()) {
             self.discord.header = "details".into();
         }
+        self.torrents.cache_gb = self.torrents.cache_gb.clamp(1, 500);
         self
     }
 }
