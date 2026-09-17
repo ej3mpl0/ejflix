@@ -11,6 +11,13 @@ import { Toggle } from "./Toggle";
 
 /** Disk the torrent cache may take, in GB. */
 const CACHE_SIZES = [2, 5, 10, 20, 50, 100];
+/** Bandwidth caps offered, in KB/s; 0 is no cap. */
+const RATE_CAPS = [0, 256, 512, 1024, 2048, 5120, 10240];
+
+function rateLabel(kbps: number, none: string): string {
+  if (!kbps) return none;
+  return kbps >= 1024 ? `${kbps / 1024} MB/s` : `${kbps} KB/s`;
+}
 
 /** Settings › Addons: Stremio addon manifests (catalogs + online sources). */
 export function AddonsSection({ onToast }: { onToast: (message: string) => void }) {
@@ -48,12 +55,19 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
       ? t("torrentsCacheUsage", { size: formatSize(cache.bytes) || "0 MB", count: String(cache.torrents) })
       : t("torrentsCacheEmpty")
     : "";
-  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
+  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.disabled.join("|")}`;
+
+  /** Switches one addon off (kept in the list) or back on. */
+  const setEnabled = (addon: AddonInfo, enabled: boolean) => {
+    const current = settings.addons.disabled;
+    const disabled = enabled ? current.filter((u) => u !== addon.url) : [...current.filter((u) => u !== addon.url), addon.url];
+    void update({ addons: { disabled } });
+  };
 
   useEffect(() => {
     let alive = true;
     api
-      .addonsList()
+      .addonsAll()
       .then((list) => {
         if (alive) setAddons(list);
       })
@@ -118,7 +132,7 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
           <p className="py-4 text-[13px] text-dim">{t("loading")}…</p>
         ) : addons.length ? (
           addons.map((addon) => (
-            <div key={addon.url} className="flex items-center gap-4 py-3">
+            <div key={addon.url} className={`flex items-center gap-4 py-3 ${addon.enabled ? "" : "opacity-60"}`}>
               <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-white/6 text-muted">
                 {addon.logo ? <img src={addon.logo} alt="" className="h-full w-full object-cover" /> : <Puzzle size={18} />}
               </span>
@@ -131,6 +145,11 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
                       {t("builtinAddon")}
                     </span>
                   ) : null}
+                  {!addon.enabled ? (
+                    <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+                      {t("addonOff")}
+                    </span>
+                  ) : null}
                 </p>
                 <p className="truncate text-[12px] text-dim">
                   {addon.description || addon.url}
@@ -138,6 +157,9 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
                   {addon.resources.includes("stream") ? ` · ${t("streams")}` : ""}
                 </p>
               </div>
+              {!addon.builtin ? (
+                <Toggle checked={addon.enabled} onChange={(on) => setEnabled(addon, on)} label={addon.name} />
+              ) : null}
               {addon.configureUrl ? (
                 <button
                   type="button"
@@ -177,7 +199,10 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
         <SettingsRow label={t("torrentsEnabled")} hint={t("torrentsEnabledHint")}>
           <Toggle
             checked={settings.torrents.enabled}
-            onChange={(enabled) => void update({ torrents: { enabled } })}
+            onChange={(enabled) => {
+              void update({ torrents: { enabled } });
+              if (!enabled) void api.torrentPauseAll().catch(() => undefined);
+            }}
             label={t("torrentsEnabled")}
           />
         </SettingsRow>
@@ -186,6 +211,24 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
             checked={settings.torrents.share}
             onChange={(share) => void update({ torrents: { share } })}
             label={t("torrentsShare")}
+          />
+        </SettingsRow>
+        <SettingsRow label={t("torrentsUpload")} hint={t("torrentsUploadHint")}>
+          <Select
+            label={t("torrentsUpload")}
+            value={String(settings.torrents.uploadKbps)}
+            onChange={(value) => void update({ torrents: { uploadKbps: Number(value) } })}
+            className="h-11 min-w-[130px]"
+            options={RATE_CAPS.map((kb) => ({ value: String(kb), label: rateLabel(kb, t("torrentsNoLimit")) }))}
+          />
+        </SettingsRow>
+        <SettingsRow label={t("torrentsDownload")} hint={t("torrentsDownloadHint")}>
+          <Select
+            label={t("torrentsDownload")}
+            value={String(settings.torrents.downloadKbps)}
+            onChange={(value) => void update({ torrents: { downloadKbps: Number(value) } })}
+            className="h-11 min-w-[130px]"
+            options={RATE_CAPS.map((kb) => ({ value: String(kb), label: rateLabel(kb, t("torrentsNoLimit")) }))}
           />
         </SettingsRow>
         <SettingsRow label={t("torrentsCache")} hint={[t("torrentsCacheHint"), cacheUsage].filter(Boolean).join(" ")}>

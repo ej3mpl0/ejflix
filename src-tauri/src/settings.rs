@@ -33,10 +33,15 @@ pub struct Settings {
 #[serde(rename_all = "camelCase", default)]
 pub struct TorrentPrefs {
     pub enabled: bool,
-    /// Upload to other peers while watching (applies when the engine next starts).
+    /// Upload to other peers while watching.
     pub share: bool,
     /// Disk the downloaded files may take before the oldest are dropped.
     pub cache_gb: u32,
+    /// Upload cap in KB/s while sharing; 0 = none. Capped by default: a saturated
+    /// upload link stalls every other request the app makes.
+    pub upload_kbps: u32,
+    /// Download cap in KB/s; 0 = none.
+    pub download_kbps: u32,
 }
 
 impl Default for TorrentPrefs {
@@ -45,6 +50,8 @@ impl Default for TorrentPrefs {
             enabled: true,
             share: true,
             cache_gb: 5,
+            upload_kbps: 512,
+            download_kbps: 0,
         }
     }
 }
@@ -113,6 +120,8 @@ pub struct AddonPrefs {
     pub urls: Vec<String>,
     /// Keep Cinemeta (Stremio's public catalog/metadata addon) as a built-in addon.
     pub cinemeta: bool,
+    /// Addons kept in `urls` but switched off: no catalogs, no sources.
+    pub disabled: Vec<String>,
 }
 
 impl Default for AddonPrefs {
@@ -120,6 +129,7 @@ impl Default for AddonPrefs {
         Self {
             urls: Vec::new(),
             cinemeta: true,
+            disabled: Vec::new(),
         }
     }
 }
@@ -232,6 +242,19 @@ impl Settings {
         let mut seen_urls = std::collections::HashSet::new();
         self.addons.urls.retain(|u| seen_urls.insert(u.clone()));
         self.addons.urls.truncate(30);
+        let urls = self.addons.urls.clone();
+        let mut disabled: Vec<String> = self
+            .addons
+            .disabled
+            .iter()
+            .filter_map(|u| crate::addons::normalize_manifest_url(u).ok())
+            .filter(|u| urls.contains(u))
+            .collect();
+        let mut seen_off = std::collections::HashSet::new();
+        disabled.retain(|u| seen_off.insert(u.clone()));
+        self.addons.disabled = disabled;
+        self.torrents.upload_kbps = self.torrents.upload_kbps.min(1_000_000);
+        self.torrents.download_kbps = self.torrents.download_kbps.min(1_000_000);
         // Always ejFlix's own application, whatever an older store may hold.
         self.discord.client_id = String::new();
         self.discord.details = self.discord.details.chars().take(128).collect();

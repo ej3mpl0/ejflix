@@ -131,6 +131,10 @@ export const api = {
     invoke<TorrentResolved>("torrent_resolve", { args }),
   torrentCacheInfo: () => invoke<TorrentCacheInfo>("torrent_cache_info"),
   torrentCacheClear: () => invoke<TorrentCacheInfo>("torrent_cache_clear"),
+  /** Pauses every torrent nobody is watching (the switch went off). */
+  torrentPauseAll: () => invoke<void>("torrent_pause_all"),
+  /** Every configured addon, switched-off ones included (Settings). */
+  addonsAll: () => invoke<AddonInfo[]>("addons_all"),
   playerStart: (args: {
     itemId: string;
     title: string;

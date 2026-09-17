@@ -51,6 +51,8 @@ pub struct AddonInfo {
     pub builtin: bool,
     /// The addon's own settings page (debrid keys and the like), when it has one.
     pub configure_url: Option<String>,
+    /// False when the profile switched it off (kept in the list, not consulted).
+    pub enabled: bool,
     #[serde(skip)]
     manifest: Value,
 }
@@ -652,6 +654,7 @@ fn parse_manifest(url: &str, value: Value, builtin: bool) -> Result<AddonInfo, S
         catalogs,
         builtin,
         configure_url: (configurable && !builtin).then(|| format!("{}/configure", base_of(url))),
+        enabled: true,
         manifest: value,
     })
 }
@@ -1037,6 +1040,7 @@ mod tests {
             catalogs: vec![],
             builtin: false,
             configure_url: None,
+            enabled: true,
             manifest: Value::Null,
         };
         // Peerflix / Torrentio: a bare info hash with a file index and trackers.

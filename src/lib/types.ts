@@ -299,6 +299,8 @@ export type AddonInfo = {
   builtin: boolean;
   /** The addon's own settings page (debrid keys and the like), when it has one. */
   configureUrl: string | null;
+  /** False when the profile switched it off (kept in the list, not consulted). */
+  enabled: boolean;
 };
 
 export type AddonMeta = {
@@ -433,7 +435,8 @@ export type Settings = {
     showTimeRemaining: boolean;
   };
   library: { pinned: string[] };
-  addons: { urls: string[]; cinemeta: boolean };
+  /** `disabled` holds the URLs of addons kept in the list but switched off. */
+  addons: { urls: string[]; cinemeta: boolean; disabled: string[] };
   /** Discord Rich Presence; templates accept {title} {episode} {year} {type} {source}. */
   discord: {
     enabled: boolean;
@@ -463,6 +466,10 @@ export type Settings = {
     share: boolean;
     /** Disk the downloaded files may take before the oldest are dropped. */
     cacheGb: number;
+    /** Upload cap in KB/s while sharing; 0 = none. */
+    uploadKbps: number;
+    /** Download cap in KB/s; 0 = none. */
+    downloadKbps: number;
   };
 };
 
@@ -661,7 +668,7 @@ export const DEFAULT_SETTINGS: Settings = {
     showTimeRemaining: false,
   },
   library: { pinned: [] },
-  addons: { urls: [], cinemeta: true },
+  addons: { urls: [], cinemeta: true, disabled: [] },
   discord: {
     enabled: false,
     clientId: "",
@@ -673,5 +680,5 @@ export const DEFAULT_SETTINGS: Settings = {
     header: "details",
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
-  torrents: { enabled: true, share: true, cacheGb: 5 },
+  torrents: { enabled: true, share: true, cacheGb: 5, uploadKbps: 512, downloadKbps: 0 },
 };

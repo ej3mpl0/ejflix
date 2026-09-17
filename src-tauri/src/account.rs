@@ -525,28 +525,10 @@ pub fn forget_profile(app: &tauri::AppHandle, user_id: &str) {
     }
 }
 
-/// Addons the account holds as disabled. The app has no switch for them, so they are
-/// kept aside and go back into the document as they came.
+/// Where 0.6.2 kept the addons the website had switched off; they live in the
+/// profile settings (`addons.disabled`) now, so the key is only ever cleaned up.
 fn addons_off_key(user_id: &str) -> String {
     format!("addonsOff.{user_id}")
-}
-
-fn load_addons_off(app: &tauri::AppHandle, user_id: &str) -> Vec<Value> {
-    app.store(crate::store_path())
-        .ok()
-        .and_then(|s| s.get(addons_off_key(user_id)))
-        .and_then(|v| v.as_array().cloned())
-        .unwrap_or_default()
-}
-
-fn save_addons_off(app: &tauri::AppHandle, user_id: &str, items: &[Value]) -> Result<(), String> {
-    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
-    if items.is_empty() {
-        store.delete(addons_off_key(user_id));
-    } else {
-        store.set(addons_off_key(user_id), Value::Array(items.to_vec()));
-    }
-    store.save().map_err(|e| e.to_string())
 }
 
 fn prompt_dismissed(app: &tauri::AppHandle, user_id: &str) -> bool {
@@ -1358,18 +1340,12 @@ async fn build_doc(
 ) -> Value {
     match kind {
         "addons" => {
-            let urls = settings::load(app, uid).map(|s| s.addons.urls).unwrap_or_default();
-            let mut items: Vec<Value> = urls
+            let prefs = settings::load(app, uid).map(|s| s.addons).unwrap_or_default();
+            let items: Vec<Value> = prefs
+                .urls
                 .iter()
-                .map(|u| json!({ "id": u, "manifestUrl": u, "name": host_of(u), "enabled": true }))
+                .map(|u| json!({ "id": u, "manifestUrl": u, "name": host_of(u), "enabled": !prefs.disabled.contains(u) }))
                 .collect();
-            // Switched off on the website: not in the app, but still the account's.
-            for item in load_addons_off(app, uid) {
-                let url = item.get("manifestUrl").and_then(|v| v.as_str()).unwrap_or_default();
-                if !url.is_empty() && !urls.iter().any(|u| u == url) {
-                    items.push(item);
-                }
-            }
             json!({ "kind": "addons", "items": items })
         }
         "settings" => {
@@ -1457,15 +1433,11 @@ async fn apply_doc(
         "addons" => {
             let items = items_array(doc);
             let enabled = |i: &Value| i.get("enabled").and_then(|v| v.as_bool()).unwrap_or(true);
-            let urls: Vec<String> = items
-                .iter()
-                .filter(|i| enabled(i))
-                .filter_map(|i| i.get("manifestUrl").and_then(|v| v.as_str()).map(str::to_string))
-                .collect();
-            let off: Vec<Value> = items.into_iter().filter(|i| !enabled(i)).collect();
-            save_addons_off(app, uid, &off)?;
+            let url_of = |i: &Value| i.get("manifestUrl").and_then(|v| v.as_str()).map(str::to_string);
+            let urls: Vec<String> = items.iter().filter_map(url_of).collect();
+            let disabled: Vec<String> = items.iter().filter(|i| !enabled(i)).filter_map(url_of).collect();
             let _guard = state.settings_lock.lock().await;
-            let saved = settings::merge_and_save(app, uid, json!({ "addons": { "urls": urls } }))?;
+            let saved = settings::merge_and_save(app, uid, json!({ "addons": { "urls": urls, "disabled": disabled } }))?;
             let _ = app.emit("settings://changed", &saved);
         }
         "settings" => {

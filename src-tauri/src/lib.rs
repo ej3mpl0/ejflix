@@ -320,6 +320,11 @@ async fn settings_set(
     let _ = app.emit("settings://changed", &saved);
     drop(_guard);
     refresh_presence(&app).await;
+    // Bandwidth caps and sharing apply to a running torrent engine at once.
+    state.torrents.apply_limits(torrent::EngineOptions::from(&saved.torrents)).await;
+    if !saved.torrents.enabled {
+        state.torrents.pause_idle().await;
+    }
     Ok(saved)
 }
 
@@ -646,8 +651,16 @@ async fn torrent_resolve(
     let dir = torrent::cache_dir(&app);
     state
         .torrents
-        .resolve(&dir, &args.info_hash, args.file_idx, &args.sources, limit, torrent::EngineOptions { share: prefs.share })
+        .resolve(&dir, &args.info_hash, args.file_idx, &args.sources, limit, torrent::EngineOptions::from(&prefs))
         .await
+}
+
+/// Pauses every torrent that is not being watched (the switch was turned off, or the
+/// player closed).
+#[tauri::command]
+async fn torrent_pause_all(state: State<'_, AppState>) -> Result<(), String> {
+    state.torrents.pause_idle().await;
+    Ok(())
 }
 
 #[tauri::command]
@@ -873,6 +886,8 @@ async fn player_stop(
             PlaybackSource::Live { .. } => {}
         }
     }
+    // A torrent nobody is reading any more stops using the connection right away.
+    state.torrents.pause_idle().await;
     refresh_presence(&app).await;
     if switching.unwrap_or(false) {
         return Ok(());
@@ -1456,17 +1471,46 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
 
 // ---- Stremio addons ----
 
-/// Manifest URLs to consult, in priority order (built-in Cinemeta last).
-async fn addon_urls(app: &tauri::AppHandle, state: &AppState) -> Vec<(String, bool)> {
-    let prefs = match settings_user(app, state).await {
+async fn addon_prefs(app: &tauri::AppHandle, state: &AppState) -> settings::AddonPrefs {
+    match settings_user(app, state).await {
         Some(uid) => settings::load(app, &uid).unwrap_or_default().addons,
         None => settings::Settings::default().addons,
-    };
-    let mut list: Vec<(String, bool)> = prefs.urls.into_iter().map(|u| (u, false)).collect();
+    }
+}
+
+/// Manifest URLs to consult, in priority order (built-in Cinemeta last). Addons the
+/// profile switched off are left out.
+async fn addon_urls(app: &tauri::AppHandle, state: &AppState) -> Vec<(String, bool)> {
+    let prefs = addon_prefs(app, state).await;
+    let mut list: Vec<(String, bool)> = prefs
+        .urls
+        .iter()
+        .filter(|u| !prefs.disabled.contains(u))
+        .map(|u| (u.clone(), false))
+        .collect();
     if prefs.cinemeta && !list.iter().any(|(u, _)| u == addons::CINEMETA_URL) {
         list.push((addons::CINEMETA_URL.to_string(), true));
     }
     list
+}
+
+/// Every configured addon, the switched-off ones included, for Settings.
+#[tauri::command]
+async fn addons_all(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<AddonInfo>, String> {
+    let prefs = addon_prefs(&app, &state).await;
+    let mut out = Vec::new();
+    for url in &prefs.urls {
+        if let Ok(mut info) = state.addons.manifest(url, false).await {
+            info.enabled = !prefs.disabled.contains(url);
+            out.push(info);
+        }
+    }
+    if prefs.cinemeta && !prefs.urls.iter().any(|u| u == addons::CINEMETA_URL) {
+        if let Ok(info) = state.addons.manifest(addons::CINEMETA_URL, true).await {
+            out.push(info);
+        }
+    }
+    Ok(out)
 }
 
 async fn loaded_addons(app: &tauri::AppHandle, state: &AppState) -> Vec<AddonInfo> {
@@ -1511,11 +1555,12 @@ async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: St
     let _guard = state.settings_lock.lock().await;
     let current = settings::load(&app, &uid)?.addons;
     let urls: Vec<String> = current.urls.into_iter().filter(|u| u != &url).collect();
+    let disabled: Vec<String> = current.disabled.into_iter().filter(|u| u != &url).collect();
     let cinemeta = if url == addons::CINEMETA_URL { false } else { current.cinemeta };
     let saved = settings::merge_and_save(
         &app,
         &uid,
-        serde_json::json!({ "addons": { "urls": urls, "cinemeta": cinemeta } }),
+        serde_json::json!({ "addons": { "urls": urls, "disabled": disabled, "cinemeta": cinemeta } }),
     )?;
     state.addons.forget(&url);
     let _ = app.emit("settings://changed", &saved);
@@ -2102,6 +2147,8 @@ pub fn run() {
             torrent_resolve,
             torrent_cache_info,
             torrent_cache_clear,
+            torrent_pause_all,
+            addons_all,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

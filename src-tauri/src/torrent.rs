@@ -2,16 +2,19 @@
 //! a file index, what Peerflix, Torrentio or Comet answer without a debrid service)
 //! becomes a local `http://127.0.0.1` URL that mpv opens and seeks in like any other
 //! stream: pieces are fetched on demand around the byte being read, files land in a
-//! cache folder with a size cap, and a torrent nobody is watching is paused after a
-//! minute so it stops using the connection.
+//! cache folder with a size cap, a torrent nobody is watching is paused within
+//! seconds, and after a few idle minutes the whole engine (DHT, listener) stops so it
+//! leaves the connection and the router alone. Upload is capped by default.
 
 use std::collections::{HashMap, HashSet};
 use std::io::SeekFrom;
 use std::net::Ipv4Addr;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use librqbit::limits::LimitsConfig;
 use librqbit::{AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, ManagedTorrent, Session, SessionOptions};
 use serde::Serialize;
 
@@ -46,7 +49,12 @@ const VIDEO_EXT: &[&str] = &["mkv", "mp4", "avi", "m4v", "mov", "ts", "m2ts", "w
 /// How long to wait for the torrent's metadata (its file list) before giving up.
 const METADATA_TIMEOUT: Duration = Duration::from_secs(90);
 /// A torrent with no reader for this long is paused (its files stay cached).
-const IDLE_PAUSE: Duration = Duration::from_secs(60);
+const IDLE_PAUSE: Duration = Duration::from_secs(15);
+/// With nothing read for this long the whole engine stops: DHT chatter and incoming
+/// peers keep a home router busy long after playback, and a restart is cheap.
+const ENGINE_IDLE: Duration = Duration::from_secs(300);
+/// Peers per torrent: enough for speed, few enough not to swamp a home router.
+const PEER_LIMIT: usize = 50;
 /// A read that finds no piece for this long ends the response (mpv reports it).
 const READ_TIMEOUT: Duration = Duration::from_secs(120);
 const READ_CHUNK: usize = 256 * 1024;
@@ -58,6 +66,9 @@ pub struct TorrentEngine {
     server: tokio::sync::Mutex<Option<u16>>,
     /// Torrents the engine holds, by info hash.
     active: Mutex<HashMap<String, Active>>,
+    /// Last time anyone asked the engine for anything (a resolve still waiting for
+    /// metadata has no `Active` entry yet, and must not be shut down under).
+    touched: Mutex<Instant>,
 }
 
 struct Active {
@@ -86,11 +97,37 @@ pub struct CacheInfo {
     pub dir: String,
 }
 
-/// Session-wide choices, fixed when the engine starts (a change applies after a restart).
+/// Bandwidth choices: applied when the engine starts and again on every change.
 #[derive(Debug, Clone, Copy)]
 pub struct EngineOptions {
     /// Upload to other peers while downloading (what keeps torrents alive).
     pub share: bool,
+    /// Upload cap in KB/s; 0 = none.
+    pub upload_kbps: u32,
+    /// Download cap in KB/s; 0 = none.
+    pub download_kbps: u32,
+}
+
+impl Default for EngineOptions {
+    fn default() -> Self {
+        Self { share: true, upload_kbps: 512, download_kbps: 0 }
+    }
+}
+
+impl From<&crate::settings::TorrentPrefs> for EngineOptions {
+    fn from(prefs: &crate::settings::TorrentPrefs) -> Self {
+        Self { share: prefs.share, upload_kbps: prefs.upload_kbps, download_kbps: prefs.download_kbps }
+    }
+}
+
+impl EngineOptions {
+    /// (upload, download) caps in bytes per second, `None` for no cap. Sharing off at
+    /// runtime becomes a one-byte cap, as good as none.
+    fn caps(self) -> (Option<NonZeroU32>, Option<NonZeroU32>) {
+        let cap = |kbps: u32| NonZeroU32::new(kbps.saturating_mul(1024));
+        let up = if self.share { cap(self.upload_kbps) } else { NonZeroU32::new(1) };
+        (up, cap(self.download_kbps))
+    }
 }
 
 pub fn cache_dir(app: &tauri::AppHandle) -> PathBuf {
@@ -103,6 +140,7 @@ impl TorrentEngine {
             session: tokio::sync::Mutex::new(None),
             server: tokio::sync::Mutex::new(None),
             active: Mutex::new(HashMap::new()),
+            touched: Mutex::new(Instant::now()),
         }
     }
 
@@ -121,7 +159,9 @@ impl TorrentEngine {
         if hash.len() != 40 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("Torrent no válido".into());
         }
+        *self.touched.lock().unwrap() = Instant::now();
         let session = self.session(dir, opts).await?;
+        apply_caps(&session, opts);
         self.evict(&session, dir, cache_limit, &hash).await;
         let folder = dir.join(&hash);
         std::fs::create_dir_all(&folder).map_err(|e| format!("No se pudo crear la caché de torrents: {e}"))?;
@@ -217,12 +257,62 @@ impl TorrentEngine {
         }
     }
 
+    /// New bandwidth caps for a running engine (nothing to do before it starts).
+    pub async fn apply_limits(&self, opts: EngineOptions) {
+        if let Some(session) = self.session.lock().await.as_ref() {
+            apply_caps(session, opts);
+        }
+    }
+
+    /// Pauses every torrent without an open reader, right now.
+    pub async fn pause_idle(&self) {
+        self.pause_idle_for(Duration::ZERO).await;
+    }
+
+    /// Pauses the torrents that have had no reader for at least `idle`.
+    async fn pause_idle_for(&self, idle: Duration) {
+        let session = self.session.lock().await.clone();
+        let Some(session) = session else { return };
+        let due: Vec<ManagedTorrentHandle> = {
+            let mut map = self.active.lock().unwrap();
+            map.values_mut()
+                .filter(|a| a.readers == 0 && !a.paused && a.last_used.elapsed() >= idle)
+                .map(|a| {
+                    a.paused = true;
+                    a.handle.clone()
+                })
+                .collect()
+        };
+        for handle in due {
+            let _ = session.pause(&handle).await;
+        }
+        // Nothing asked of the engine for a good while: let the whole thing go.
+        let quiet = self.touched.lock().unwrap().elapsed() >= ENGINE_IDLE && {
+            let map = self.active.lock().unwrap();
+            map.values().all(|a| a.readers == 0 && a.last_used.elapsed() >= ENGINE_IDLE)
+        };
+        if quiet && idle > Duration::ZERO {
+            self.shutdown().await;
+        }
+    }
+
+    /// Stops the session (torrents, DHT, listener); files stay in the cache and the
+    /// next play starts a fresh one.
+    async fn shutdown(&self) {
+        let session = self.session.lock().await.take();
+        self.active.lock().unwrap().clear();
+        if let Some(session) = session {
+            session.stop().await;
+        }
+    }
+
     async fn session(&self, dir: &Path, opts: EngineOptions) -> Result<Arc<Session>, String> {
         let mut guard = self.session.lock().await;
         if let Some(session) = guard.as_ref() {
             return Ok(session.clone());
         }
         std::fs::create_dir_all(dir).map_err(|e| format!("No se pudo crear la caché de torrents: {e}"))?;
+        let (upload_bps, download_bps) = opts.caps();
         let session = Session::new_with_opts(
             dir.to_path_buf(),
             SessionOptions {
@@ -231,6 +321,8 @@ impl TorrentEngine {
                     ..Default::default()
                 }),
                 disable_upload: !opts.share,
+                ratelimits: LimitsConfig { upload_bps, download_bps },
+                peer_limit: Some(PEER_LIMIT),
                 ..Default::default()
             },
         )
@@ -273,22 +365,8 @@ impl TorrentEngine {
 
     async fn idle_loop(self: Arc<Self>) {
         loop {
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            let session = self.session.lock().await.clone();
-            let Some(session) = session else { continue };
-            let idle: Vec<ManagedTorrentHandle> = {
-                let mut map = self.active.lock().unwrap();
-                map.values_mut()
-                    .filter(|a| a.readers == 0 && !a.paused && a.last_used.elapsed() > IDLE_PAUSE)
-                    .map(|a| {
-                        a.paused = true;
-                        a.handle.clone()
-                    })
-                    .collect()
-            };
-            for handle in idle {
-                let _ = session.pause(&handle).await;
-            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            self.pause_idle_for(IDLE_PAUSE).await;
         }
     }
 
@@ -433,6 +511,7 @@ impl Drop for Reader {
 
 impl TorrentEngine {
     fn adjust(&self, hash: &str, delta: i64) {
+        *self.touched.lock().unwrap() = Instant::now();
         if let Some(active) = self.active.lock().unwrap().get_mut(hash) {
             active.readers = (active.readers as i64 + delta).max(0) as usize;
             active.last_used = Instant::now();
@@ -441,6 +520,12 @@ impl TorrentEngine {
 }
 
 // ---- torrent helpers ----
+
+fn apply_caps(session: &Session, opts: EngineOptions) {
+    let (upload_bps, download_bps) = opts.caps();
+    session.ratelimits.set_upload_bps(upload_bps);
+    session.ratelimits.set_download_bps(download_bps);
+}
 
 /// `magnet:?xt=urn:btih:<hash>` plus the addon's trackers and the public ones.
 pub fn magnet_link(hash: &str, sources: &[String]) -> String {
@@ -804,7 +889,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ejflix-torrent-smoke-{}", std::process::id()));
         let engine = Arc::new(TorrentEngine::new());
         let resolved = engine
-            .resolve(&dir, "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c", None, &[], 2 * 1024 * 1024 * 1024, EngineOptions { share: false })
+            .resolve(&dir, "dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c", None, &[], 2 * 1024 * 1024 * 1024, EngineOptions { share: false, ..Default::default() })
             .await
             .expect("resolve");
         assert!(resolved.file_name.to_ascii_lowercase().ends_with(".mp4"), "{}", resolved.file_name);
@@ -849,7 +934,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ejflix-torrent-probe-{}", std::process::id()));
         let engine = Arc::new(TorrentEngine::new());
         let started = Instant::now();
-        let session = engine.session(&dir, EngineOptions { share: false }).await.expect("session");
+        let session = engine.session(&dir, EngineOptions { share: false, ..Default::default() }).await.expect("session");
         println!("session up in {:?}; listen {:?}", started.elapsed(), session.listen_addr());
         for _ in 0..3 {
             tokio::time::sleep(Duration::from_secs(5)).await;
