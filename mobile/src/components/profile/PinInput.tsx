@@ -66,7 +66,7 @@ export function PinInput({
         {[0, 1, 2, 3].map((i) => {
           const current = i === value.length;
           return (
-            <View key={i} style={[s.box, current || error ? { borderColor: t.colors.accent } : null]}>
+            <View key={i} style={[s.box, error ? { borderColor: t.colors.danger } : current ? { borderColor: t.colors.accent } : null]}>
               <Text style={s.dot}>{value[i] ? "•" : ""}</Text>
             </View>
           );

@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Text, View } from "react-native";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Server } from "lucide-react-native";
-import { makeStyles } from "../theme/ThemeProvider";
+import { ChevronDown, CircleCheck, Server, Wifi } from "lucide-react-native";
+import { makeStyles, useTheme } from "../theme/ThemeProvider";
+import { text } from "../theme/typography";
 import { useI18n } from "../lib/locale-context";
 import { useSession } from "../lib/session-context";
 import { api } from "../lib/api";
@@ -23,8 +24,28 @@ export function LoginScreen({ navigation }: AuthScreenProps<"Login">) {
   const { t } = useI18n();
   const { server, hasLocal, setServer, setGate } = useSession();
   const [url, setUrl] = useState(server?.serverUrl ?? "http://192.168.1.10:8096");
+  const th = useTheme();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+
+  const test = async () => {
+    const trimmed = url.trim();
+    if (!trimmed || testing) return;
+    setError("");
+    setTested(null);
+    setTesting(true);
+    try {
+      const info = await api.testServer(trimmed);
+      setTested(`${info.serverName} · Jellyfin ${info.version}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const back = () => {
     const target = server || hasLocal ? "Profiles" : "Welcome";
@@ -69,7 +90,10 @@ export function LoginScreen({ navigation }: AuthScreenProps<"Login">) {
                 label={t("jellyfinServer")}
                 icon={Server}
                 value={url}
-                onChangeText={setUrl}
+                onChangeText={(value) => {
+                  setUrl(value);
+                  setTested(null);
+                }}
                 placeholder="http://192.168.1.10:8096"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -81,7 +105,37 @@ export function LoginScreen({ navigation }: AuthScreenProps<"Login">) {
                 error={error || null}
                 containerStyle={{ marginBottom: error ? 16 : 20 }}
               />
+              {tested ? (
+                <View style={s.tested} accessibilityLiveRegion="polite">
+                  <CircleCheck size={15} color={th.colors.success} />
+                  <Text style={s.testedText}>{tested}</Text>
+                </View>
+              ) : null}
               <Pill variant="primary" size="lg" block label={t("connect")} loading={loading} disabled={!url.trim()} onPress={() => void connect()} />
+              <Pill
+                variant="tonal"
+                size="md"
+                block
+                icon={Wifi}
+                label={t("testConnection")}
+                loading={testing}
+                disabled={!url.trim() || loading}
+                onPress={() => void test()}
+                style={{ marginTop: 10 }}
+              />
+              <Pressable accessibilityRole="button" accessibilityState={{ expanded: help }} onPress={() => setHelp((v) => !v)} style={s.helpToggle}>
+                <Text style={s.helpToggleText}>{t("serverHelpTitle")}</Text>
+                <ChevronDown size={14} color={th.colors.dim} style={help ? { transform: [{ rotate: "180deg" }] } : null} />
+              </Pressable>
+              {help ? (
+                <View style={s.help}>
+                  {(["serverHelpSamePcMobile", "serverHelpLan", "serverHelpRemote", "serverHelpDashboard"] as const).map((key) => (
+                    <Text key={key} style={s.helpText}>
+                      {t(key)}
+                    </Text>
+                  ))}
+                </View>
+              ) : null}
             </CardSurface>
           </Animated.View>
         </ScrollView>
@@ -96,4 +150,10 @@ const useStyles = makeStyles((t) => ({
   scroll: { flexGrow: 1, justifyContent: "center", alignItems: "center", paddingTop: 16 },
   cardWrap: { width: "100%", maxWidth: 420 },
   card: { padding: 28, borderRadius: t.radii.card },
+  tested: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: -8, marginBottom: 14 },
+  testedText: { ...text(13), color: t.colors.success, flexShrink: 1 },
+  helpToggle: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, marginTop: 16, paddingVertical: 6 },
+  helpToggleText: { ...text(13), color: t.colors.dim },
+  help: { marginTop: 8, gap: 8, borderRadius: 14, backgroundColor: "rgba(0,0,0,0.25)", padding: 14 },
+  helpText: { ...text(12.5, "regular", { lineHeight: 18 }), color: t.colors.muted },
 }));

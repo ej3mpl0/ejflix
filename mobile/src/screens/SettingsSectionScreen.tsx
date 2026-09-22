@@ -14,7 +14,9 @@ export function SettingsSectionScreen({ route, navigation }: MainScreenProps<"Se
   const s = useStyles();
   const { t } = useI18n();
   const { insets, pagePad } = useLayout();
-  const id = isSettingsSectionId(route.params.section) ? route.params.section : "appearance";
+  const requested = isSettingsSectionId(route.params.section) ? route.params.section : "appearance";
+  // Language lives inside General now.
+  const id = requested === "language" ? "appearance" : requested;
   const meta = SETTINGS_SECTIONS.find((section) => section.id === id);
   return (
     <View style={s.root}>

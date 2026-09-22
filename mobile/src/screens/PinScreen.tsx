@@ -76,7 +76,7 @@ const useStyles = makeStyles((t) => ({
   fill: { flex: 1 },
   body: { flex: 1, alignItems: "center", justifyContent: "center" },
   title: { ...text(28, "semibold", { tracking: -0.025 }), color: t.colors.text, textAlign: "center", marginTop: 20, marginBottom: 32, maxWidth: 480 },
-  error: { ...text(13), color: t.colors.accent, marginTop: 16, minHeight: 20, textAlign: "center" },
+  error: { ...text(13), color: t.colors.danger, marginTop: 16, minHeight: 20, textAlign: "center" },
   back: { marginTop: 24, flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingHorizontal: 12 },
   backText: { ...text(14), color: t.colors.dim },
 }));

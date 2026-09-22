@@ -15,7 +15,9 @@ import {
   Tv,
   Unlink,
   Users,
-  Languages as LanguagesIcon,
+  Magnet,
+  RefreshCw,
+  Search,
 } from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
 import { IptvSection } from "../components/settings/IptvSection";
@@ -33,12 +35,39 @@ import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
+import { Select } from "../components/Select";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { fieldClass as field } from "../lib/ui";
+import { UpdatesSection } from "../components/settings/UpdatesSection";
+import type { MessageKey } from "../lib/i18n";
 
-type Section = "appearance" | "playback" | "addons" | "iptv" | "discord" | "language" | "account" | "about";
+/** "language" is kept as an id (old deep links) but lives in the General section now. */
+type Section =
+  | "appearance"
+  | "playback"
+  | "addons"
+  | "torrents"
+  | "iptv"
+  | "discord"
+  | "language"
+  | "account"
+  | "updates"
+  | "about";
+
+/** Titles and row labels of each section, for the settings search. */
+const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
+  appearance: ["language", "appLanguage", "theme", "amoled", "posterSize"],
+  playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining"],
+  addons: ["addons", "importAddons", "cinemetaRow"],
+  torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
+  iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled", "iptvWheelZap", "iptvIncludeVod"],
+  discord: ["discord", "discordEnable", "discordHeader", "discordShowPoster", "discordShowTime", "discordShowPaused"],
+  account: ["account", "accountEjflix", "accountCredentials", "accountSignOutAccount", "accountDelete", "jellyfinServer", "switchProfile", "signOut"],
+  updates: ["updates", "updateAuto"],
+  about: ["about", "version", "sourceCode"],
+};
 export type SettingsSectionId = Section;
 
 const tonal =
@@ -54,7 +83,7 @@ function LocalAccount({
   session: Session;
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState<LocalProfile | null>(null);
@@ -244,12 +273,35 @@ export function Settings({
   onSwitchProfile: () => void;
   onLogout: () => void;
   onBack: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
-  const [section, setSection] = useState<Section>(initialSection ?? lastSection);
+  const [rawSection, setSection] = useState<Section>(initialSection ?? lastSection);
+  // Language moved into General (appearance).
+  const section: Section = rawSection === "language" ? "appearance" : rawSection;
   lastSection = section;
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = needle
+    ? (Object.entries(SEARCH_INDEX) as Array<[Section, MessageKey[]]>).flatMap(([id, keys]) =>
+        keys.filter((key) => t(key).toLocaleLowerCase().includes(needle)).map((key) => ({ id, label: t(key) })),
+      )
+    : [];
+
+  /** Jump to a search hit: open its section, then bring the matching heading or row into view. */
+  const goTo = (id: Section, label: string) => {
+    setSection(id);
+    setQuery("");
+    window.setTimeout(() => {
+      const root = document.querySelector("[data-settings-content]");
+      const target = [...(root?.querySelectorAll<HTMLElement>("h3, p") ?? [])].find((el) => el.textContent?.trim() === label);
+      const row = target?.closest<HTMLElement>("section > div > div, section") ?? target;
+      row?.scrollIntoView({ block: "center", behavior: "smooth" });
+      row?.classList.add("setting-hit");
+      window.setTimeout(() => row?.classList.remove("setting-hit"), 1600);
+    }, 60);
+  };
   const { appearance, playback } = settings;
 
   useEffect(() => {
@@ -269,13 +321,14 @@ export function Settings({
   ];
 
   const sections: { id: Section; label: string; icon: typeof Palette }[] = [
-    { id: "appearance", label: t("appearance"), icon: Palette },
+    { id: "appearance", label: t("general"), icon: Palette },
     { id: "playback", label: t("playback"), icon: Play },
     { id: "addons", label: t("addons"), icon: Puzzle },
+    { id: "torrents", label: t("torrentsTitle"), icon: Magnet },
     { id: "iptv", label: t("iptv"), icon: Tv },
     { id: "discord", label: t("discord"), icon: MessageCircle },
-    { id: "language", label: t("language"), icon: LanguagesIcon },
     { id: "account", label: t("account"), icon: Users },
+    { id: "updates", label: t("updates"), icon: RefreshCw },
     { id: "about", label: t("about"), icon: Info },
   ];
 
@@ -294,6 +347,45 @@ export function Settings({
       </div>
       <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[240px_minmax(0,1fr)] md:gap-10">
         {/* A scrolling strip of sections on narrow windows, a column beside the content otherwise. */}
+        <div className="min-w-0 space-y-3">
+        <label className="relative flex items-center">
+          <span className="sr-only">{t("searchSettings")}</span>
+          <Search size={15} className="pointer-events-none absolute left-3 text-dim" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && matches[0]) goTo(matches[0].id, matches[0].label);
+              if (e.key === "Escape" && query) {
+                e.stopPropagation();
+                setQuery("");
+              }
+            }}
+            placeholder={t("searchSettings")}
+            className={cn(field, "h-10 pl-9")}
+          />
+        </label>
+        {needle ? (
+          <div role="listbox" aria-label={t("searchSettings")} className="space-y-0.5">
+            {matches.length ? (
+              matches.map((hit) => (
+                <button
+                  key={`${hit.id}:${hit.label}`}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={() => goTo(hit.id, hit.label)}
+                  className="flex w-full flex-col rounded-btn px-3 py-2 text-left hover:bg-white/6"
+                >
+                  <span className="text-[14px] text-text">{hit.label}</span>
+                  <span className="text-[12px] text-dim">{sections.find((s) => s.id === hit.id)?.label}</span>
+                </button>
+              ))
+            ) : (
+              <p className="px-3 py-2 text-[13px] text-dim">{t("noResults")}</p>
+            )}
+          </div>
+        ) : (
         <nav
           aria-label={t("settings")}
           className="no-scrollbar -mx-page flex gap-1 overflow-x-auto px-page md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0"
@@ -314,10 +406,17 @@ export function Settings({
             </button>
           ))}
         </nav>
+        )}
+        </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6" data-settings-content>
           {section === "appearance" ? (
             <>
+              <SettingsSection title={t("language")}>
+                <SettingsRow label={t("appLanguage")}>
+                  <LanguageSelect />
+                </SettingsRow>
+              </SettingsSection>
               <SettingsSection title={t("theme")} description={t("themeHint")}>
                 <SettingsRow label={t("theme")} stacked>
                   <ThemePicker
@@ -404,6 +503,71 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
+              <SettingsSection title={t("subStyleTitle")} description={t("subStyleHint")}>
+                {/* Preview of the look over a frame-like backdrop. */}
+                <div className="my-3 grid h-28 place-items-end justify-center rounded-btn bg-[linear-gradient(135deg,#3a4a5a,#1b232b_60%,#4a3a2a)] pb-4">
+                  <span
+                    className="rounded px-2 text-center font-semibold"
+                    style={{
+                      color: playback.subColor,
+                      fontSize: `${Math.round(18 * playback.subScale)}px`,
+                      background: playback.subBackground === "box" ? "rgb(0 0 0 / 0.7)" : "transparent",
+                      textShadow:
+                        playback.subBackground === "box"
+                          ? "none"
+                          : playback.subBackground === "shadow"
+                            ? "0 0 2px #000, 2px 2px 3px #000"
+                            : "0 0 2px #000, 0 0 2px #000, 0 0 2px #000",
+                    }}
+                  >
+                    {t("subPreview")}
+                  </span>
+                </div>
+                <SettingsRow label={t("subSize")}>
+                  <Select
+                    label={t("subSize")}
+                    value={String(playback.subScale)}
+                    onChange={(value) => void update({ playback: { subScale: Number(value) } })}
+                    className="min-w-[130px]"
+                    options={[0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.75, 2].map((v) => ({ value: String(v), label: `${Math.round(v * 100)}%` }))}
+                  />
+                </SettingsRow>
+                <SettingsRow label={t("subColor")}>
+                  <SegmentedControl
+                    label={t("subColor")}
+                    value={playback.subColor}
+                    onChange={(subColor) => void update({ playback: { subColor } })}
+                    options={[
+                      { value: "#FFFFFF", label: t("colorWhite") },
+                      { value: "#FFE45C", label: t("colorYellow") },
+                      { value: "#7DF9FF", label: t("colorCyan") },
+                      { value: "#9CFF8A", label: t("colorGreen") },
+                    ]}
+                  />
+                </SettingsRow>
+                <SettingsRow label={t("subBackground")}>
+                  <SegmentedControl
+                    label={t("subBackground")}
+                    value={playback.subBackground}
+                    onChange={(subBackground) => void update({ playback: { subBackground } })}
+                    options={[
+                      { value: "outline", label: t("subBgOutline") },
+                      { value: "shadow", label: t("subBgShadow") },
+                      { value: "box", label: t("subBgBox") },
+                    ]}
+                  />
+                </SettingsRow>
+              </SettingsSection>
+              <SettingsSection title={t("seekStepTitle")}>
+                <SettingsRow label={t("seekStep")} hint={t("seekStepHint")}>
+                  <SegmentedControl<number>
+                    label={t("seekStep")}
+                    value={playback.seekStep}
+                    onChange={(seekStep) => void update({ playback: { seekStep } })}
+                    options={[5, 10, 15, 30].map((n) => ({ value: n, label: `${n} s` }))}
+                  />
+                </SettingsRow>
+              </SettingsSection>
               <SettingsSection title={t("playbackSpeed")}>
                 <SettingsRow label={t("rememberSpeed")} hint={t("rememberSpeedHint")}>
                   <Toggle
@@ -425,17 +589,14 @@ export function Settings({
 
           {section === "addons" ? <AddonsSection onToast={onToast} /> : null}
 
+          {section === "torrents" ? <AddonsSection onToast={onToast} part="torrents" /> : null}
+
+          {section === "updates" ? <UpdatesSection version={version} /> : null}
+
           {section === "iptv" ? <IptvSection onToast={onToast} /> : null}
 
           {section === "discord" ? <DiscordSection /> : null}
 
-          {section === "language" ? (
-            <SettingsSection title={t("language")}>
-              <SettingsRow label={t("appLanguage")}>
-                <LanguageSelect />
-              </SettingsRow>
-            </SettingsSection>
-          ) : null}
 
           {section === "account" ? (
             <>
@@ -480,7 +641,7 @@ export function Settings({
             </>
           ) : null}
 
-          {section === "about" ? <AboutSection version={version} /> : null}
+          {section === "about" ? <AboutSection version={version} withUpdates={false} /> : null}
         </div>
       </div>
     </div>

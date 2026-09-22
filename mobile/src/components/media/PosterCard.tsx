@@ -2,7 +2,7 @@ import React, { memo, useCallback, useState } from "react";
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
 import * as Haptics from "expo-haptics";
-import { Globe } from "lucide-react-native";
+import { Globe, Heart } from "lucide-react-native";
 import type { Movie } from "../../lib/types";
 import { formatRuntime, isRecentlyAdded } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
@@ -94,7 +94,12 @@ function PosterCardInner({ movie, width, onOpen, onPlay, onMenu, style }: Poster
         ) : null}
         {movie.external ? (
           <View pointerEvents="none" style={s.globe} accessibilityLabel={tr("online")}>
-            <Globe size={13} color={t.white(0.85)} strokeWidth={2} />
+            {/* A saved online title shows the heart instead of the plain globe. */}
+            {flags.favorite ? (
+              <Heart size={13} color={t.colors.accent} fill={t.colors.accent} strokeWidth={2} />
+            ) : (
+              <Globe size={13} color={t.white(0.85)} strokeWidth={2} />
+            )}
           </View>
         ) : (
           <WatchedBadge movie={movie} style={s.watched} />

@@ -10,7 +10,7 @@ import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
 import { ChannelsPanel } from "../components/ChannelsPanel";
 import { api } from "../lib/api";
-import type { Channel, EpgNow, Movie, PlayerState } from "../lib/types";
+import type { Channel, EpgNow, Movie, PlayerState, TorrentStatus } from "../lib/types";
 import { channelToMovie } from "../lib/iptv";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
@@ -22,6 +22,8 @@ import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
 import { usePauseInfo } from "../hooks/usePauseInfo";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
+import { StartCover } from "../components/StartCover";
+import { StatsPanel } from "../components/StatsPanel";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -62,6 +64,13 @@ export function Player({
   const [state, setState] = useState<PlayerState>(emptyState);
   /** What the splash says while a source is still being prepared (torrent peers). */
   const [startHint, setStartHint] = useState("");
+  /** Starting failed: the cover shows it with retry / other source instead of leaving. */
+  const [startError, setStartError] = useState<string | null>(null);
+  /** Bumped by "Retry" to run the start again. */
+  const [attempt, setAttempt] = useState(0);
+  /** Info hash of the torrent being opened (engine side) or played (overlay side). */
+  const [torrentHash, setTorrentHash] = useState<string | null>(null);
+  const [torrent, setTorrent] = useState<TorrentStatus | null>(null);
   const [detail, setDetail] = useState<Movie | null>(null);
   // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
   const [visible, setVisible] = useState(false);
@@ -73,6 +82,10 @@ export function Player({
   const [flash, setFlash] = useState<Flash | null>(null);
   /** "?" overlay with the keyboard shortcuts. */
   const [help, setHelp] = useState(false);
+  /** Subtitle and audio delays of this file (mpv resets them on every load). */
+  const [delays, setDelays] = useState({ sub: 0, audio: 0 });
+  /** Technical numbers overlay (I). */
+  const [stats, setStats] = useState(false);
   /** Subtitle track to bring back when V turns subtitles on again. */
   const lastSub = useRef<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
@@ -199,6 +212,7 @@ export function Player({
             if (!url && stream?.infoHash && torrents) {
               // A bare torrent: the built-in engine turns it into a local URL first.
               setStartHint(tRef.current("torrentConnecting"));
+              setTorrentHash(stream.infoHash);
               const resolved = await api.torrentResolve({
                 infoHash: stream.infoHash,
                 fileIdx: stream.fileIdx,
@@ -250,8 +264,8 @@ export function Player({
           setState(next);
         } catch (err) {
           if (cancelled) return;
-          onErrorRef.current(err instanceof Error ? err.message : tRef.current("playerStartError"));
-          onExitRef.current();
+          setStartHint("");
+          setStartError(err instanceof Error ? err.message : tRef.current("playerStartError"));
         }
       };
       void begin();
@@ -265,13 +279,44 @@ export function Player({
       if (!overlay) stopping.current = api.playerStop(mounted.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movie, overlay]);
+  }, [movie, overlay, attempt]);
+
+  // Live peers / speed of the torrent while it opens (engine) or plays (overlay).
+  const playingHash = overlay ? (movie.external?.stream?.infoHash ?? null) : torrentHash;
+  useEffect(() => {
+    if (!playingHash) {
+      setTorrent(null);
+      return;
+    }
+    let alive = true;
+    const load = () => {
+      api
+        .torrentStatus(playingHash)
+        .then((status) => {
+          if (alive) setTorrent(status);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const handle = window.setInterval(load, 1000);
+    return () => {
+      alive = false;
+      window.clearInterval(handle);
+    };
+  }, [playingHash]);
 
   // A new item (next episode, another version) may chain again later.
   useEffect(() => {
     nextSent.current = false;
     setPanel(false);
+    setDelays({ sub: 0, audio: 0 });
   }, [movie]);
+
+  const changeDelay = (kind: "sub" | "audio", seconds: number) => {
+    const value = Math.max(-30, Math.min(30, Math.round(seconds * 10) / 10));
+    setDelays((current) => ({ ...current, [kind]: value }));
+    void api.playerSetProp(kind === "sub" ? "sub-delay" : "audio-delay", value);
+  };
 
   // Episodes: look up what comes next so the end of the file can chain into it.
   // Online episodes carry their successor already (resolved by the engine side).
@@ -583,13 +628,13 @@ export function Player({
       case "j":
       case "J":
         if (live) zap(-1);
-        else seekBy(-10);
+        else seekBy(-settings.playback.seekStep);
         break;
       case "ArrowRight":
       case "l":
       case "L":
         if (live) zap(1);
-        else seekBy(10);
+        else seekBy(settings.playback.seekStep);
         break;
       case "PageUp":
         if (live) {
@@ -668,6 +713,18 @@ export function Player({
         }
         break;
       }
+      case "z":
+      case "Z":
+        if (!live) changeDelay("sub", delays.sub - 0.1);
+        break;
+      case "x":
+      case "X":
+        if (!live) changeDelay("sub", delays.sub + 0.1);
+        break;
+      case "i":
+      case "I":
+        setStats((open) => !open);
+        break;
       case "?":
         setHelp((open) => !open);
         setMenu(null);
@@ -680,7 +737,30 @@ export function Player({
   };
 
   if (!overlay) {
-    return <div className="fixed inset-0 z-[60] bg-base" />;
+    return (
+      <StartCover
+        movie={movie}
+        heading={heading}
+        subheading={subheading}
+        hint={startHint}
+        torrent={torrent}
+        error={startError}
+        onCancel={onExit}
+        onRetry={() => {
+          setStartError(null);
+          setAttempt((n) => n + 1);
+        }}
+        onOtherSource={
+          movie.external
+            ? () => {
+                // The app reopens the source picker on a failed start.
+                onError(startError ?? t("playerStartError"));
+                onExit();
+              }
+            : undefined
+        }
+      />
+    );
   }
 
   return (
@@ -727,7 +807,7 @@ export function Player({
             {flash === "back" || flash === "fwd" ? (
               <span className="relative grid place-items-center">
                 {flash === "back" ? <RotateCcw size={40} strokeWidth={1.5} /> : <RotateCw size={40} strokeWidth={1.5} />}
-                <span className="absolute text-[11px] font-bold tabular">10</span>
+                <span className="absolute text-[11px] font-bold tabular">{settings.playback.seekStep}</span>
               </span>
             ) : null}
           </div>
@@ -758,6 +838,9 @@ export function Player({
           shifted={panel}
         />
       ) : null}
+      {stats && !locked ? (
+        <StatsPanel torrent={torrent} delays={delays} onClose={() => setStats(false)} />
+      ) : null}
       {help && !locked ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
       {locked ? (
         <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
@@ -785,6 +868,8 @@ export function Player({
           onVolume={(value) => void changeVolume(value)}
           onMute={() => void api.playerSetMute(!state.mute)}
           onTrack={(kind, id) => void api.playerSetTrack(kind, id)}
+          delays={delays}
+          onDelay={changeDelay}
           onSpeed={setSpeed}
           onAspect={cycleAspect}
           onFullscreen={() => void toggleFullscreen()}

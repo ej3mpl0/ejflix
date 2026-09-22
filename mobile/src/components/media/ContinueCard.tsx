@@ -104,7 +104,7 @@ function ContinueCardInner({ movie, width, onPlay, onOpen, variant = "resume", o
         {started ? t("remaining", { n: remaining }) : formatRuntime(movie.runtimeTicks)}
       </Text>
       {menuMounted && !onMenu ? (
-        <ItemActionSheet movie={movie} visible={menu} onClose={() => setMenu(false)} onOpen={onOpen} onPlay={onPlay} />
+        <ItemActionSheet movie={movie} visible={menu} onClose={() => setMenu(false)} onOpen={onOpen} onPlay={onPlay} continueRow={variant === "resume"} />
       ) : null}
     </View>
   );

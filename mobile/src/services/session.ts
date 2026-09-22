@@ -439,6 +439,11 @@ export async function probeServer(url: string): Promise<PublicInfo> {
   return info;
 }
 
+/** "Test connection": the same check as connecting, without remembering the server. */
+export async function testServer(url: string): Promise<PublicInfo> {
+  return probeRaw(normalizeUrl(url));
+}
+
 export async function login(url: string, username: string, password: string): Promise<Session> {
   const deviceId = await existingDeviceId();
   const session = await loginRaw(url, username, password, deviceId);

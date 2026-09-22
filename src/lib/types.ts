@@ -273,6 +273,8 @@ export type PlayerState = {
 export type Toast = {
   id: number;
   message: string;
+  /** One button in the toast ("Undo"); running it closes the toast. */
+  action?: { label: string; run: () => void };
 };
 
 export type AddonCatalog = {
@@ -350,6 +352,8 @@ export type AddonMetaFull = AddonMeta & {
   director: string[];
   videos: AddonVideo[];
   related: AddonRelated[];
+  /** YouTube watch URLs. */
+  trailers: string[];
 };
 
 /** An online title the user saved to their list or ticked off as watched. */
@@ -433,6 +437,13 @@ export type Settings = {
     rememberSpeed: boolean;
     lastSpeed: number;
     showTimeRemaining: boolean;
+    /** Subtitle size factor, 0.5 to 2.5. */
+    subScale: number;
+    /** Subtitle text colour, "#RRGGBB". */
+    subColor: string;
+    subBackground: SubBackground;
+    /** Seconds a seek jumps: 5, 10, 15 or 30. */
+    seekStep: number;
   };
   library: { pinned: string[] };
   /** `disabled` holds the URLs of addons kept in the list but switched off. */
@@ -479,6 +490,17 @@ export type Settings = {
 export type ImportedAddon = { url: string; name: string; official: boolean };
 
 export type DiscordHeader = "name" | "details" | "state";
+export type SubBackground = "outline" | "shadow" | "box";
+
+/** Live numbers of a torrent being opened or played; `known` is false before its metadata. */
+export type TorrentStatus = {
+  known: boolean;
+  peers: number;
+  downMbps: number;
+  upMbps: number;
+  progressBytes: number;
+  totalBytes: number;
+};
 
 /** Result of asking GitHub for the latest release. */
 export type UpdateCheck = {
@@ -671,6 +693,10 @@ export const DEFAULT_SETTINGS: Settings = {
     rememberSpeed: false,
     lastSpeed: 1,
     showTimeRemaining: false,
+    subScale: 1,
+    subColor: "#FFFFFF",
+    subBackground: "outline",
+    seekStep: 10,
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true, disabled: [] },

@@ -30,6 +30,10 @@ import { useBackNavigation } from "../lib/use-back";
 import { routeFor, type DetailsRoute } from "../lib/view-stack";
 import { mixFeatured, useAddonFeatured } from "../hooks/useAddonFeatured";
 import { EmptyState } from "../components/EmptyState";
+import { SeeAllContext, type SeeAllRequest } from "../lib/see-all-context";
+import { SeeAllPage } from "./SeeAllPage";
+import { handlePosterArrows } from "../lib/poster-nav";
+import { Shimmer } from "../components/Shimmer";
 
 const PAGE_EXIT_MS = 250;
 
@@ -65,7 +69,7 @@ export function Home({
   /** Bumped when the player failed to start: bring the sources sheet back. */
   playFailed?: number;
   onPlay: (movie: Movie) => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
   /** The account changed (profile edited, server linked or unlinked). */
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
@@ -96,6 +100,8 @@ export function Home({
   const scrolledRef = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollOf = useRef(new Map<NavView, number>());
+  /** A row opened as a full grid, over the current view. */
+  const [seeAll, setSeeAll] = useState<SeeAllRequest | null>(null);
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
 
@@ -285,11 +291,13 @@ export function Home({
 
   const openView = (next: NavView) => {
     setStack([]);
+    setSeeAll(null);
     if (next !== "settings") setSettingsSection(undefined);
     // Leaving the search view empties the box, so the header stops showing a stale query.
     if (next !== "search") setSearch("");
     if (next === view) return;
     remember();
+    setSeeAll(null);
     setView(next);
     scroller.current?.scrollTo({ top: 0 });
   };
@@ -309,6 +317,7 @@ export function Home({
     setStack([]);
     setSettingsSection(undefined);
     remember();
+    setSeeAll(null);
     setView("search");
     scroller.current?.scrollTo({ top: 0 });
   };
@@ -318,6 +327,7 @@ export function Home({
     setSettingsSection(section);
     if (view === "settings") return;
     remember();
+    setSeeAll(null);
     setStack([]);
     setView("settings");
     scroller.current?.scrollTo({ top: 0 });
@@ -346,7 +356,7 @@ export function Home({
   };
 
   const hasStack = stack.length > 0;
-  useBackNavigation(hasStack || picker || view === "home" ? null : back);
+  useBackNavigation(hasStack || picker || seeAll || view === "home" ? null : back);
 
   const play = (movie: Movie) => {
     if (movie.live) {
@@ -467,14 +477,16 @@ export function Home({
         }}
         onSearchFocus={openSearch}
         scrolled={scrolled}
-        hidden={hasStack}
+        hidden={hasStack || seeAll != null}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
       />
+      <SeeAllContext.Provider value={setSeeAll}>
       <div
         ref={scroller}
         className="h-full overflow-y-auto"
-        inert={hasStack}
+        inert={hasStack || seeAll != null}
+        onKeyDown={(e) => handlePosterArrows(e, scroller.current)}
         onScroll={(e) => {
           const y = e.currentTarget.scrollTop;
           e.currentTarget.style.setProperty("--scroll-y", String(y));
@@ -514,6 +526,16 @@ export function Home({
           <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} />
         ) : error ? (
           retry
+        ) : homeLoading && view === "mylist" ? (
+          // "My list" is a grid: its placeholder is one too.
+          <div className="px-page pt-24 pb-16">
+            <Shimmer className="mb-6 h-7 w-40 rounded" />
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
+              {Array.from({ length: 12 }).map((_, i) => (
+                <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
+              ))}
+            </div>
+          </div>
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
@@ -549,6 +571,17 @@ export function Home({
           />
         ) : null}
       </div>
+      </SeeAllContext.Provider>
+      {seeAll ? (
+        <SeeAllPage
+          key={seeAll.title}
+          request={seeAll}
+          top={!hasStack && !picker}
+          onBack={() => setSeeAll(null)}
+          onOpen={openDetails}
+          onPlay={play}
+        />
+      ) : null}
       {stack.map((route, i) =>
         route.seed?.external ? (
           <ExternalDetailsPage

@@ -86,7 +86,7 @@ function errorText(err: unknown): string {
 }
 
 /** Settings › IPTV: playlists (M3U by URL or file), Xtream Codes accounts, guide and preferences. */
-export function IptvSection({ onToast }: { onToast: (message: string) => void }) {
+export function IptvSection({ onToast }: { onToast: (message: string, action?: { label: string; run: () => void }) => void }) {
   const { t, locale } = useI18n();
   const { settings, update } = useSettings();
   const prefs = settings.iptv;

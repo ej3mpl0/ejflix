@@ -12,7 +12,7 @@ function initials(name: string): string {
 }
 
 /** Circular cast avatars with name and role (Nuvio style). */
-export function CastRow({ people }: { people: Person[] }) {
+export function CastRow({ people, onPerson }: { people: Person[]; onPerson?: (person: Person) => void }) {
   const { t } = useI18n();
   if (!people.length) return null;
   return (
@@ -20,8 +20,15 @@ export function CastRow({ people }: { people: Person[] }) {
       <h2 className="mb-4 text-[18px] font-semibold">{t("cast")}</h2>
       <ScrollRow className="pb-2">
         {people.map((person) => (
-          <div key={person.id} className="w-[116px] shrink-0 text-center">
-            <div className="img-outline mx-auto grid h-[88px] w-[88px] place-items-center overflow-hidden rounded-full bg-panel text-[22px] font-semibold text-muted">
+          <button
+            key={person.id}
+            type="button"
+            disabled={!onPerson}
+            onClick={() => onPerson?.(person)}
+            aria-label={onPerson ? `${person.name}: ${t("personInLibrary")}` : undefined}
+            className="group/person w-[116px] shrink-0 text-center disabled:cursor-default"
+          >
+            <div className="img-outline mx-auto grid h-[88px] w-[88px] place-items-center overflow-hidden rounded-full bg-panel text-[22px] font-semibold text-muted transition-transform duration-150 group-hover/person:scale-105">
               {person.imageUrl ? (
                 <img src={person.imageUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
               ) : (
@@ -40,7 +47,7 @@ export function CastRow({ people }: { people: Person[] }) {
                 </p>
               ) : null}
             </div>
-          </div>
+          </button>
         ))}
       </ScrollRow>
     </section>

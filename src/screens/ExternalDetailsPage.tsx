@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Play, RotateCcw } from "lucide-react";
+import { CheckCheck, Clapperboard, Globe, Play, RotateCcw } from "lucide-react";
 import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
@@ -19,6 +19,8 @@ import { ProductionInfo } from "../components/ProductionInfo";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { SeasonChips } from "../components/SeasonChips";
+import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
+import { useUserData } from "../lib/userdata-context";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -48,6 +50,9 @@ export function ExternalDetailsPage({
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
   const [reload, setReload] = useState(0);
+  const [showTrailer, setShowTrailer] = useState(false);
+  const [markingSeason, setMarkingSeason] = useState(false);
+  const { setPlayed, flags } = useUserData();
   const root = useRef<HTMLDivElement>(null);
   const movie = meta ? metaFullToMovie(meta) : seed;
   const tint = useDominantColor(movie?.backdropUrl);
@@ -172,6 +177,8 @@ export function ExternalDetailsPage({
       ? t("resume")
       : t("playOnline");
   const genresLine = movie.genres.slice(0, 3).join(" • ");
+  const trailer = playableTrailer(movie.remoteTrailers);
+  const resumes = Boolean(startItem && startItem.playbackPositionTicks > 0);
   const episodes = meta && season != null ? videos.filter((v) => (v.season ?? 0) === season) : [];
 
   return (
@@ -234,7 +241,23 @@ export function ExternalDetailsPage({
                     {playLabel}
                   </Pill>
                   <FavoriteButton movie={movie} pill className="h-12" />
+                  {resumes && startItem ? (
+                    <Pill
+                      variant="tonal"
+                      pill
+                      size="lg"
+                      icon={<RotateCcw size={16} />}
+                      onClick={() => onPlay({ ...startItem, playbackPositionTicks: 0 })}
+                    >
+                      {t("startOver")}
+                    </Pill>
+                  ) : null}
                   <WatchedButton movie={movie} pill className="h-12" />
+                  {trailer ? (
+                    <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
+                      {t("trailer")}
+                    </Pill>
+                  ) : null}
                 </div>
               </div>
             </section>
@@ -267,7 +290,26 @@ export function ExternalDetailsPage({
 
               {ext.type === "series" ? (
                 <section>
-                  <h2 className="mb-4 text-[18px] font-semibold">{t("episodes")}</h2>
+                  <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
+                    <h2 className="text-[18px] font-semibold">{t("episodes")}</h2>
+                    {meta && episodes.length ? (
+                      <Pill
+                        variant="tonal"
+                        size="sm"
+                        disabled={markingSeason}
+                        icon={<CheckCheck size={15} />}
+                        onClick={() => {
+                          // One entry per episode in the local list, one after another.
+                          setMarkingSeason(true);
+                          void (async () => {
+                            for (const video of episodes) await setPlayed(videoToMovie(meta, video), true);
+                          })().finally(() => setMarkingSeason(false));
+                        }}
+                      >
+                        {t("markSeasonWatched")}
+                      </Pill>
+                    ) : null}
+                  </div>
                   <div className="mb-4 empty:hidden">
                     <SeasonChips
                       seasons={seasons.map((s) => ({
@@ -301,6 +343,11 @@ export function ExternalDetailsPage({
                                   <Play size={18} fill="currentColor" className="translate-x-px" />
                                 </span>
                               </div>
+                              {flags(item).played ? (
+                                <span className="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white">
+                                  <CheckCheck size={13} />
+                                </span>
+                              ) : null}
                               {pct > 0 ? (
                                 <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
                                   <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
@@ -336,6 +383,7 @@ export function ExternalDetailsPage({
         )}
       </div>
       <FloatingTitleBar title={movie.name} onBack={onBack} />
+      {showTrailer && trailer ? <TrailerDialog url={trailer} title={movie.name} onClose={() => setShowTrailer(false)} /> : null}
     </div>
   );
 }

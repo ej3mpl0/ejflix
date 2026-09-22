@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 const CLIENT_NAME: &str = "ejFlix";
-const CLIENT_VERSION: &str = "0.6.4";
+const CLIENT_VERSION: &str = "0.6.5";
 const DEVICE_NAME: &str = "Windows";
 pub const IMAGE_SCHEME: &str = "jfimg";
 const IMAGE_ORIGIN: &str = "http://jfimg.localhost";
@@ -855,6 +855,20 @@ impl JellyfinClient {
         let fields = item_fields();
         self.items_query(&format!(
             "/Users/{}/Items?SearchTerm={q}&IncludeItemTypes=Movie,Series&Recursive=true&Limit=48&Fields={fields}",
+            session.user_id
+        ))
+        .await
+    }
+
+    /// Films and series of the library a person (cast or crew) takes part in, newest first.
+    pub async fn person_items(&self, person_id: &str) -> Result<Vec<Movie>, String> {
+        if !valid_item_id(person_id) {
+            return Err("Persona no válida".into());
+        }
+        let session = self.require_session().await?;
+        let fields = item_fields();
+        self.items_query(&format!(
+            "/Users/{}/Items?PersonIds={person_id}&IncludeItemTypes=Movie,Series&Recursive=true&SortBy=ProductionYear,SortName&SortOrder=Descending&Limit=100&Fields={fields}",
             session.user_id
         ))
         .await

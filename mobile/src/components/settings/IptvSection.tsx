@@ -261,8 +261,8 @@ export function IptvSection() {
                     ) : null}
                   </View>
                   <View style={s.statusRow}>
-                    {source.loading ? <Spinner size={12} color={t.colors.dim} /> : source.error ? <CircleAlert size={12} color={t.colors.accent} strokeWidth={2.2} /> : null}
-                    <Text numberOfLines={2} style={[s.meta, source.error ? { color: t.colors.accent } : null, { flexShrink: 1 }]}>
+                    {source.loading ? <Spinner size={12} color={t.colors.dim} /> : source.error ? <CircleAlert size={12} color={t.colors.danger} strokeWidth={2.2} /> : null}
+                    <Text numberOfLines={2} style={[s.meta, source.error ? { color: t.colors.danger } : null, { flexShrink: 1 }]}>
                       {statusLine(source)}
                     </Text>
                   </View>
@@ -505,6 +505,6 @@ const useStyles = makeStyles((t) => ({
   checkRow: { flexDirection: "row", alignItems: "center", flexWrap: "wrap", gap: 12 },
   accountText: { ...text(13), color: t.colors.muted, flexShrink: 1 },
   errorRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  errorText: { ...text(13), color: t.colors.accent, flex: 1 },
+  errorText: { ...text(13), color: t.colors.danger, flex: 1 },
   formActions: { flexDirection: "row", flexWrap: "wrap", gap: 12, paddingTop: 4 },
 }));

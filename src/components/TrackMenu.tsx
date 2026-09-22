@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { Check } from "lucide-react";
 import type { PlayerTrack } from "../lib/types";
 import { useI18n } from "../lib/locale-context";
@@ -60,8 +60,11 @@ export function TrackMenu({
   kind,
   tracks,
   onSelect,
+  footer,
 }: {
   kind: "audio" | "sub";
+  /** Extra controls under the list (delay, subtitle look). */
+  footer?: ReactNode;
   tracks: PlayerTrack[];
   onSelect: (kind: string, id: number) => void;
 }) {
@@ -112,7 +115,7 @@ export function TrackMenu({
         const next = items[Math.min(items.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))];
         next?.focus();
       }}
-      className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 w-[300px] -translate-x-1/2 rounded-2xl bg-panel/95 p-3 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
+      className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 max-h-[calc(100vh-190px)] w-[330px] -translate-x-1/2 overflow-y-auto rounded-2xl bg-panel/95 p-3 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
       <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
         {kind === "audio" ? t("audio") : t("subtitles")}
       </p>
@@ -140,6 +143,7 @@ export function TrackMenu({
             {t("noTracks")}
           </li> : null}
       </ul>
+      {footer}
     </div>
   );
 }

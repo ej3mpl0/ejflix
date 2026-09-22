@@ -26,6 +26,8 @@ import { SpeedMenu, formatSpeed } from "./SpeedMenu";
 import { Timeline } from "./Timeline";
 import { QualityBadges } from "./QualityBadge";
 import { useI18n } from "../lib/locale-context";
+import { DelayStepper, SubtitleTools } from "./SubtitleTools";
+import { useSettings } from "../lib/settings-context";
 
 export type PlayerMenu = "speed" | "audio" | "sub" | null;
 
@@ -88,6 +90,8 @@ export function PlayerControls({
   onVolume,
   onMute,
   onTrack,
+  delays,
+  onDelay,
   onSpeed,
   onAspect,
   onFullscreen,
@@ -120,6 +124,9 @@ export function PlayerControls({
   onVolume: (value: number) => void;
   onMute: () => void;
   onTrack: (kind: string, id: number) => void;
+  /** Current subtitle / audio delay in seconds and how to change it. */
+  delays: { sub: number; audio: number };
+  onDelay: (kind: "sub" | "audio", seconds: number) => void;
   onSpeed: (speed: number) => void;
   onAspect: () => void;
   onFullscreen: () => void;
@@ -129,6 +136,7 @@ export function PlayerControls({
   onHoldUi: (hold: boolean) => void;
 }) {
   const { t, locale } = useI18n();
+  const seekStep = useSettings().settings.playback.seekStep;
   const [scrub, setScrub] = useState<number | null>(null);
   const overChrome = useRef(false);
   const shownTime = scrub ?? state.time;
@@ -311,7 +319,7 @@ export function PlayerControls({
               <button
                 type="button"
                 className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
-                onClick={() => onSeek(-10)}
+                onClick={() => onSeek(-seekStep)}
                 aria-label={t("seekBack")}
                 title={`${t("seekBack")} (J)`}
                 tabIndex={live ? -1 : undefined}
@@ -341,7 +349,7 @@ export function PlayerControls({
               <button
                 type="button"
                 className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
-                onClick={() => onSeek(10)}
+                onClick={() => onSeek(seekStep)}
                 aria-label={t("seekForward")}
                 title={`${t("seekForward")} (L)`}
                 tabIndex={live ? -1 : undefined}
@@ -408,6 +416,7 @@ export function PlayerControls({
                 {menu === "sub" ? (
                   <TrackMenu
                     kind="sub"
+                    footer={<SubtitleTools delay={delays.sub} onDelay={(value) => onDelay("sub", value)} />}
                     tracks={state.tracks}
                     onSelect={(kind, id) => {
                       onTrack(kind, id);
@@ -428,6 +437,11 @@ export function PlayerControls({
                 {menu === "audio" ? (
                   <TrackMenu
                     kind="audio"
+                    footer={
+                      <div className="mt-2 border-t border-white/10 pt-2">
+                        <DelayStepper label={t("audioDelay")} value={delays.audio} onChange={(value) => onDelay("audio", value)} />
+                      </div>
+                    }
                     tracks={state.tracks}
                     onSelect={(kind, id) => {
                       onTrack(kind, id);

@@ -682,3 +682,41 @@ p {
     animation: none !important;
   }
 }
+
+/* Poster hover card */
+@keyframes preview-in {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.preview-in {
+  animation: preview-in 200ms var(--ease-out-soft) both;
+  transform-origin: 50% 60%;
+}
+@media (prefers-reduced-motion: reduce) {
+  .preview-in {
+    animation: none;
+  }
+}
+
+/* Settings search: the row a hit jumped to glows for a moment. */
+@keyframes setting-hit {
+  0%,
+  60% {
+    box-shadow: inset 0 0 0 2px color-mix(in oklab, var(--color-accent) 70%, transparent);
+    background-color: var(--color-accent-soft);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px transparent;
+    background-color: transparent;
+  }
+}
+.setting-hit {
+  border-radius: var(--radius-btn);
+  animation: setting-hit 1.6s var(--ease-std);
+}

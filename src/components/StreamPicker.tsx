@@ -25,6 +25,54 @@ function byQuality(a: string, b: string): number {
   return rank(a) - rank(b) || a.localeCompare(b);
 }
 
+type SortMode = "default" | "quality" | "size" | "seeders";
+
+/** Seeders as most torrent addons print them in the description ("👤 123"). */
+function seedersOf(stream: AddonStream): number {
+  const match = /👤\s*(\d+)/u.exec(stream.title ?? "");
+  return match ? Number(match[1]) : -1;
+}
+
+/** Size in bytes: the addon's field, else "💾 1.4 GB" in the description. */
+function sizeOf(stream: AddonStream): number {
+  if (stream.videoSize) return stream.videoSize;
+  const match = /💾\s*([\d.,]+)\s*(TB|GB|MB)/iu.exec(stream.title ?? "");
+  if (!match) return -1;
+  const value = Number(match[1].replace(",", "."));
+  const unit = match[2].toUpperCase();
+  return value * 1024 ** (unit === "TB" ? 4 : unit === "GB" ? 3 : 2);
+}
+
+/** The source last played for each title ("the one I always use"), per title id. */
+const PREFERRED_KEY = "ejflix.preferredSource";
+type Preferred = { addonUrl: string; bingeGroup: string | null };
+
+function readPreferred(metaId: string): Preferred | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(PREFERRED_KEY) ?? "{}") as Record<string, Preferred>;
+    return all[metaId] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function savePreferred(metaId: string, stream: AddonStream) {
+  try {
+    const all = JSON.parse(localStorage.getItem(PREFERRED_KEY) ?? "{}") as Record<string, Preferred>;
+    all[metaId] = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
+    // Keep the most recent 300 titles.
+    const entries = Object.entries(all).slice(-300);
+    localStorage.setItem(PREFERRED_KEY, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    /* storage unavailable: nothing to remember */
+  }
+}
+
+function isPreferred(stream: AddonStream, preferred: Preferred | null): boolean {
+  if (!preferred || stream.addonUrl !== preferred.addonUrl) return false;
+  return preferred.bingeGroup ? stream.bingeGroup === preferred.bingeGroup : false;
+}
+
 /** Clipboard, with the old command as a fallback when WebView2 refuses the async API. */
 async function copyText(text: string): Promise<boolean> {
   try {
@@ -67,7 +115,7 @@ export function StreamPicker({
   movie: Movie;
   onClose: () => void;
   onPlay: (movie: Movie, stream: AddonStream) => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t } = useI18n();
   const downloads = useDownloads();
@@ -79,6 +127,7 @@ export function StreamPicker({
   const [quality, setQuality] = useState("");
   const [availability, setAvailability] = useState("");
   const [language, setLanguage] = useState("");
+  const [sort, setSort] = useState<SortMode>("default");
   const [error, setError] = useState("");
   /** Manifest URL -> the addon's settings page, for the torrent-only notices. */
   const [configure, setConfigure] = useState<Record<string, string>>({});
@@ -161,6 +210,21 @@ export function StreamPicker({
     if (language && !view.meta.languages.includes(language)) return false;
     return true;
   });
+  const preferred = ext ? readPreferred(ext.metaId) : null;
+  const rank = (view: StreamView): number => {
+    if (sort === "quality") {
+      const q = view.label.resolution ? QUALITY_ORDER.indexOf(view.label.resolution.toLowerCase()) : -1;
+      return q < 0 ? QUALITY_ORDER.length : q;
+    }
+    if (sort === "size") return -sizeOf(view.stream);
+    if (sort === "seeders") return -seedersOf(view.stream);
+    return 0;
+  };
+  // The usual source first, then the chosen order (stable: the addon's own order breaks ties).
+  filtered.sort(
+    (a, b) =>
+      Number(isPreferred(b.stream, preferred)) - Number(isPreferred(a.stream, preferred)) || rank(a) - rank(b),
+  );
   const filtering = Boolean(quality || availability || language);
   const activeFilters = [quality, availability, language].filter(Boolean).length;
   /** With one quality and one language there is nothing a filter could narrow down. */
@@ -291,6 +355,18 @@ export function StreamPicker({
           </div>
           {canFilter && showFilters ? (
             <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Select<SortMode>
+                label={t("sortBy")}
+                value={sort}
+                onChange={setSort}
+                className="h-9 min-w-[150px] text-[13px]"
+                options={[
+                  { value: "default", label: t("sortRecommended") },
+                  { value: "quality", label: t("sortQuality") },
+                  { value: "size", label: t("sortSize") },
+                  { value: "seeders", label: t("sortSeeders") },
+                ]}
+              />
               {qualities.length > 1 ? (
                 <Select
                   label={t("filterQuality")}
@@ -392,7 +468,10 @@ export function StreamPicker({
                       onClick={() => {
                         if (!enabled) return;
                         if (downloadOnly) startDownload(stream);
-                        else onPlay(movie, stream);
+                        else {
+                          if (ext && stream.bingeGroup) savePreferred(ext.metaId, stream);
+                          onPlay(movie, stream);
+                        }
                       }}
                       className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2.5 text-left"
                     >
@@ -415,7 +494,17 @@ export function StreamPicker({
                         )}
                       </span>
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-[14px] font-medium text-text">{view.title}</span>
+                        <span className="flex items-center gap-2">
+                          <span className="block min-w-0 truncate text-[14px] font-medium text-text">{view.title}</span>
+                          {isPreferred(stream, preferred) ? (
+                            <span className="inline-flex h-[18px] shrink-0 items-center rounded-md bg-accent px-1.5 text-[10px] font-bold tracking-wide text-on-accent uppercase">
+                              {t("usualSource")}
+                            </span>
+                          ) : null}
+                          {seedersOf(stream) >= 0 ? (
+                            <span className="shrink-0 text-[11px] text-dim tabular">👤 {seedersOf(stream)}</span>
+                          ) : null}
+                        </span>
                         {failed ? (
                           <span className="line-clamp-2 text-[12px] leading-[1.4] text-muted">
                             {stream.title || t("streamFailed")}

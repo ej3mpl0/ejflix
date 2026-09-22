@@ -24,7 +24,14 @@ function rateLabel(kbps: number, none: string): string {
 }
 
 /** Settings › Addons: Stremio addon manifests (catalogs + online sources). */
-export function AddonsSection({ onToast }: { onToast: (message: string) => void }) {
+export function AddonsSection({
+  onToast,
+  part = "addons",
+}: {
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
+  /** Settings shows the addons and the torrent engine as two sections. */
+  part?: "addons" | "torrents";
+}) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
@@ -98,15 +105,28 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
     }
   };
 
+  /** Removes at once and offers Undo, which adds it back in the same on/off state. */
   const remove = async (addon: AddonInfo) => {
+    const wasOff = settings.addons.disabled.includes(addon.url);
     try {
       await api.addonRemove(addon.url);
+      onToast(t("addonRemoved", { name: addon.name }), {
+        label: t("undo"),
+        run: () => {
+          void api
+            .addonAdd(addon.url)
+            .then(() => {
+              if (wasOff) void update({ addons: { disabled: [...settings.addons.disabled.filter((u) => u !== addon.url), addon.url] } });
+            })
+            .catch((err) => onToast(err instanceof Error ? err.message : String(err)));
+        },
+      });
     } catch (err) {
       onToast(err instanceof Error ? err.message : String(err));
     }
   };
 
-  return (
+  return part === "addons" ? (
     <>
       <SettingsSection title={t("addons")} description={t("addonsHint")}>
         <form
@@ -177,21 +197,15 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
               ) : null}
               {/* Built-ins (Cinemeta) are switched in their own section, never removed. */}
               {!addon.builtin ? (
-                <ConfirmButton
-                  confirmLabel={t("remove")}
-                  onConfirm={() => remove(addon)}
-                  trigger={(ask) => (
-                    <button
-                      type="button"
-                      onClick={ask}
-                      aria-label={`${t("removeAddon")}: ${addon.name}`}
-                      title={t("removeAddon")}
-                      className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                />
+                <button
+                  type="button"
+                  onClick={() => void remove(addon)}
+                  aria-label={`${t("removeAddon")}: ${addon.name}`}
+                  title={t("removeAddon")}
+                  className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
+                >
+                  <Trash2 size={16} />
+                </button>
               ) : null}
             </div>
           ))
@@ -213,6 +227,9 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
           />
         </SettingsRow>
       </SettingsSection>
+    </>
+  ) : (
+    <>
       <SettingsSection title={t("torrentsTitle")} description={t("torrentsDescription")}>
         <SettingsRow label={t("torrentsEnabled")} hint={t("torrentsEnabledHint")}>
           <Toggle

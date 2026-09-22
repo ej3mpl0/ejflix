@@ -3,7 +3,7 @@
  * Manifests are cached 60 min, catalog pages 5 min (never when searching); streams are
  * fetched concurrently from every addon that serves them.
  */
-import type { AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ResumeEntry, SettingsPatch } from "../lib/types";
+import type { AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ImportedAddon, LibraryEntry, ResumeEntry, SettingsPatch } from "../lib/types";
 import { emit } from "./events";
 import { fetchWithTimeout, shortError } from "./http";
 import { KEYS, store } from "./store";
@@ -24,6 +24,7 @@ import {
   parseMeta,
   parseMetaFull,
   parseStream,
+  parseStremioCollection,
   streamPath,
   supports,
   upsertProgressList,
@@ -229,12 +230,106 @@ export async function addonStreams(type: string, id: string): Promise<AddonStrea
   return lists.flat();
 }
 
+// ---- the source last played for each title ("your usual") ----
+
+type Preferred = { addonUrl: string; bingeGroup: string | null };
+
+export function preferredSource(metaId: string): Preferred | null {
+  const all = store.get<Record<string, Preferred>>(KEYS.preferredSource) ?? {};
+  return all[metaId] ?? null;
+}
+
+export function savePreferredSource(metaId: string, stream: AddonStream): void {
+  if (!stream.bingeGroup) return;
+  const all = { ...(store.get<Record<string, Preferred>>(KEYS.preferredSource) ?? {}) };
+  delete all[metaId];
+  all[metaId] = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
+  // Keep the most recent 300 titles.
+  store.set(KEYS.preferredSource, Object.fromEntries(Object.entries(all).slice(-300)));
+}
+
+// ---- local list of online titles ("My list" and watched marks) ----
+
+const MAX_LIBRARY_ENTRIES = 500;
+
+function loadLibrary(uid: string): LibraryEntry[] {
+  const raw = store.get<unknown[]>(KEYS.addonLibrary(uid));
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((e): e is LibraryEntry => Boolean(e) && typeof (e as LibraryEntry).key === "string");
+}
+
+export async function addonLibraryList(): Promise<LibraryEntry[]> {
+  const uid = settingsUser();
+  return uid ? loadLibrary(uid) : [];
+}
+
+/**
+ * Port of `set_library_flags`: the entry keeps its other flag, goes to the front, and is
+ * dropped once it is neither saved nor watched.
+ */
+export async function addonLibrarySet(args: {
+  entry: Omit<LibraryEntry, "saved" | "watched" | "updatedMs">;
+  saved?: boolean;
+  watched?: boolean;
+}): Promise<LibraryEntry[]> {
+  const uid = settingsUser();
+  if (!uid) throw new Error("No hay ningún perfil activo");
+  if (!args.entry.key) throw new Error("La entrada no tiene identificador");
+  const list = loadLibrary(uid);
+  const previous = list.find((e) => e.key === args.entry.key);
+  const entry: LibraryEntry = {
+    ...args.entry,
+    saved: args.saved ?? previous?.saved ?? false,
+    watched: args.watched ?? previous?.watched ?? false,
+    updatedMs: nowMs(),
+  };
+  const next = list.filter((e) => e.key !== entry.key);
+  if (entry.saved || entry.watched) next.unshift(entry);
+  const saved = next.slice(0, MAX_LIBRARY_ENTRIES);
+  store.set(KEYS.addonLibrary(uid), saved);
+  return saved;
+}
+
 // ---- local resume positions for online titles ----
 
 function loadProgress(uid: string): ResumeEntry[] {
   const raw = store.get<unknown[]>(KEYS.addonProgress(uid));
   if (!Array.isArray(raw)) return [];
   return raw.map(normalizeResumeEntry).filter((e): e is ResumeEntry => e !== null);
+}
+
+/**
+ * Addons installed in a Stremio account: login, `addonCollectionGet`, logout. The password
+ * only goes to Stremio's API and is never stored. Errors are stable codes the UI translates.
+ */
+export async function stremioAddons(email: string, password: string): Promise<ImportedAddon[]> {
+  if (!email.trim() || !password) throw new Error("stremio_auth");
+  const API = "https://api.strem.io/api";
+  const post = async (path: string, body: unknown): Promise<Record<string, unknown>> => {
+    let response: Response;
+    try {
+      response = await fetchWithTimeout(`${API}/${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new Error("stremio_network");
+    }
+    try {
+      return (await response.json()) as Record<string, unknown>;
+    } catch {
+      throw new Error("stremio_unexpected");
+    }
+  };
+  const login = await post("login", { type: "Login", email: email.trim(), password, facebook: false });
+  const result = login.result as { authKey?: unknown } | undefined;
+  if (login.error || typeof result?.authKey !== "string") throw new Error("stremio_auth");
+  const authKey = result.authKey;
+  const collection = await post("addonCollectionGet", { type: "AddonCollectionGet", authKey, update: true });
+  void post("logout", { type: "Logout", authKey }).catch(() => undefined);
+  if (collection.error) throw new Error("stremio_unexpected");
+  return parseStremioCollection(collection, normalizeManifestUrl);
 }
 
 export async function addonProgressList(): Promise<ResumeEntry[]> {

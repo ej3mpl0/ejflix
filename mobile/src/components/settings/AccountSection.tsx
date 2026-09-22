@@ -195,5 +195,5 @@ const useStyles = makeStyles((t) => ({
   serverDisc: { width: 44, height: 44, borderRadius: 12, backgroundColor: t.colors.accentSoft, alignItems: "center", justifyContent: "center" },
   actions: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
   twoCols: { flexDirection: "row", gap: 12 },
-  error: { ...text(13), color: t.colors.accent },
+  error: { ...text(13), color: t.colors.danger },
 }));

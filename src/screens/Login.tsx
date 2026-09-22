@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, LoaderCircle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronDown, LoaderCircle, Wifi } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
 import { LanguageSelect } from "../components/LanguageSelect";
@@ -21,6 +21,23 @@ export function Login({
   const [url, setUrl] = useState("http://localhost:8096");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [tested, setTested] = useState<string | null>(null);
+  const [help, setHelp] = useState(false);
+
+  const test = async () => {
+    setError("");
+    setTested(null);
+    setTesting(true);
+    try {
+      const info = await api.testServer(url);
+      setTested(`${info.serverName} · Jellyfin ${info.version}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const connect = async () => {
     setError("");
@@ -63,7 +80,7 @@ export function Login({
           <WindowControls />
         </div>
       </div>
-      <div className="relative z-10 flex flex-1 items-center justify-center px-6">
+      <div className="relative z-10 flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
         <form
           className="w-[420px] max-w-full rounded-2xl bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]"
           onSubmit={(e) => {
@@ -80,11 +97,23 @@ export function Login({
           <input
             autoFocus
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              setTested(null);
+            }}
             placeholder="http://192.168.1.10:8096"
             className={cn("mb-2", fieldLgClass)}
           />
-          {error ? <p className="mb-3 text-sm text-danger">{error}</p> : <div className="mb-3 h-5" />}
+          {error ? (
+            <p className="mb-3 text-sm text-danger">{error}</p>
+          ) : tested ? (
+            <p className="mb-3 flex items-center gap-1.5 text-sm text-success" role="status">
+              <CheckCircle2 size={15} />
+              {tested}
+            </p>
+          ) : (
+            <div className="mb-3 h-5" />
+          )}
           <button
             type="submit"
             disabled={loading || !url.trim()}
@@ -93,6 +122,32 @@ export function Login({
             {loading ? <LoaderCircle size={16} className="animate-spin" /> : null}
             {t("connect")}
           </button>
+          <button
+            type="button"
+            disabled={testing || loading || !url.trim()}
+            onClick={() => void test()}
+            className="btn-press mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-btn bg-white/8 text-sm font-semibold hover:bg-white/12 disabled:opacity-60"
+          >
+            {testing ? <LoaderCircle size={16} className="animate-spin" /> : <Wifi size={16} />}
+            {t("testConnection")}
+          </button>
+          <button
+            type="button"
+            aria-expanded={help}
+            onClick={() => setHelp((v) => !v)}
+            className="mt-4 flex w-full items-center justify-center gap-1 text-[13px] text-dim hover:text-text"
+          >
+            {t("serverHelpTitle")}
+            <ChevronDown size={14} className={cn("transition-transform", help && "rotate-180")} />
+          </button>
+          {help ? (
+            <ul className="mt-3 space-y-2 rounded-btn bg-black/25 p-4 text-[12.5px] leading-[1.5] text-muted">
+              <li>{t("serverHelpSamePc")}</li>
+              <li>{t("serverHelpLan")}</li>
+              <li>{t("serverHelpRemote")}</li>
+              <li>{t("serverHelpDashboard")}</li>
+            </ul>
+          ) : null}
         </form>
       </div>
     </div>

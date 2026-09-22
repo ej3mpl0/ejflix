@@ -29,7 +29,15 @@ function CatalogRow({ catalog, onOpen, onPlay }: { catalog: AddonCatalog; onOpen
 
   if (items == null) return <RowSkeleton />;
   if (!items.length) return null;
-  return <PosterRow title={`${catalog.name} · ${catalog.addonName}`} items={items} onOpen={onOpen} onPlay={onPlay} />;
+  return (
+    <PosterRow
+      title={`${catalog.name} · ${catalog.addonName}`}
+      items={items}
+      onOpen={onOpen}
+      onPlay={onPlay}
+      catalog={{ addonUrl: catalog.addonUrl, type: catalog.type, id: catalog.id }}
+    />
+  );
 }
 
 /** One rail per addon catalog (movies and series), in addon priority order. */

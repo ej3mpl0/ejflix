@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Globe, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { episodeCode, formatRuntime } from "../lib/format";
@@ -21,6 +22,8 @@ function EpisodeRow({
   const runtime = formatRuntime(episode.runtimeTicks);
   const progress = flags.playedPercentage || 0;
   const number = episode.episodeNumber != null ? `${episode.episodeNumber}. ` : "";
+  const [open, setOpen] = useState(false);
+  const long = (episode.overview?.length ?? 0) > 150;
 
   return (
     <div className="group/ep relative flex w-full items-start gap-4 rounded-xl p-2 transition-colors duration-150 hover:bg-white/5">
@@ -45,18 +48,30 @@ function EpisodeRow({
           </div>
         ) : null}
       </button>
-      <button type="button" onClick={() => onPlay(episode)} className="min-w-0 flex-1 py-1 text-left">
-        <div className="flex items-baseline justify-between gap-3 pr-20">
-          <p className="truncate text-[15px] font-medium text-white">
-            {number}
-            {episode.name}
-          </p>
-          {runtime ? <span className="shrink-0 text-[12px] text-dim tabular">{runtime}</span> : null}
-        </div>
-        {episode.overview ? (
-          <p className="mt-1 line-clamp-2 text-[13px] leading-[1.5] text-muted">{episode.overview}</p>
+      <div className="min-w-0 flex-1 py-1">
+        <button type="button" onClick={() => onPlay(episode)} className="block w-full text-left">
+          <div className="flex items-baseline justify-between gap-3 pr-20">
+            <p className="truncate text-[15px] font-medium text-white">
+              {number}
+              {episode.name}
+            </p>
+            {runtime ? <span className="shrink-0 text-[12px] text-dim tabular">{runtime}</span> : null}
+          </div>
+          {episode.overview ? (
+            <p className={`mt-1 text-[13px] leading-[1.5] text-muted ${open ? "" : "line-clamp-2"}`}>{episode.overview}</p>
+          ) : null}
+        </button>
+        {long ? (
+          <button
+            type="button"
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+            className="mt-0.5 text-[12px] font-semibold text-text/80 hover:text-text hover:underline"
+          >
+            {open ? t("less") : t("more")}
+          </button>
         ) : null}
-      </button>
+      </div>
       <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 transition-opacity duration-150 group-hover/ep:opacity-100 focus-within:opacity-100">
         {onOnline ? (
           <button

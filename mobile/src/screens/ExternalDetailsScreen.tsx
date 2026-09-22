@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { Globe, Play } from "lucide-react-native";
+import { CheckCheck, Clapperboard, Globe, Play, RotateCcw } from "lucide-react-native";
 import { api } from "../lib/api";
 import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
 import { episodeCode } from "../lib/format";
@@ -24,6 +24,9 @@ import { MetaChips } from "../components/media/MetaChips";
 import { ProductionInfo } from "../components/media/ProductionInfo";
 import { SeasonChips, type SeasonChip } from "../components/media/SeasonChips";
 import { FloatingTitleBar } from "../components/shell";
+import { useUserData } from "../lib/userdata-context";
+import { FavoriteButton } from "../components/media/FavoriteButton";
+import { WatchedButton } from "../components/media/WatchedButton";
 
 /** Height of the tint → base gradient under the backdrop (desktop 720 px). */
 const BODY_TINT_H = 720;
@@ -52,6 +55,9 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   const [season, setSeason] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
+  const [markingSeason, setMarkingSeason] = useState(false);
+  const { setPlayed } = useUserData();
   const scrollY = useSharedValue(0);
 
   const movie = meta ? metaFullToMovie(meta) : seed;
@@ -67,6 +73,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   useEffect(() => {
     if (!ext) return undefined;
     let alive = true;
+    setError("");
     api
       .addonMeta(ext.type, ext.metaId)
       .then((full) => {
@@ -84,7 +91,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
     return () => {
       alive = false;
     };
-  }, [ext?.type, ext?.metaId]);
+  }, [ext?.type, ext?.metaId, reload]);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasonNumbers = useMemo(() => {
@@ -152,6 +159,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
 
   if (!ext) return null;
 
+  const trailer = movie?.remoteTrailers?.find((url) => /youtu\.?be/.test(url)) ?? null;
   const startCode = startItem?.kind === "Episode" ? episodeCode(startItem, tr("episodeCode")) : "";
   const playLabel =
     startItem?.kind === "Episode" && startCode
@@ -247,11 +255,38 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
               disabled={!startItem}
               onPress={() => startItem && onPlay(startItem)}
             />
+            {startItem && startItem.playbackPositionTicks > 0 ? (
+              <Pill
+                variant="tonal"
+                pill
+                size="lg"
+                icon={RotateCcw}
+                label={tr("startOver")}
+                onPress={() => onPlay({ ...startItem, playbackPositionTicks: 0 })}
+              />
+            ) : null}
+            <FavoriteButton movie={movie} pill size="lg" />
+            <WatchedButton movie={movie} pill size="lg" />
+            {trailer ? (
+              <Pill
+                variant="tonal"
+                pill
+                size="lg"
+                icon={Clapperboard}
+                label={tr("trailer")}
+                onPress={() => void Linking.openURL(trailer).catch(() => undefined)}
+              />
+            ) : null}
           </View>
 
           <MetaChips movie={movie} seasons={isSeries ? seasonCount : undefined} />
 
-          {error ? <Text style={s.empty}>{error}</Text> : null}
+          {error ? (
+            <View style={s.retryRow}>
+              <Text style={[s.empty, { flex: 1 }]}>{error}</Text>
+              <Pill variant="tonal" size="sm" icon={RotateCcw} label={tr("retry")} onPress={() => setReload((n) => n + 1)} />
+            </View>
+          ) : null}
 
           {movie.overview ? (
             <View>
@@ -273,7 +308,25 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
 
           {ext.type === "series" ? (
             <View>
-              <Text style={[s.heading, { marginBottom: 14 }]}>{tr("episodes")}</Text>
+              <View style={s.episodesHead}>
+                <Text style={s.heading}>{tr("episodes")}</Text>
+                {meta && episodes.length ? (
+                  <Pill
+                    variant="tonal"
+                    size="sm"
+                    icon={CheckCheck}
+                    loading={markingSeason}
+                    label={tr("markSeasonWatched")}
+                    onPress={() => {
+                      // One entry per episode in the local list, one after another.
+                      setMarkingSeason(true);
+                      void (async () => {
+                        for (const episode of episodes) await setPlayed(episode, true);
+                      })().finally(() => setMarkingSeason(false));
+                    }}
+                  />
+                ) : null}
+              </View>
               <View style={{ marginHorizontal: -layout.pagePad, marginBottom: 14 }}>
                 <SeasonChips
                   seasons={seasonChips}
@@ -282,7 +335,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
                   padHorizontal={layout.pagePad}
                 />
               </View>
-              {!meta ? (
+              {!meta && error ? null : !meta ? (
                 <EpisodeListSkeleton />
               ) : episodes.length ? (
                 <EpisodeList episodes={episodes} onPlay={onPlay} metaOf={(item) => (item.year ? String(item.year) : null)} />
@@ -303,6 +356,8 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
 }
 
 const useStyles = makeStyles((t) => ({
+  retryRow: { flexDirection: "row", alignItems: "center", gap: 12 },
+  episodesHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 14 },
   root: { flex: 1, backgroundColor: t.colors.base },
   hero: { width: "100%", overflow: "hidden", backgroundColor: t.colors.surface },
   backdrop: { transform: [{ scale: 1.08 }] },

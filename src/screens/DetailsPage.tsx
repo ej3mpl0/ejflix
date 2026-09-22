@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe, Play, RotateCcw } from "lucide-react";
-import type { Movie } from "../lib/types";
+import { Clapperboard, Globe, Play, RotateCcw } from "lucide-react";
+import type { Movie, Person } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
 import { externalRefForJellyfin } from "../lib/addons";
@@ -23,6 +23,8 @@ import { ProductionInfo } from "../components/ProductionInfo";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { ScrollRow } from "../components/ScrollRow";
+import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
+import { PersonDialog } from "../components/PersonDialog";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -54,6 +56,8 @@ export function DetailsPage({
   const [episodes, setEpisodes] = useState<Movie[] | null>(null);
   const [nextUp, setNextUp] = useState<Movie | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [showTrailer, setShowTrailer] = useState(false);
+  const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
   /** Seasons or episodes failed: shown in the episodes section with a retry, not as an endless skeleton. */
   const [listError, setListError] = useState("");
@@ -136,6 +140,7 @@ export function DetailsPage({
     : resume && movie
       ? t("resumeFrom", { time: formatClock(ticksToSeconds(movie.playbackPositionTicks)) })
       : t("play");
+  const trailer = movie ? playableTrailer(movie.remoteTrailers) : null;
   const currentSeason = seasons.find((season) => season.id === seasonId) ?? null;
   const chapters = movie && !isSeries && hasChapterImages(movie.chapters) ? movie.chapters : [];
   const genresLine = movie?.genres.slice(0, 3).join(" • ") ?? "";
@@ -252,6 +257,11 @@ export function DetailsPage({
                   ) : null}
                   <FavoriteButton movie={movie} pill className="h-12" />
                   <WatchedButton movie={movie} pill className="h-12" />
+                  {trailer ? (
+                    <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
+                      {t("trailer")}
+                    </Pill>
+                  ) : null}
                   {onlineRef ? (
                     <Pill variant="tonal" pill size="lg" icon={<Globe size={16} />} onClick={() => openOnline(movie)}>
                       {t("onlineSources")}
@@ -335,7 +345,7 @@ export function DetailsPage({
                 </section>
               ) : null}
 
-              <CastRow people={movie.cast} />
+              <CastRow people={movie.cast} onPerson={setPerson} />
 
               {chapters.length ? (
                 <section>
@@ -381,6 +391,8 @@ export function DetailsPage({
         )}
       </div>
       <FloatingTitleBar title={heading} onBack={onBack} />
+      {person ? <PersonDialog person={person} onClose={() => setPerson(null)} onOpen={onPush} onPlay={onPlay} /> : null}
+      {showTrailer && trailer ? <TrailerDialog url={trailer} title={heading} onClose={() => setShowTrailer(false)} /> : null}
     </div>
   );
 }

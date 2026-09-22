@@ -10,7 +10,7 @@ const AUTHOR_URL = "https://x.com/j3mplo";
 const REPO_URL = "https://github.com/ej3mpl0/ejflix";
 
 /** Settings › About: what this build is, who made it, and where it comes from. */
-export function AboutSection({ version }: { version: string | null }) {
+export function AboutSection({ version, withUpdates = true }: { version: string | null; withUpdates?: boolean }) {
   const { t } = useI18n();
   const link =
     "inline-flex items-center gap-1.5 text-[13px] font-medium text-muted transition-colors duration-150 hover:text-text";
@@ -50,7 +50,7 @@ export function AboutSection({ version }: { version: string | null }) {
           </button>
         </div>
       </SettingsSection>
-      <UpdatesSection version={version} />
+      {withUpdates ? <UpdatesSection version={version} /> : null}
     </>
   );
 }

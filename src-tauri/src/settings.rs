@@ -205,6 +205,14 @@ pub struct Playback {
     pub remember_speed: bool,
     pub last_speed: f64,
     pub show_time_remaining: bool,
+    /// Subtitle size factor (mpv sub-scale), 0.5 to 2.5.
+    pub sub_scale: f64,
+    /// Subtitle text colour, "#RRGGBB".
+    pub sub_color: String,
+    /// "outline", "shadow" or "box".
+    pub sub_background: String,
+    /// Seconds the arrow keys and the seek buttons jump: 5, 10, 15 or 30.
+    pub seek_step: u32,
 }
 
 impl Default for Playback {
@@ -219,6 +227,10 @@ impl Default for Playback {
             remember_speed: false,
             last_speed: 1.0,
             show_time_remaining: false,
+            sub_scale: 1.0,
+            sub_color: "#FFFFFF".into(),
+            sub_background: "outline".into(),
+            seek_step: 10,
         }
     }
 }
@@ -246,6 +258,20 @@ impl Settings {
         } else {
             1.0
         };
+        self.playback.sub_scale = if self.playback.sub_scale.is_finite() {
+            self.playback.sub_scale.clamp(0.5, 2.5)
+        } else {
+            1.0
+        };
+        if !crate::player::valid_sub_color(&self.playback.sub_color) {
+            self.playback.sub_color = "#FFFFFF".into();
+        }
+        if ![5, 10, 15, 30].contains(&self.playback.seek_step) {
+            self.playback.seek_step = 10;
+        }
+        if !["outline", "shadow", "box"].contains(&self.playback.sub_background.as_str()) {
+            self.playback.sub_background = "outline".into();
+        }
         self.library.pinned.retain(|id| crate::jellyfin::valid_item_id(id));
         let mut seen = std::collections::HashSet::new();
         self.library.pinned.retain(|id| seen.insert(id.clone()));

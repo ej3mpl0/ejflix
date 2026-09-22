@@ -15,3 +15,6 @@ export { Splash } from "./Splash";
 export { Timeline } from "./Timeline";
 export { TimelinePreview } from "./TimelinePreview";
 export { TrackSheet, type TrackKind } from "./TrackSheet";
+export { StatsSheet } from "./StatsSheet";
+export { SubtitleOverlay } from "./SubtitleOverlay";
+export { SubtitleTools } from "./SubtitleTools";

@@ -134,6 +134,7 @@ export function metaFullToMovie(meta: AddonMetaFull): Movie {
   return {
     ...movie,
     directors: meta.director,
+    remoteTrailers: meta.trailers ?? [],
     cast: meta.cast.map((person, i) => ({
       id: `${meta.id}:cast:${i}`,
       name: person.name,

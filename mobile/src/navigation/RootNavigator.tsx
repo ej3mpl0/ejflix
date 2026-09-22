@@ -1,7 +1,9 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useSession } from "../lib/session-context";
+import { useSettings } from "../lib/settings-context";
+import { SetupScreen } from "../screens/SetupScreen";
 import { useTheme } from "../theme/ThemeProvider";
 import { useLayout } from "../theme/responsive";
 import { AuthNavigator } from "./AuthNavigator";
@@ -13,6 +15,7 @@ import { ExternalDetailsScreen } from "../screens/ExternalDetailsScreen";
 import { SettingsSectionScreen } from "../screens/SettingsSectionScreen";
 import { ProfileEditorScreen } from "../screens/ProfileEditorScreen";
 import { PlayerScreen } from "../screens/PlayerScreen";
+import { SeeAllScreen } from "../screens/SeeAllScreen";
 
 const Root = createNativeStackNavigator<RootStackParamList>();
 const Main = createNativeStackNavigator<MainStackParamList>();
@@ -51,6 +54,7 @@ function MainNavigator() {
       <Main.Screen name="Details" component={DetailsScreen} options={{ animation: "fade_from_bottom" }} />
       <Main.Screen name="ExternalDetails" component={ExternalDetailsScreen} options={{ animation: "fade_from_bottom" }} />
       <Main.Screen name="SettingsSection" component={SettingsSectionScreen} />
+      <Main.Screen name="SeeAll" component={SeeAllScreen} />
       <Main.Screen name="ProfileEditor" component={ProfileEditorScreen} options={{ presentation: "modal", animation: "slide_from_bottom" }} />
       <Main.Screen
         name="Player"
@@ -70,6 +74,12 @@ function MainNavigator() {
 
 function MainRoute() {
   const { session } = useSession();
+  const { settings, ready } = useSettings();
+  const [setupClosed, setSetupClosed] = useState(false);
+  // First-run setup of a new profile (look, addon import), once, before Home.
+  if (ready && !settings.onboarding.setupDone && !setupClosed) {
+    return <SetupScreen onDone={() => setSetupClosed(true)} />;
+  }
   return <MainNavigator key={session?.userId ?? "none"} />;
 }
 

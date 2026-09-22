@@ -261,9 +261,13 @@ export type PlayerState = {
   aspect: string;
 };
 
+export type ToastAction = { label: string; run: () => void };
+
 export type Toast = {
   id: number;
   message: string;
+  /** One button in the toast ("Undo"); running it closes the toast. */
+  action?: ToastAction;
 };
 
 export type AddonCatalog = {
@@ -320,6 +324,27 @@ export type AddonMetaFull = AddonMeta & {
   cast: string[];
   director: string[];
   videos: AddonVideo[];
+  /** YouTube watch URLs from `trailers` / `trailerStreams`. */
+  trailers: string[];
+};
+
+/** An online title the user saved to their list or ticked off as watched. */
+export type LibraryEntry = {
+  key: string;
+  type: string;
+  metaId: string;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  background: string | null;
+  logo: string | null;
+  year: number | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  saved: boolean;
+  watched: boolean;
+  updatedMs: number;
 };
 
 /** Locally remembered position of an online title. */
@@ -384,6 +409,12 @@ export type Settings = {
     rememberSpeed: boolean;
     lastSpeed: number;
     showTimeRemaining: boolean;
+    /** Look of the subtitles the app draws itself (files loaded from the device). */
+    subScale: number;
+    subColor: string;
+    subBackground: SubBackground;
+    /** Seconds a double tap or a seek button jumps: 5, 10, 15 or 30. */
+    seekStep: number;
   };
   library: { pinned: string[] };
   addons: { urls: string[]; cinemeta: boolean };
@@ -409,7 +440,14 @@ export type Settings = {
     /** Mouse wheel over the video changes channel instead of volume. */
     wheelZap: boolean;
   };
+  /** First-run setup of the profile (look, addon import). */
+  onboarding: { setupDone: boolean };
 };
+
+export type SubBackground = "outline" | "shadow" | "box";
+
+/** An addon found in another app's account, offered for import. */
+export type ImportedAddon = { url: string; name: string; official: boolean };
 
 export type DiscordHeader = "name" | "details" | "state";
 
@@ -548,6 +586,10 @@ export const DEFAULT_SETTINGS: Settings = {
     rememberSpeed: false,
     lastSpeed: 1,
     showTimeRemaining: false,
+    subScale: 1,
+    subColor: "#FFFFFF",
+    subBackground: "outline",
+    seekStep: 10,
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true },
@@ -562,4 +604,5 @@ export const DEFAULT_SETTINGS: Settings = {
     header: "details",
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
+  onboarding: { setupDone: false },
 };

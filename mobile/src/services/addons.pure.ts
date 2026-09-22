@@ -9,6 +9,7 @@ import type {
   AddonMetaFull,
   AddonStream,
   AddonVideo,
+  ImportedAddon,
   ResumeEntry,
 } from "../lib/types";
 
@@ -271,7 +272,56 @@ export function parseMetaFull(v: Json): AddonMetaFull | null {
       });
     }
   }
-  return { ...meta, cast: strings(v, "cast"), director: strings(v, "director"), videos };
+  return { ...meta, cast: strings(v, "cast"), director: strings(v, "director"), videos, trailers: parseTrailers(obj) };
+}
+
+/** Stremio metas give trailers as YouTube ids; they become watch URLs. */
+export function parseTrailers(v: Json): string[] {
+  const ids: string[] = [];
+  const push = (id: unknown) => {
+    if (typeof id !== "string") return;
+    const clean = id.trim();
+    if (/^[\w-]{11}$/.test(clean) && !ids.includes(clean)) ids.push(clean);
+  };
+  const obj = isObject(v) ? v : {};
+  if (Array.isArray(obj.trailerStreams)) for (const t of obj.trailerStreams) if (isObject(t)) push(t.ytId);
+  if (Array.isArray(obj.trailers)) {
+    for (const t of obj.trailers) {
+      if (!isObject(t)) continue;
+      const kind = typeof t.type === "string" ? t.type : "Trailer";
+      if (kind.toLowerCase() === "trailer") push(t.source);
+    }
+  }
+  return ids.map((id) => `https://www.youtube.com/watch?v=${id}`);
+}
+
+/**
+ * Addons of a Stremio account collection (`addonCollectionGet`), without Cinemeta (built
+ * in here) and the local streaming-server addon; duplicates dropped.
+ */
+export function parseStremioCollection(value: unknown, normalize: (url: string) => string): ImportedAddon[] {
+  const result = isObject(value) && isObject(value.result) ? value.result : null;
+  const list = result && Array.isArray(result.addons) ? result.addons : [];
+  const out: ImportedAddon[] = [];
+  for (const addon of list) {
+    if (!isObject(addon) || typeof addon.transportUrl !== "string") continue;
+    let url: string;
+    try {
+      url = normalize(addon.transportUrl);
+    } catch {
+      continue;
+    }
+    if (url === CINEMETA_URL || url.includes("127.0.0.1") || url.includes("localhost")) continue;
+    if (out.some((a) => a.url === url)) continue;
+    const manifest = isObject(addon.manifest) ? addon.manifest : {};
+    const flags = isObject(addon.flags) ? addon.flags : {};
+    out.push({
+      url,
+      name: typeof manifest.name === "string" ? manifest.name : url,
+      official: flags.official === true,
+    });
+  }
+  return out;
 }
 
 export function parseStream(addon: AddonInfo, s: Json): AddonStream | null {

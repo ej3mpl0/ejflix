@@ -22,6 +22,12 @@ export function openPlayer(movie: Movie) {
   navigationRef.navigate("Main", { screen: "Player", params: { movie } });
 }
 
+/** Opens a row as a full grid ("See all"). */
+export function openSeeAll(title: string, items: Movie[], catalog?: { addonUrl: string; type: string; id: string }) {
+  if (!navigationRef.isReady()) return;
+  navigationRef.navigate("Main", { screen: "SeeAll", params: { title, items, catalog } });
+}
+
 export function goBack() {
   if (navigationRef.isReady() && navigationRef.canGoBack()) navigationRef.goBack();
 }

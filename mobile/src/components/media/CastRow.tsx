@@ -1,5 +1,5 @@
 import React, { useCallback } from "react";
-import { FlatList, StyleSheet, Text, View } from "react-native";
+import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import type { Person } from "../../lib/types";
 import { useI18n } from "../../lib/locale-context";
@@ -20,14 +20,29 @@ function initials(name: string): string {
 }
 
 /** Circular cast avatars with name and role (Nuvio style). Bleeds to the page edges. */
-export function CastRow({ people, title }: { people: Person[]; title?: string }) {
+export function CastRow({
+  people,
+  title,
+  onPerson,
+}: {
+  people: Person[];
+  title?: string;
+  /** Opens a person's filmography (Jellyfin cast); without it the avatars are plain. */
+  onPerson?: (person: Person) => void;
+}) {
   const s = useStyles();
   const { t } = useI18n();
   const { pagePad } = useLayout();
 
   const renderItem = useCallback(
     ({ item }: { item: Person }) => (
-      <View style={s.item}>
+      <Pressable
+        disabled={!onPerson}
+        accessibilityRole={onPerson ? "button" : undefined}
+        accessibilityLabel={onPerson ? item.name : undefined}
+        onPress={() => onPerson?.(item)}
+        style={({ pressed }) => [s.item, pressed ? { opacity: 0.7 } : null]}
+      >
         <View style={s.avatar}>
           {item.imageUrl ? (
             <Image source={{ uri: item.imageUrl }} contentFit="cover" transition={300} cachePolicy="memory-disk" recyclingKey={item.id} style={StyleSheet.absoluteFill} />
@@ -44,9 +59,9 @@ export function CastRow({ people, title }: { people: Person[]; title?: string })
             {item.role}
           </Text>
         ) : null}
-      </View>
+      </Pressable>
     ),
-    [s],
+    [s, onPerson],
   );
 
   if (!people.length) return null;

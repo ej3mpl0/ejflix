@@ -194,6 +194,66 @@ pub struct PlaybackPrefs {
     pub subtitle_language: String,
     pub remember_speed: bool,
     pub last_speed: f64,
+    /// Subtitle look: size factor, text colour (#RRGGBB) and "outline" / "shadow" / "box".
+    pub sub_scale: f64,
+    pub sub_color: String,
+    pub sub_background: String,
+}
+
+/// mpv properties the UI may set while playing (delays, subtitle look).
+const SETTABLE: &[&str] = &[
+    "sub-delay",
+    "audio-delay",
+    "sub-scale",
+    "sub-color",
+    "sub-back-color",
+    "sub-border-style",
+    "sub-shadow-offset",
+    "sub-pos",
+];
+
+/// mpv properties the stats panel reads.
+const READABLE: &[&str] = &[
+    "video-codec",
+    "audio-codec-name",
+    "width",
+    "height",
+    "estimated-vf-fps",
+    "video-bitrate",
+    "audio-bitrate",
+    "frame-drop-count",
+    "decoder-frame-drop-count",
+    "demuxer-cache-duration",
+    "cache-speed",
+    "hwdec-current",
+    "sub-delay",
+    "audio-delay",
+    "file-format",
+];
+
+/// The properties behind a subtitle background choice.
+fn sub_background_props(kind: &str) -> Vec<(&'static str, Value)> {
+    match kind {
+        "box" => vec![
+            ("sub-border-style", json!("background-box")),
+            ("sub-back-color", json!("#B3000000")),
+            ("sub-shadow-offset", json!(0)),
+        ],
+        "shadow" => vec![
+            ("sub-border-style", json!("outline-and-shadow")),
+            ("sub-back-color", json!("#00000000")),
+            ("sub-shadow-offset", json!(2.5)),
+        ],
+        _ => vec![
+            ("sub-border-style", json!("outline-and-shadow")),
+            ("sub-back-color", json!("#00000000")),
+            ("sub-shadow-offset", json!(0)),
+        ],
+    }
+}
+
+pub fn valid_sub_color(color: &str) -> bool {
+    color.len() == 7 && color.starts_with('#') && color[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 pub const ASPECT_MODES: &[&str] = &["auto", "16:9", "4:3", "2.35:1", "fill"];
@@ -441,6 +501,16 @@ impl Player {
         let _ = self
             .command(json!(["set_property", "speed", speed]), false)
             .await;
+        // Subtitle look from the settings; delays start at zero for every file.
+        let scale = if prefs.sub_scale.is_finite() { prefs.sub_scale.clamp(0.5, 2.5) } else { 1.0 };
+        let _ = self.command(json!(["set_property", "sub-scale", scale]), false).await;
+        let color = if valid_sub_color(&prefs.sub_color) { prefs.sub_color.clone() } else { "#FFFFFF".into() };
+        let _ = self.command(json!(["set_property", "sub-color", color]), false).await;
+        for (name, value) in sub_background_props(&prefs.sub_background) {
+            let _ = self.command(json!(["set_property", name, value]), false).await;
+        }
+        let _ = self.command(json!(["set_property", "sub-delay", 0.0]), false).await;
+        let _ = self.command(json!(["set_property", "audio-delay", 0.0]), false).await;
         // Every file starts with its own aspect ratio.
         let _ = self
             .command(json!(["set_property", "video-aspect-override", -1]), false)
@@ -544,6 +614,45 @@ impl Player {
             self.command(json!(["set_property", prop, id]), false)
                 .await?;
         }
+        Ok(())
+    }
+
+    /// Sets one of `SETTABLE`; `sub-background` is a shortcut for its three properties.
+    pub async fn set_prop(&self, name: &str, value: Value) -> Result<(), String> {
+        if name == "sub-background" {
+            for (prop, v) in sub_background_props(value.as_str().unwrap_or("outline")) {
+                self.command(json!(["set_property", prop, v]), false).await?;
+            }
+            return Ok(());
+        }
+        if !SETTABLE.contains(&name) {
+            return Err("Propiedad no permitida".into());
+        }
+        self.command(json!(["set_property", name, value]), false).await?;
+        Ok(())
+    }
+
+    /// Current values of the `READABLE` properties (missing ones are null).
+    pub async fn props(&self) -> serde_json::Map<String, Value> {
+        let mut out = serde_json::Map::new();
+        for name in READABLE {
+            let value = match tokio::time::timeout(
+                Duration::from_millis(800),
+                self.command(json!(["get_property", name]), true),
+            )
+            .await
+            {
+                Ok(Ok(reply)) => reply.get("data").cloned().unwrap_or(Value::Null),
+                _ => Value::Null,
+            };
+            out.insert((*name).to_string(), value);
+        }
+        out
+    }
+
+    /// Loads an external subtitle file and selects it.
+    pub async fn sub_add(&self, path: &str) -> Result<(), String> {
+        self.command(json!(["sub-add", path, "select"]), false).await?;
         Ok(())
     }
 

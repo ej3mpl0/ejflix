@@ -22,6 +22,9 @@ import { Spinner } from "../components/ui/Spinner";
 import { GridSkeleton } from "../components/ui/Skeletons";
 import { TAB_BAR_HEIGHT } from "../components/ui/Toast";
 import { PosterCard } from "../components/media/PosterCard";
+import { SegmentedControl } from "../components/ui/SegmentedControl";
+import { EmptyCard } from "../components/ui/EmptyCard";
+import { SearchX } from "lucide-react-native";
 
 const MAX_SEARCH_CATALOGS = 4;
 const DEBOUNCE_MS = 300;
@@ -76,6 +79,8 @@ export function SearchScreen() {
   const [serverGenres, setServerGenres] = useState<string[]>([]);
   const [genre, setGenre] = useState<string | null>(null);
   const [genreItems, setGenreItems] = useState<Movie[] | null>(null);
+  /** Movies / series filter over the results (both sources). */
+  const [kind, setKind] = useState<"all" | "Movie" | "Series">("all");
   const request = useRef(0);
   const genreRequest = useRef(0);
   const toastRef = useRef(toast);
@@ -248,6 +253,11 @@ export function SearchScreen() {
 
   const showDiscover = query.trim().length < 2;
   const nothing = !!searched && !loading && !results.length && !online.length;
+  const ofKind = (list: Movie[]) => (kind === "all" ? list : list.filter((movie) => movie.kind === kind));
+  const shownResults = ofKind(results);
+  const shownOnline = ofKind(online);
+  const kinds = new Set([...results, ...online].map((movie) => movie.kind));
+  const canFilter = kinds.has("Movie") && kinds.has("Series");
   const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24;
 
   return (
@@ -355,27 +365,44 @@ export function SearchScreen() {
                 <GridSkeleton rows={2} />
               </View>
             ) : null}
-            {results.length ? (
-              <View style={{ marginBottom: online.length ? 32 : 0 }}>
+            <Text accessibilityLiveRegion="polite" style={{ height: 0, opacity: 0 }}>
+              {searched && !loading ? tr("resultsCount", { n: results.length + online.length }) : ""}
+            </Text>
+            {canFilter ? (
+              <View style={{ marginBottom: 20 }}>
+                <SegmentedControl
+                  label={tr("filterType")}
+                  value={kind}
+                  onChange={setKind}
+                  options={[
+                    { value: "all", label: tr("sourceAll") },
+                    { value: "Movie", label: tr("movies") },
+                    { value: "Series", label: tr("series") },
+                  ]}
+                />
+              </View>
+            ) : null}
+            {shownResults.length ? (
+              <View style={{ marginBottom: shownOnline.length ? 32 : 0 }}>
                 <View style={s.sectionHeader}>
                   <Server size={17} color={t.colors.dim} strokeWidth={2} />
                   <Text style={s.sectionTitle}>{tr("myServer")}</Text>
-                  <Text style={s.count}>{results.length}</Text>
+                  <Text style={s.count}>{shownResults.length}</Text>
                 </View>
-                <WrapGrid items={results} onOpen={open} onPlay={playItem} />
+                <WrapGrid items={shownResults} onOpen={open} onPlay={playItem} />
               </View>
             ) : null}
-            {online.length ? (
+            {shownOnline.length ? (
               <View>
                 <View style={s.sectionHeader}>
                   <Globe size={17} color={t.colors.dim} strokeWidth={2} />
                   <Text style={s.sectionTitle}>{tr("online")}</Text>
-                  <Text style={s.count}>{online.length}</Text>
+                  <Text style={s.count}>{shownOnline.length}</Text>
                 </View>
-                <WrapGrid items={online} onOpen={open} onPlay={playItem} />
+                <WrapGrid items={shownOnline} onOpen={open} onPlay={playItem} />
               </View>
             ) : null}
-            {nothing ? <Text style={s.empty}>{tr("noResults")}</Text> : null}
+            {nothing ? <EmptyCard icon={SearchX} title={tr("noResults")} hint={tr("noResultsHint")} /> : null}
           </View>
         )}
       </ScrollView>

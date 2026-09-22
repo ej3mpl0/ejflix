@@ -24,7 +24,7 @@ export function UpdatesSection() {
 
   let status: { text: string; color: string } | null = null;
   if (checking) status = { text: tr("updateChecking"), color: t.colors.dim };
-  else if (checkError) status = { text: tr("updateError", { error: checkError }), color: t.colors.accent };
+  else if (checkError) status = { text: tr("updateError", { error: checkError }), color: t.colors.danger };
   else if (check?.available) status = { text: tr("updateFound", { version: check.latest }), color: t.colors.success };
   else if (check) status = { text: tr("updateUpToDate"), color: t.colors.dim };
   else if (prefs.skipped) status = { text: tr("updateSkippedHint", { version: prefs.skipped }), color: t.colors.dim };
@@ -71,7 +71,7 @@ export function UpdatesSection() {
           </View>
         ) : null}
         {check?.available && !check.assetUrl ? <Text style={s.hint}>{tr(Platform.OS === "ios" ? "updateSideload" : "updateNoAsset")}</Text> : null}
-        {installError ? <Text style={[s.hint, { color: t.colors.accent }]}>{tr("updateDownloadError", { error: installError })}</Text> : null}
+        {installError ? <Text style={[s.hint, { color: t.colors.danger }]}>{tr("updateDownloadError", { error: installError })}</Text> : null}
       </SettingsBlock>
       <SettingsBlock>
         <View style={s.notesHeader}>

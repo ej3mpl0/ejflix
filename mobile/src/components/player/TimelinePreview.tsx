@@ -30,8 +30,11 @@ export function TimelinePreview({
   seconds,
   delta = null,
   width = PREVIEW_WIDTH,
+  label = null,
 }: {
   movie: Movie;
+  /** Name of the intro / recap / credits band under this point. */
+  label?: string | null;
   seconds: number;
   delta?: number | null;
   width?: number;
@@ -133,6 +136,11 @@ export function TimelinePreview({
 
   return (
     <View style={s.root}>
+      {label ? (
+        <View style={s.segment}>
+          <Text style={s.segmentText}>{label}</Text>
+        </View>
+      ) : null}
       {picture}
       <View style={s.caption}>
         {chapter?.name ? (
@@ -147,6 +155,8 @@ export function TimelinePreview({
 }
 
 const useStyles = makeStyles((t) => ({
+  segment: { alignSelf: "center", marginBottom: 6, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.75)", paddingHorizontal: 10, paddingVertical: 3 },
+  segmentText: { ...text(11, "semibold", { tracking: 0.06, uppercase: true }), color: "#fff" },
   root: { alignItems: "center", gap: 6 },
   box: {
     overflow: "hidden",

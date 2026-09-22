@@ -7,7 +7,9 @@ import * as NavigationBar from "expo-navigation-bar";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useKeepAwake } from "expo-keep-awake";
 import { useFocusEffect } from "@react-navigation/native";
-import { ExternalLink, ListVideo } from "lucide-react-native";
+import { ExternalLink, ListVideo, RotateCcw } from "lucide-react-native";
+import * as DocumentPicker from "expo-document-picker";
+import { File } from "expo-file-system";
 import { api } from "../lib/api";
 import { engine } from "../services/player/engine";
 import type { Channel, EpgNow, MediaSegment, Movie, PlayerState } from "../lib/types";
@@ -20,6 +22,7 @@ import { openInExternalPlayer } from "../lib/external-player";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { useToast } from "../lib/toast-context";
+import { decodeSubtitleBytes, parseSubtitles, type Cue } from "../lib/subtitles";
 import { useStreamPicker } from "../lib/stream-picker-context";
 import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
@@ -46,6 +49,9 @@ import {
   SkipButton,
   SpeedSheet,
   Splash,
+  StatsSheet,
+  SubtitleOverlay,
+  SubtitleTools,
   TimelinePreview,
   TrackSheet,
   type Flash,
@@ -120,6 +126,11 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   const [playError, setPlayError] = useState<PlayerError | null>(null);
   const [zapList, setZapList] = useState<Channel[]>([]);
   const [liveEpg, setLiveEpg] = useState<EpgNow | null>(null);
+  /** Subtitle file loaded from the device, drawn by the app (expo-video cannot load it). */
+  const [extSub, setExtSub] = useState<{ name: string; cues: Cue[] } | null>(null);
+  const [subDelay, setSubDelay] = useState(0);
+  /** Bumped by "Retry" to run the start again. */
+  const [attempt, setAttempt] = useState(0);
 
   const remaining = settings.playback.showTimeRemaining;
   const live = movie.live ?? null;
@@ -292,8 +303,13 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         setState(next);
       } catch (err) {
         if (cancelled) return;
-        toastRef.current(err instanceof Error ? err.message : tRef.current("playerStartError"));
-        exitRef.current();
+        // Stay on the player with the error, a retry and (online) another source.
+        setPlayError({
+          message: err instanceof Error ? err.message : tRef.current("playerStartError"),
+          detail: "",
+          code: "unknown",
+          url: null,
+        });
       }
     };
 
@@ -307,7 +323,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       stopping.current = api.playerStop(mounted.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [movie]);
+  }, [movie, attempt]);
 
   // A new item may chain again later; everything item-scoped goes back to its start value.
   useEffect(() => {
@@ -320,7 +336,34 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     setReady(false);
     setSplash(true);
     setState(emptyState);
+    setExtSub(null);
+    setSubDelay(0);
   }, [movie]);
+
+  /** Picks a subtitle file on the device; the app draws it and the embedded track goes off. */
+  const pickSubtitleFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: ["*/*"], copyToCacheDirectory: true, multiple: false });
+      if (result.canceled || !result.assets[0]) return;
+      const asset = result.assets[0];
+      const name = asset.name || "subtitles.srt";
+      if (!/\.(srt|vtt)$/i.test(name)) {
+        toast(t("subUnsupported"));
+        return;
+      }
+      const bytes = await new File(asset.uri).bytes();
+      const cues = parseSubtitles(decodeSubtitleBytes(bytes));
+      if (!cues.length) {
+        toast(t("subEmpty"));
+        return;
+      }
+      void api.playerSetTrack("sub", 0);
+      setExtSub({ name, cues });
+      setSubDelay(0);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err));
+    }
+  };
 
   // Episodes: look up what comes next so the end of the file can chain into it.
   // Online episodes carry their successor (resolved by the start effect above).
@@ -599,7 +642,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       return;
     }
     if (live) return;
-    seekBy(zone === "left" ? -10 : 10);
+    const step = settings.playback.seekStep;
+    seekBy(zone === "left" ? -step : step);
   };
 
   const onVerticalPan = (side: VerticalSide, phase: PanPhase, fraction: number) => {
@@ -683,6 +727,13 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     onPlayNext: playNext,
   });
   const pauseInfo = usePauseInfo(state.paused, visible);
+  /** Intro / recap / credits name under a scrub position. */
+  const segmentLabelAt = (seconds: number): string | null => {
+    const hit = segments.find((segment) => seconds >= segment.startSeconds && seconds < segment.endSeconds);
+    if (!hit) return null;
+    const key = hit.kind === "intro" ? "segIntro" : hit.kind === "recap" ? "segRecap" : hit.kind === "outro" ? "segOutro" : hit.kind === "preview" ? "segPreview" : "segCommercial";
+    return t(key);
+  };
 
   // Render --------------------------------------------------------------------
 
@@ -727,13 +778,31 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         </View>
       ) : null}
 
+      {extSub ? (
+        <SubtitleOverlay
+          cues={extSub.cues}
+          time={state.time}
+          delay={subDelay}
+          scale={settings.playback.subScale}
+          color={settings.playback.subColor}
+          background={settings.playback.subBackground}
+          bottom={insets.bottom + (visible ? CHROME_BOTTOM_HEIGHT + 8 : 28)}
+        />
+      ) : null}
+
       {flash ? <FlashIcon key={flash.id} flash={flash} width={width} /> : null}
 
       {hud ? <GestureHud hud={hud} top={insets.top + 20} /> : null}
 
       {preview ? (
         <View pointerEvents="none" style={s.preview}>
-          <TimelinePreview key={timelineMovie.id} movie={timelineMovie} seconds={preview.seconds} delta={preview.delta} />
+          <TimelinePreview
+            key={timelineMovie.id}
+            movie={timelineMovie}
+            seconds={preview.seconds}
+            delta={preview.delta}
+            label={segmentLabelAt(preview.seconds)}
+          />
         </View>
       ) : null}
 
@@ -778,9 +847,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
               </Text>
             ) : null}
             <View style={s.errorActions}>
+              <Pill
+                variant="primary"
+                size="sm"
+                pill
+                icon={RotateCcw}
+                label={t("retry")}
+                onPress={() => {
+                  setPlayError(null);
+                  setAttempt((n) => n + 1);
+                }}
+              />
               {movie.external ? (
                 <Pill
-                  variant="primary"
+                  variant="tonal"
                   size="sm"
                   pill
                   icon={ListVideo}
@@ -834,6 +914,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
             setPanel((open) => !open);
           }}
           onZap={zap}
+          externalSub={extSub?.name ?? null}
           onReveal={bump}
           onHoldUi={holdUi}
         />
@@ -865,9 +946,26 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         kind={sheet === "audio" ? "audio" : "sub"}
         visible={sheet === "audio" || sheet === "sub"}
         tracks={state.tracks}
-        onSelect={(kind, id) => void api.playerSetTrack(kind, id)}
+        onSelect={(kind, id) => {
+          // Picking any embedded subtitle (or "off") drops the file the app was drawing.
+          if (kind === "sub") setExtSub(null);
+          void api.playerSetTrack(kind, id);
+        }}
         onClose={() => setSheet(null)}
+        footer={
+          sheet === "sub" ? (
+            <SubtitleTools
+              fileName={extSub?.name ?? null}
+              delay={subDelay}
+              onDelay={(value) => setSubDelay(Math.max(-30, Math.min(30, value)))}
+              onPickFile={() => void pickSubtitleFile()}
+              onClearFile={() => setExtSub(null)}
+            />
+          ) : null
+        }
       />
+
+      <StatsSheet visible={sheet === "stats"} state={state} subDelay={subDelay} onClose={() => setSheet(null)} />
 
       <SpeedSheet visible={sheet === "speed"} speed={state.speed} onSelect={setSpeed} onClose={() => setSheet(null)} />
     </View>

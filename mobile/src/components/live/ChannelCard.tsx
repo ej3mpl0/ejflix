@@ -3,7 +3,7 @@ import { Text, View } from "react-native";
 import { Image } from "expo-image";
 import { Star } from "lucide-react-native";
 import type { Channel, EpgNow } from "../../lib/types";
-import { channelInitials, formatRange, programmeProgress } from "../../lib/iptv";
+import { channelInitials, formatRange, formatTime, programmeProgress } from "../../lib/iptv";
 import { useI18n } from "../../lib/locale-context";
 import { makeStyles, useTheme } from "../../theme/ThemeProvider";
 import { text } from "../../theme/typography";
@@ -11,7 +11,7 @@ import { PressableScale } from "../ui/PressableScale";
 import { ProgressBar } from "../ui/ProgressBar";
 
 /** Height of the two-line text block: keeps every tile exactly as tall as the rest. */
-const TEXT_H = 58;
+const TEXT_H = 74;
 
 export type ChannelCardProps = {
   channel: Channel;
@@ -38,6 +38,7 @@ function ChannelCardInner({ channel, epg, width, onPlay, onFavorite }: ChannelCa
   const [broken, setBroken] = useState(false);
   const plateH = Math.round((width * 9) / 16);
   const now = epg?.now ?? null;
+  const next = epg?.next ?? null;
   const progress = now ? programmeProgress(now) : 0;
   const on = channel.favorite;
 
@@ -96,6 +97,11 @@ function ChannelCardInner({ channel, epg, width, onPlay, onFavorite }: ChannelCa
               {channel.group || tr("noGroup")}
             </Text>
           )}
+          {next ? (
+            <Text numberOfLines={1} style={s.sub}>
+              {`${tr("upNext")} ${formatTime(next.start, locale)} · ${next.title}`}
+            </Text>
+          ) : null}
         </View>
       </PressableScale>
       <PressableScale

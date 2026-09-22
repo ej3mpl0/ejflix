@@ -17,6 +17,18 @@ export function ToastStack({ toasts, onDismiss }: { toasts: ToastType[]; onDismi
           className="toast-enter pointer-events-auto flex items-start gap-2 rounded-2xl bg-panel/95 py-3 pr-2 pl-4 text-sm text-text shadow-[0_12px_32px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
         >
           <span className="min-w-0 flex-1 py-0.5 [overflow-wrap:anywhere]">{toast.message}</span>
+          {toast.action ? (
+            <button
+              type="button"
+              onClick={() => {
+                toast.action?.run();
+                onDismiss(toast.id);
+              }}
+              className="shrink-0 rounded-md px-2 py-0.5 text-[13px] font-semibold text-accent hover:bg-white/8"
+            >
+              {toast.action.label}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={t("close")}

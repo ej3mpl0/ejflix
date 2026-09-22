@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { ChevronRight } from "lucide-react-native";
+import { ChevronRight, Search } from "lucide-react-native";
 import { useI18n } from "../lib/locale-context";
 import { useSession } from "../lib/session-context";
 import type { MainStackParamList } from "../navigation/types";
@@ -11,7 +11,9 @@ import { useLayout } from "../theme/responsive";
 import { text } from "../theme/typography";
 import { CardSurface } from "../components/ui/CardSurface";
 import { TAB_BAR_HEIGHT } from "../components/ui/Toast";
-import { SETTINGS_SECTIONS, SettingsSectionContent, isSettingsSectionId, type SettingsSectionId } from "../components/settings/SettingsSectionContent";
+import { SETTINGS_SEARCH, SETTINGS_SECTIONS, SettingsSectionContent, isSettingsSectionId, type SettingsSectionId } from "../components/settings/SettingsSectionContent";
+import { TextField } from "../components/ui/TextField";
+import type { MessageKey } from "../lib/i18n";
 
 type Params = { section?: string } | undefined;
 
@@ -30,6 +32,56 @@ export function SettingsScreen() {
   const params = route.params as Params;
   const requested = isSettingsSectionId(params?.section) ? params.section : null;
   const [section, setSection] = useState<SettingsSectionId>(requested ?? "appearance");
+  const [query, setQuery] = useState("");
+  const needle = query.trim().toLocaleLowerCase();
+  const matches = needle
+    ? (Object.entries(SETTINGS_SEARCH) as Array<[SettingsSectionId, MessageKey[]]>).flatMap(([id, keys]) =>
+        keys.filter((key) => tr(key).toLocaleLowerCase().includes(needle)).map((key) => ({ id, label: tr(key) })),
+      )
+    : [];
+  const goTo = (id: SettingsSectionId) => {
+    setQuery("");
+    if (wide) setSection(id);
+    else navigation.navigate("SettingsSection", { section: id });
+  };
+  const search = (
+    <View style={{ marginBottom: 16, gap: 8 }}>
+      <TextField
+        icon={Search}
+        value={query}
+        onChangeText={setQuery}
+        placeholder={tr("searchSettings")}
+        accessibilityLabel={tr("searchSettings")}
+        returnKeyType="search"
+        onSubmitEditing={() => matches[0] && goTo(matches[0].id)}
+        height={44}
+      />
+      {needle ? (
+        <CardSurface style={s.list}>
+          {matches.length ? (
+            matches.map((hit, i) => (
+              <Pressable
+                key={`${hit.id}:${hit.label}`}
+                accessibilityRole="button"
+                onPress={() => goTo(hit.id)}
+                style={({ pressed }) => [s.item, i > 0 ? s.itemDivider : null, pressed ? s.itemPressed : null]}
+              >
+                <View style={s.itemText}>
+                  <Text style={s.itemLabel}>{hit.label}</Text>
+                  <Text numberOfLines={1} style={s.itemHint}>
+                    {tr(SETTINGS_SECTIONS.find((x) => x.id === hit.id)?.labelKey ?? "settings")}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color={t.colors.dim} strokeWidth={2} />
+              </Pressable>
+            ))
+          ) : (
+            <Text style={[s.itemHint, { padding: 14 }]}>{tr("noResults")}</Text>
+          )}
+        </CardSurface>
+      ) : null}
+    </View>
+  );
   const { wide, pagePad, insets } = layout;
   const bottomPad = TAB_BAR_HEIGHT + insets.bottom + 24;
 
@@ -54,7 +106,8 @@ export function SettingsScreen() {
           <View style={s.wideInner}>
             {title}
             <View style={s.panes}>
-              <ScrollView style={s.nav} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false}>
+              <ScrollView style={s.nav} contentContainerStyle={{ paddingBottom: bottomPad }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {search}
                 {SETTINGS_SECTIONS.map(({ id, icon: Icon, labelKey }) => {
                   const active = section === id;
                   return (
@@ -86,6 +139,8 @@ export function SettingsScreen() {
     <View style={s.root}>
       <ScrollView contentContainerStyle={[s.scroll, { paddingTop: insets.top + 20, paddingHorizontal: pagePad, paddingBottom: bottomPad }]} showsVerticalScrollIndicator={false}>
         {title}
+        {search}
+        {needle ? null : (
         <CardSurface style={s.list}>
           {SETTINGS_SECTIONS.map(({ id, icon: Icon, labelKey, hintKey }, i) => (
             <Pressable
@@ -108,6 +163,7 @@ export function SettingsScreen() {
             </Pressable>
           ))}
         </CardSurface>
+        )}
         {footer}
       </ScrollView>
     </View>

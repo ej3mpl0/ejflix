@@ -51,7 +51,7 @@ export function HomeScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const { session } = useSession();
-  const { version: userDataVersion, clearOverrides } = useUserData();
+  const { version: userDataVersion, clearOverrides, onlineList } = useUserData();
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const layout = useLayout();
   const play = usePlay();
@@ -63,6 +63,8 @@ export function HomeScreen() {
   const [libraries, setLibraries] = useState<Library[]>([]);
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [favorites, setFavorites] = useState<Movie[]>([]);
+  /** "My list" is the server's favourites plus the online titles saved locally. */
+  const myList = useMemo(() => [...onlineList, ...favorites], [onlineList, favorites]);
   const [onlineResume, setOnlineResume] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -264,7 +266,7 @@ export function HomeScreen() {
     return (
       <View style={s.root}>
         <PosterGrid
-          items={favorites}
+          items={myList}
           onOpen={onOpen}
           onPlay={onPlay}
           extraData={userDataVersion}
@@ -330,7 +332,7 @@ export function HomeScreen() {
         data={home}
         tv={false}
         featured={main ? hero : undefined}
-        myList={favorites}
+        myList={myList}
         onlineResume={main ? onlineResume : []}
         showAddons={main}
         empty={main && !addons?.length ? noAddons : null}

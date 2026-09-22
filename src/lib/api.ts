@@ -8,6 +8,7 @@ import type {
   SyncReport,
   AddonInfo,
   ImportedAddon,
+  TorrentStatus,
   AddonMeta,
   AddonMetaFull,
   AddonStream,
@@ -46,6 +47,8 @@ import type {
 
 export const api = {
   probeServer: (url: string) => invoke<PublicInfo>("probe_server", { url }),
+  /** Checks a server without saving it (the "Test connection" button). */
+  testServer: (url: string) => invoke<PublicInfo>("probe_server_only", { url }),
   login: (url: string, username: string, password: string) =>
     invoke<Session>("login", { url, username, password }),
   sessionRestore: () => invoke<Session | null>("session_restore"),
@@ -83,6 +86,7 @@ export const api = {
     invoke<Movie | null>("get_next_episode", { seriesId, episodeId }),
   getSeriesNextUp: (seriesId: string) => invoke<Movie | null>("get_series_next_up", { seriesId }),
   searchItems: (query: string) => invoke<Movie[]>("search_items", { query }),
+  personItems: (id: string) => invoke<Movie[]>("person_items", { id }),
   getSimilar: (id: string) => invoke<Movie[]>("get_similar", { id }),
   getFavorites: () => invoke<Movie[]>("get_favorites"),
   /** Resolves to the flag confirmed by the server. */
@@ -95,6 +99,11 @@ export const api = {
     invoke<MediaSegment[]>("get_media_segments_external", { imdb, season, episode }),
   // Stremio addons
   addonsList: () => invoke<AddonInfo[]>("addons_list"),
+  /** Whitelisted mpv properties: sub-delay, audio-delay, sub-scale, sub-color, sub-background… */
+  playerSetProp: (name: string, value: unknown) => invoke<void>("player_set_prop", { name, value }),
+  playerProps: () => invoke<Record<string, unknown>>("player_props"),
+  playerSubAddText: (name: string, content: string) => invoke<void>("player_sub_add_text", { name, content }),
+  torrentStatus: (infoHash: string) => invoke<TorrentStatus>("torrent_status", { infoHash }),
   addonAdd: (url: string) => invoke<AddonInfo>("addon_add", { url }),
   /** Addons of a Stremio account (the password goes to Stremio only, never stored). */
   stremioAddons: (email: string, password: string) =>

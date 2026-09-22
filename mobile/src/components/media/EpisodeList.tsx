@@ -51,6 +51,8 @@ function EpisodeRow({
   const title = [code, episode.name].filter(Boolean).join(" · ");
   const thumbW = stacked ? layout.width - 2 * layout.pagePad - 16 : layout.thumbW;
   const thumbH = Math.round((thumbW * 9) / 16);
+  const [open, setOpen] = useState(false);
+  const long = (episode.overview?.length ?? 0) > 120;
 
   const menu = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
@@ -85,9 +87,14 @@ function EpisodeRow({
           {meta ? <Text style={s.meta}>{meta}</Text> : null}
         </View>
         {episode.overview ? (
-          <Text numberOfLines={2} style={s.overview}>
+          <Text numberOfLines={open ? undefined : 2} style={s.overview}>
             {episode.overview}
           </Text>
+        ) : null}
+        {long ? (
+          <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} hitSlop={8} onPress={() => setOpen((v) => !v)}>
+            <Text style={s.moreText}>{open ? tr("less") : tr("more")}</Text>
+          </Pressable>
         ) : null}
       </View>
       <IconButton icon={Ellipsis} label={tr("moreOptions")} onPress={menu} size={20} color={t.colors.muted} style={s.more} />
@@ -150,5 +157,6 @@ const useStyles = makeStyles((t) => ({
   title: { ...text(15, "medium"), color: t.colors.text, flex: 1 },
   meta: { ...text(12, "regular", { tabular: true }), color: t.colors.dim },
   overview: { ...text(13, "regular", { lineHeight: 19 }), color: t.colors.muted, marginTop: 4 },
+  moreText: { ...text(12, "semibold"), color: t.colors.text, marginTop: 4 },
   more: { position: "absolute", top: 4, right: 4 },
 }));

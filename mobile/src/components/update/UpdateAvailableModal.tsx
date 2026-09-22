@@ -102,7 +102,7 @@ export function UpdateAvailableModal() {
         ) : (
           <Pill variant="primary" size="lg" block icon={ExternalLink} label={tr("updateViewGithub")} onPress={openRelease} />
         )}
-        <Text style={[s.footnote, installError ? { color: t.colors.accent } : null]}>
+        <Text style={[s.footnote, installError ? { color: t.colors.danger } : null]}>
           {installError ? tr("updateDownloadError", { error: installError }) : check.assetUrl ? tr("updateInstallHint") : tr(Platform.OS === "ios" ? "updateSideload" : "updateNoAsset")}
         </Text>
 

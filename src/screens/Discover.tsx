@@ -11,6 +11,7 @@ import { Shimmer } from "../components/Shimmer";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
+import { cn } from "../lib/format";
 
 type Source = "all" | "server" | "online";
 type Kind = "movie" | "series";
@@ -340,7 +341,8 @@ export function Discover({
         ) : null}
       </div>
 
-      {loading ? (
+      {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
+      {loading && !visible.length ? (
         <div className={grid}>
           {Array.from({ length: 18 }).map((_, i) => (
             <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
@@ -348,7 +350,7 @@ export function Discover({
         </div>
       ) : visible.length ? (
         <>
-          <div className={grid}>
+          <div className={cn(grid, "transition-opacity duration-200", loading && "pointer-events-none opacity-50")} aria-busy={loading}>
             {visible.map((movie, i) => (
               <PosterCard
                 key={movie.id}

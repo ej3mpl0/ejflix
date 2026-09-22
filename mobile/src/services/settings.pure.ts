@@ -10,6 +10,7 @@ import {
   type PosterSize,
   type Settings,
   type SkipMode,
+  type SubBackground,
   type ThemeId,
 } from "../lib/types";
 
@@ -89,6 +90,17 @@ export function sanitize(value: unknown): Settings {
   const addons = isPlainObject(root.addons) ? root.addons : {};
   const discord = isPlainObject(root.discord) ? root.discord : {};
   const iptv = isPlainObject(root.iptv) ? root.iptv : {};
+  // A stored object from before the setup step has no `onboarding` key: that profile
+  // already exists, so it never gets the step. Nothing stored at all means a new profile.
+  const onboarding = isPlainObject(root.onboarding) ? root.onboarding : null;
+  const setupDone = onboarding ? boolOr(onboarding.setupDone, false) : Object.keys(root).length > 0;
+  const scaleRaw = playback.subScale;
+  const subScale =
+    typeof scaleRaw === "number" && Number.isFinite(scaleRaw) ? Math.min(2.5, Math.max(0.5, scaleRaw)) : 1;
+  const subColor =
+    typeof playback.subColor === "string" && /^#[0-9a-fA-F]{6}$/.test(playback.subColor) ? playback.subColor : "#FFFFFF";
+  const seekStep =
+    typeof playback.seekStep === "number" && [5, 10, 15, 30].includes(playback.seekStep) ? playback.seekStep : 10;
 
   const countdownRaw = playback.nextEpisodeCountdown;
   const countdown: Countdown =
@@ -129,6 +141,10 @@ export function sanitize(value: unknown): Settings {
       rememberSpeed: boolOr(playback.rememberSpeed, d.playback.rememberSpeed),
       lastSpeed,
       showTimeRemaining: boolOr(playback.showTimeRemaining, d.playback.showTimeRemaining),
+      subScale,
+      subColor,
+      subBackground: oneOf<SubBackground>(playback.subBackground, ["shadow", "box"], "outline"),
+      seekStep,
     },
     library: {
       pinned: dedupe(stringList(library.pinned).filter(validItemId)).slice(0, MAX_PINNED),
@@ -152,6 +168,7 @@ export function sanitize(value: unknown): Settings {
       epg: boolOr(iptv.epg, d.iptv.epg),
       wheelZap: boolOr(iptv.wheelZap, d.iptv.wheelZap),
     },
+    onboarding: { setupDone },
   };
 }
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Magnet, Puzzle, ShieldOff } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Magnet, Palette, Puzzle, ShieldOff } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
 import { LanguageSelect } from "../components/LanguageSelect";
@@ -9,8 +9,10 @@ import { Toggle } from "../components/settings/Toggle";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
+import { ThemePicker } from "../components/settings/ThemePicker";
+import { LanguagePicker } from "../components/settings/LanguagePicker";
 
-type Step = "torrents" | "addons";
+type Step = "style" | "torrents" | "addons";
 
 /**
  * First-run setup of a profile, shown once before Home: whether addon sources that come as
@@ -20,7 +22,7 @@ type Step = "torrents" | "addons";
 export function SetupStep({ onDone }: { onDone: () => void }) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
-  const [step, setStep] = useState<Step>("torrents");
+  const [step, setStep] = useState<Step>("style");
   const [imported, setImported] = useState(0);
   const torrents = settings.torrents.enabled;
 
@@ -62,7 +64,7 @@ export function SetupStep({ onDone }: { onDone: () => void }) {
     );
   };
 
-  const steps: Step[] = ["torrents", "addons"];
+  const steps: Step[] = ["style", "torrents", "addons"];
   const index = steps.indexOf(step);
 
   return (
@@ -95,7 +97,40 @@ export function SetupStep({ onDone }: { onDone: () => void }) {
             </span>
           </div>
 
-          {step === "torrents" ? (
+          {step === "style" ? (
+            <>
+              <span className="mb-4 grid h-12 w-12 place-items-center rounded-2xl bg-accent-soft text-accent">
+                <Palette size={24} />
+              </span>
+              <h1 className="mb-1 text-[24px] font-semibold tracking-tight [text-wrap:balance]">{t("setupStyleTitle")}</h1>
+              <p className="mb-6 text-[13px] leading-[1.55] text-dim">{t("setupStyleText")}</p>
+              <p className="mb-2 text-[13px] font-medium">{t("theme")}</p>
+              <ThemePicker value={settings.appearance.theme} onChange={(theme) => void update({ appearance: { theme } })} />
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-[13px] font-medium">{t("appLanguage")}</p>
+                  <LanguageSelect />
+                </div>
+                <div>
+                  <p className="mb-2 text-[13px] font-medium">{t("preferredSubtitles")}</p>
+                  <LanguagePicker
+                    kind="subtitle"
+                    label={t("preferredSubtitles")}
+                    value={settings.playback.subtitleLanguage}
+                    onChange={(subtitleLanguage) => void update({ playback: { subtitleLanguage } })}
+                  />
+                </div>
+              </div>
+              <div className="mt-8 flex items-center justify-between gap-3">
+                <Pill variant="ghost" onClick={finish}>
+                  {t("setupSkip")}
+                </Pill>
+                <Pill variant="primary" icon={<ArrowRight size={16} />} onClick={() => setStep("torrents")}>
+                  {t("next")}
+                </Pill>
+              </div>
+            </>
+          ) : step === "torrents" ? (
             <>
               <h1 className="mb-1 text-[24px] font-semibold tracking-tight [text-wrap:balance]">{t("setupTorrentsTitle")}</h1>
               <p className="mb-6 text-[13px] leading-[1.55] text-dim">{t("setupTorrentsText")}</p>
@@ -118,8 +153,8 @@ export function SetupStep({ onDone }: { onDone: () => void }) {
               ) : null}
               <p className="mt-4 text-[12px] text-dim">{t("setupLater")}</p>
               <div className="mt-6 flex items-center justify-between gap-3">
-                <Pill variant="ghost" onClick={finish}>
-                  {t("setupSkip")}
+                <Pill variant="ghost" icon={<ArrowLeft size={16} />} onClick={() => setStep("style")}>
+                  {t("back")}
                 </Pill>
                 <Pill variant="primary" icon={<ArrowRight size={16} />} onClick={() => setStep("addons")}>
                   {t("next")}

@@ -8,6 +8,8 @@ import type {
   AddonInfo,
   AddonMeta,
   AddonMetaFull,
+  ImportedAddon,
+  LibraryEntry,
   AddonStream,
   BrowseArgs,
   ChannelGroup,
@@ -53,6 +55,8 @@ const EXTERNAL_ALLOWLIST = ["https://github.com/", "https://discord.com/develope
 
 export const api = {
   probeServer: (url: string): Promise<PublicInfo> => session.probeServer(url),
+  /** Checks a server without saving it (the "Test connection" button). */
+  testServer: (url: string): Promise<PublicInfo> => session.testServer(url),
   login: (url: string, username: string, password: string): Promise<Session> =>
     session.login(url, username, password),
   sessionRestore: (): Promise<Session | null> => session.sessionRestore(),
@@ -88,6 +92,7 @@ export const api = {
   getSeriesNextUp: (seriesId: string): Promise<Movie | null> => library.getSeriesNextUp(seriesId),
   searchItems: (query: string): Promise<Movie[]> => library.searchItems(query),
   getSimilar: (id: string): Promise<Movie[]> => library.getSimilar(id),
+  personItems: (id: string): Promise<Movie[]> => library.personItems(id),
   getFavorites: (): Promise<Movie[]> => library.getFavorites(),
   /** Resolves to the flag confirmed by the server. */
   setFavorite: (itemId: string, favorite: boolean): Promise<boolean> => library.setFavorite(itemId, favorite),
@@ -100,6 +105,8 @@ export const api = {
   addonsList: (): Promise<AddonInfo[]> => addons.addonsList(),
   addonAdd: (url: string): Promise<AddonInfo> => addons.addonAdd(url),
   addonRemove: (url: string): Promise<void> => addons.addonRemove(url),
+  /** Addons of a Stremio account (the password goes to Stremio only, never stored). */
+  stremioAddons: (email: string, password: string): Promise<ImportedAddon[]> => addons.stremioAddons(email, password),
   addonCatalog: (args: {
     addonUrl: string;
     type: string;
@@ -112,6 +119,14 @@ export const api = {
   addonStreams: (type: string, id: string): Promise<AddonStream[]> => addons.addonStreams(type, id),
   addonProgressList: (): Promise<ResumeEntry[]> => addons.addonProgressList(),
   addonProgressRemove: (key: string): Promise<void> => addons.addonProgressRemove(key),
+  addonLibraryList: (): Promise<LibraryEntry[]> => addons.addonLibraryList(),
+  preferredSource: (metaId: string) => addons.preferredSource(metaId),
+  savePreferredSource: (metaId: string, stream: AddonStream) => addons.savePreferredSource(metaId, stream),
+  addonLibrarySet: (args: {
+    entry: Omit<LibraryEntry, "saved" | "watched" | "updatedMs">;
+    saved?: boolean;
+    watched?: boolean;
+  }): Promise<LibraryEntry[]> => addons.addonLibrarySet(args),
   /** Plays an online stream; `entry` identifies the title for the local progress. */
   playerStartUrl: (args: {
     url: string;

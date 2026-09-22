@@ -79,6 +79,18 @@ struct Active {
     paused: bool,
 }
 
+/// Live numbers of a torrent (see `TorrentEngine::status`).
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorrentStatus {
+    pub known: bool,
+    pub peers: u64,
+    pub down_mbps: f64,
+    pub up_mbps: f64,
+    pub progress_bytes: u64,
+    pub total_bytes: u64,
+}
+
 /// What the player gets back for a torrent.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,6 +273,27 @@ impl TorrentEngine {
     pub async fn apply_limits(&self, opts: EngineOptions) {
         if let Some(session) = self.session.lock().await.as_ref() {
             apply_caps(session, opts);
+        }
+    }
+
+    /// Live numbers of one torrent for the player's loading screen. `known` is false
+    /// while its metadata is still being fetched (it is not in the engine yet).
+    pub fn status(&self, info_hash: &str) -> TorrentStatus {
+        let hash = info_hash.trim().to_ascii_lowercase();
+        let handle = self.active.lock().unwrap().get(&hash).map(|a| a.handle.clone());
+        let Some(handle) = handle else {
+            return TorrentStatus::default();
+        };
+        // Read through the JSON form: stable across librqbit's internal type changes.
+        let stats = serde_json::to_value(handle.stats()).unwrap_or_default();
+        let num = |ptr: &str| stats.pointer(ptr).and_then(serde_json::Value::as_f64).unwrap_or(0.0);
+        TorrentStatus {
+            known: true,
+            peers: num("/live/snapshot/peer_stats/live") as u64,
+            down_mbps: num("/live/download_speed/mbps"),
+            up_mbps: num("/live/upload_speed/mbps"),
+            progress_bytes: num("/progress_bytes") as u64,
+            total_bytes: num("/total_bytes") as u64,
         }
     }
 

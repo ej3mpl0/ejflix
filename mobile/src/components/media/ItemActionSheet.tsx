@@ -1,5 +1,6 @@
 import React from "react";
-import { Check, CircleCheck, Eye, Globe, Info, Play, Plus } from "lucide-react-native";
+import { Check, CircleCheck, Clapperboard, Eye, Globe, Info, Play, Plus, X } from "lucide-react-native";
+import { Linking } from "react-native";
 import type { Movie } from "../../lib/types";
 import { externalRefForJellyfin } from "../../lib/addons";
 import { episodeCode, formatRuntime } from "../../lib/format";
@@ -26,16 +27,28 @@ export type ItemActionSheetProps = {
   showDetails?: boolean;
   /** IMDb id of the parent series (online sources of Jellyfin episodes). */
   seriesImdb?: string | null;
+  /** Shown from a "Continue watching" card: offer to take it out of that row. */
+  continueRow?: boolean;
 };
 
 /**
  * Long-press menu of a poster / continue card / episode row: play or resume, details,
  * My list, watched (Jellyfin items) and the online sources when addons can serve them.
  */
-export function ItemActionSheet({ movie, visible, onClose, onPlay, onOpen, onOnline, showDetails = true, seriesImdb = null }: ItemActionSheetProps) {
+export function ItemActionSheet({
+  movie,
+  visible,
+  onClose,
+  onPlay,
+  onOpen,
+  onOnline,
+  showDetails = true,
+  seriesImdb = null,
+  continueRow = false,
+}: ItemActionSheetProps) {
   const { t } = useI18n();
   const { settings } = useSettings();
-  const { flags, setFavorite, setPlayed, pending } = useUserData();
+  const { flags, setFavorite, setPlayed, pending, removeProgress } = useUserData();
   const play = usePlay();
   const picker = useStreamPicker();
 
@@ -73,7 +86,8 @@ export function ItemActionSheet({ movie, visible, onClose, onPlay, onOpen, onOnl
   if (showDetails && !movie.live) {
     actions.push({ key: "details", label: t("viewDetails"), icon: Info, onPress: () => (onOpen ?? openDetails)(movie) });
   }
-  if (jellyfin) {
+  // Online titles keep their marks in the local list, so they get these two as well.
+  if (jellyfin || (movie.external && !movie.live)) {
     actions.push({
       key: "favorite",
       label: state.favorite ? t("removeFromList") : t("addToList"),
@@ -86,8 +100,23 @@ export function ItemActionSheet({ movie, visible, onClose, onPlay, onOpen, onOnl
       label: watched ? t("markUnwatched") : t("markWatched"),
       icon: watched ? Eye : CircleCheck,
       disabled: busy,
-      onPress: () => void setPlayed(movie, !watched),
+      // Online progress lives apart from the watched mark: drop it as well.
+      onPress: () =>
+        void setPlayed(movie, !watched).then(() => (!watched && movie.external ? removeProgress(movie) : undefined)),
     });
+  }
+  if (continueRow) {
+    actions.push({
+      key: "removeContinue",
+      label: t("removeFromContinue"),
+      icon: X,
+      disabled: busy,
+      onPress: () => void removeProgress(movie),
+    });
+  }
+  const trailer = movie.remoteTrailers?.find((url) => /youtu\.?be/.test(url));
+  if (trailer) {
+    actions.push({ key: "trailer", label: t("trailer"), icon: Clapperboard, onPress: () => void Linking.openURL(trailer).catch(() => undefined) });
   }
   if (onlineItem) {
     actions.push({

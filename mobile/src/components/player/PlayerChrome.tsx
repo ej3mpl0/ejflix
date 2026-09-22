@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import {
+  Info,
   ArrowLeft,
   AudioLines,
   Captions,
@@ -44,9 +45,12 @@ import { Badges } from "./Badges";
 import { LiveStrip } from "./LiveStrip";
 import { formatSpeed } from "./SpeedSheet";
 import { Timeline } from "./Timeline";
+import { isSeriesEpisode } from "../../lib/addons";
+import { useSettings } from "../../lib/settings-context";
+import { trackShortName } from "./TrackSheet";
 
 /** Bottom sheet opened from the chip row (desktop `PlayerMenu`). */
-export type PlayerSheet = "speed" | "audio" | "sub" | null;
+export type PlayerSheet = "speed" | "audio" | "sub" | "stats" | null;
 
 /** What the chrome shows while an IPTV channel plays (desktop `LiveInfo`). */
 export type LiveInfo = { number: number | null; now: Programme | null; next: Programme | null };
@@ -136,6 +140,7 @@ export function PlayerChrome({
   onAspect,
   onLock,
   onPanel,
+  externalSub = null,
   onZap,
   onReveal,
   onHoldUi,
@@ -165,6 +170,8 @@ export function PlayerChrome({
   onAspect: () => void;
   onLock: () => void;
   onPanel: () => void;
+  /** Name of the subtitle file the app is drawing itself, if one is loaded. */
+  externalSub?: string | null;
   /** Previous (−1) / next (+1) channel of the group. */
   onZap: (dir: 1 | -1) => void;
   onReveal: () => void;
@@ -173,6 +180,7 @@ export function PlayerChrome({
   const s = useStyles();
   const t = useTheme();
   const { t: tr, locale } = useI18n();
+  const seekStep = useSettings().settings.playback.seekStep;
   const { insets, width } = useLayout();
   const reduced = useReducedMotion();
   const [scrub, setScrub] = useState<number | null>(null);
@@ -194,7 +202,7 @@ export function PlayerChrome({
       ? `-${formatClock(Math.max(0, state.duration - shownTime))}`
       : `${formatClock(shownTime)} / ${formatClock(state.duration)}`;
 
-  const isEpisode = movie.kind === "Episode" && Boolean(movie.seriesId);
+  const isEpisode = isSeriesEpisode(movie);
   const heading = isEpisode ? movie.seriesName ?? movie.name : movie.name;
   const episodeLine = isEpisode ? [episodeCode(movie, tr("episodeCode")), movie.name].filter(Boolean).join(" · ") : "";
   const hasVersions = movie.mediaSources.length > 1;
@@ -208,6 +216,11 @@ export function PlayerChrome({
   const scrollChips = chipsWidth > available;
 
   const toggleSheet = (next: Exclude<PlayerSheet, null>) => onSheet(sheet === next ? null : next);
+  // The chips name the track in use ("English"), not just the kind of menu they open.
+  const currentSub = state.tracks.find((track) => track.kind === "sub" && track.selected) ?? null;
+  const currentAudio = state.tracks.find((track) => track.kind === "audio" && track.selected) ?? null;
+  const subLabel = externalSub ?? (currentSub ? trackShortName(currentSub, locale) : tr("subtitlesOff"));
+  const audioLabel = currentAudio ? trackShortName(currentAudio, locale) : tr("audio");
 
   const chips = (
     <>
@@ -227,8 +240,23 @@ export function PlayerChrome({
           onPress={() => toggleSheet("speed")}
         />
       )}
-      <ControlChip icon={Captions} label={tr("subtitles")} active={sheet === "sub"} onPress={() => toggleSheet("sub")} />
-      <ControlChip icon={AudioLines} label={tr("audio")} active={sheet === "audio"} onPress={() => toggleSheet("audio")} />
+      <ControlChip
+        icon={Captions}
+        label={subLabel}
+        accessibilityLabel={`${tr("subtitles")}: ${subLabel}`}
+        active={sheet === "sub" || currentSub != null || externalSub != null}
+        onPress={() => toggleSheet("sub")}
+      />
+      <ControlChip
+        icon={AudioLines}
+        label={audioLabel}
+        accessibilityLabel={`${tr("audio")}: ${audioLabel}`}
+        active={sheet === "audio"}
+        onPress={() => toggleSheet("audio")}
+      />
+      {live ? null : (
+        <ControlChip icon={Info} label={tr("statsTitle")} active={sheet === "stats"} onPress={() => toggleSheet("stats")} />
+      )}
       {showPanel ? <ControlChip icon={live ? Tv : ListVideo} label={panelLabel} active={panelOpen} onPress={onPanel} /> : null}
     </>
   );
@@ -348,7 +376,7 @@ export function PlayerChrome({
             <IconButton
               icon={live ? SkipBack : RotateCcw}
               label={live ? tr("previousChannel") : tr("seekBack")}
-              onPress={() => (live ? onZap(-1) : onSeek(-10))}
+              onPress={() => (live ? onZap(-1) : onSeek(-seekStep))}
               size={22}
               hit={48}
               color={t.colors.text}
@@ -364,7 +392,7 @@ export function PlayerChrome({
             <IconButton
               icon={live ? SkipForward : RotateCw}
               label={live ? tr("nextChannel") : tr("seekForward")}
-              onPress={() => (live ? onZap(1) : onSeek(10))}
+              onPress={() => (live ? onZap(1) : onSeek(seekStep))}
               size={22}
               hit={48}
               color={t.colors.text}

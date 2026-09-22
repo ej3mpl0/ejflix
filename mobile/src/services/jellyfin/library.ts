@@ -229,6 +229,15 @@ export async function searchItems(query: string): Promise<Movie[]> {
   );
 }
 
+/** Films and series of the library a person (cast or crew) takes part in, newest first. */
+export async function personItems(personId: string): Promise<Movie[]> {
+  if (!validItemId(personId)) throw new Error("Persona no válida");
+  const session = requireSession();
+  return itemsQuery(
+    `/Users/${session.userId}/Items?PersonIds=${personId}&IncludeItemTypes=Movie,Series&Recursive=true&SortBy=ProductionYear,SortName&SortOrder=Descending&Limit=100&Fields=${ITEM_FIELDS}`,
+  );
+}
+
 /** Items Jellyfin considers similar ("More like this"). */
 export async function getSimilar(id: string): Promise<Movie[]> {
   if (!validItemId(id)) throw invalidItem();

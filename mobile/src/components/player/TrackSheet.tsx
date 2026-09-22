@@ -1,4 +1,4 @@
-import React from "react";
+import React, { type ReactNode } from "react";
 import { FlatList, Pressable, Text, View } from "react-native";
 import { Check } from "lucide-react-native";
 import type { PlayerTrack } from "../../lib/types";
@@ -21,6 +21,11 @@ function labelOf(track: PlayerTrack, locale: string): { primary: string; seconda
   return { primary: language, secondary: detail && detail !== language ? detail : null };
 }
 
+/** Short name of a track for the toolbar chip: the language when known, else its title. */
+export function trackShortName(track: PlayerTrack, locale: string): string {
+  return labelOf(track, locale).primary;
+}
+
 /** Audio or subtitle picker as a bottom sheet (desktop `TrackMenu`). */
 export function TrackSheet({
   kind,
@@ -28,8 +33,11 @@ export function TrackSheet({
   tracks,
   onSelect,
   onClose,
+  footer,
 }: {
   kind: TrackKind;
+  /** Extra controls under the list (subtitle file, delay, look). */
+  footer?: ReactNode;
   visible: boolean;
   tracks: PlayerTrack[];
   onSelect: (kind: string, id: number) => void;
@@ -76,13 +84,14 @@ export function TrackSheet({
           </Pressable>
         )}
         ListEmptyComponent={<Text style={s.empty}>{tr("noTracks")}</Text>}
+        ListFooterComponent={footer ? <>{footer}</> : null}
       />
     </Sheet>
   );
 }
 
 const useStyles = makeStyles((t) => ({
-  scroller: { maxHeight: 360 },
+  scroller: { maxHeight: 520 },
   list: { paddingHorizontal: 8, paddingBottom: 8 },
   row: { flexDirection: "row", alignItems: "center", gap: 10, minHeight: 48, paddingHorizontal: 12, borderRadius: t.radii.btn },
   rowPressed: { backgroundColor: t.white(0.06) },

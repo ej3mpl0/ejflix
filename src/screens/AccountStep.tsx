@@ -21,7 +21,7 @@ export function AccountStep({
   mode?: "intro" | "mfa";
   /** "done" when signed in (or out); "later" when the person put it off. */
   onDone: (reason: "done" | "later") => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t } = useI18n();
   const [view, setView] = useState<"intro" | "signup" | "signin">("intro");

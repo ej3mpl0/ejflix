@@ -328,6 +328,13 @@ async fn settings_set(
     Ok(saved)
 }
 
+/// "Test connection": the same check as connecting, without remembering the server.
+#[tauri::command]
+async fn probe_server_only(state: State<'_, AppState>, url: String) -> Result<PublicInfo, String> {
+    let url = jellyfin::normalize_url(&url)?;
+    state.jellyfin.probe(&url).await
+}
+
 #[tauri::command]
 async fn probe_server(
     app: tauri::AppHandle,
@@ -645,7 +652,7 @@ async fn torrent_resolve(
         None => settings::TorrentPrefs::default(),
     };
     if !prefs.enabled {
-        return Err("Los torrents están desactivados en Ajustes › Addons".into());
+        return Err("Los torrents están desactivados en Ajustes › Torrents".into());
     }
     let limit = u64::from(prefs.cache_gb) * 1024 * 1024 * 1024;
     let dir = torrent::cache_dir(&app);
@@ -751,6 +758,11 @@ async fn search_items(state: State<'_, AppState>, query: String) -> Result<Vec<M
 }
 
 #[tauri::command]
+async fn person_items(state: State<'_, AppState>, id: String) -> Result<Vec<Movie>, String> {
+    state.jellyfin.person_items(&id).await
+}
+
+#[tauri::command]
 async fn get_similar(state: State<'_, AppState>, id: String) -> Result<Vec<Movie>, String> {
     state.jellyfin.similar(&id).await
 }
@@ -802,6 +814,9 @@ async fn player_start(
         subtitle_language: playback.subtitle_language,
         remember_speed: playback.remember_speed,
         last_speed: playback.last_speed,
+        sub_scale: playback.sub_scale,
+        sub_color: playback.sub_color.clone(),
+        sub_background: playback.sub_background.clone(),
     };
     let start = args.start_seconds.unwrap_or(0.0);
     let play_session_id = Uuid::new_v4().to_string();
@@ -972,6 +987,44 @@ async fn player_set_mute(state: State<'_, AppState>, mute: bool) -> Result<(), S
 #[tauri::command]
 async fn player_set_track(state: State<'_, AppState>, kind: String, id: i64) -> Result<(), String> {
     state.player.set_track(&kind, id).await
+}
+
+/// Delays and subtitle look while playing (whitelisted mpv properties).
+#[tauri::command]
+async fn player_set_prop(state: State<'_, AppState>, name: String, value: serde_json::Value) -> Result<(), String> {
+    state.player.set_prop(&name, value).await
+}
+
+/// Technical numbers for the player's stats panel.
+#[tauri::command]
+async fn player_props(state: State<'_, AppState>) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    Ok(state.player.props().await)
+}
+
+/// Loads a subtitle file the person picked: the webview only has its text, so it is
+/// written to a temporary file first.
+#[tauri::command]
+async fn player_sub_add_text(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
+    if content.len() > 8 * 1024 * 1024 {
+        return Err("El archivo de subtítulos es demasiado grande".into());
+    }
+    let ext = std::path::Path::new(&name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .filter(|e| ["srt", "vtt", "ass", "ssa", "sub"].contains(&e.as_str()))
+        .ok_or_else(|| "Formato de subtítulos no admitido".to_string())?;
+    let dir = std::env::temp_dir().join("ejflix-subs");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("{}.{ext}", Uuid::new_v4()));
+    std::fs::write(&path, content).map_err(|e| e.to_string())?;
+    state.player.sub_add(&path.to_string_lossy()).await
+}
+
+/// Peers, speed and progress of a torrent being opened or played.
+#[tauri::command]
+async fn torrent_status(state: State<'_, AppState>, info_hash: String) -> Result<torrent::TorrentStatus, String> {
+    Ok(state.torrents.status(&info_hash))
 }
 
 #[tauri::command]
@@ -1744,6 +1797,9 @@ async fn player_start_url(
         subtitle_language: playback.subtitle_language,
         remember_speed: playback.remember_speed,
         last_speed: playback.last_speed,
+        sub_scale: playback.sub_scale,
+        sub_color: playback.sub_color.clone(),
+        sub_background: playback.sub_background.clone(),
     };
     let headers: Vec<(String, String)> = args
         .headers
@@ -1968,6 +2024,9 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         // Live TV always plays at normal speed.
         remember_speed: false,
         last_speed: 1.0,
+        sub_scale: playback.sub_scale,
+        sub_color: playback.sub_color.clone(),
+        sub_background: playback.sub_background.clone(),
     };
     let now = addons::now_ms() / 1000;
     let epg = state.iptv.epg_now(std::slice::from_ref(&id), now).await;
@@ -2092,6 +2151,12 @@ pub fn run() {
             addon_add,
             addon_remove,
             stremio_addons,
+            probe_server_only,
+            person_items,
+            player_set_prop,
+            player_props,
+            player_sub_add_text,
+            torrent_status,
             addon_catalog,
             addon_meta,
             addon_streams,

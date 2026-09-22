@@ -34,6 +34,8 @@ export type MainStackParamList = {
   SettingsSection: { section: string };
   ProfileEditor: { profileId: string };
   Player: { movie: Movie };
+  /** A row as a full grid; `catalog` lets an addon row keep paging. */
+  SeeAll: { title: string; items: Movie[]; catalog?: { addonUrl: string; type: string; id: string } };
 };
 
 export type RootScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<RootStackParamList, T>;

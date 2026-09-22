@@ -34,7 +34,7 @@ export function DownloadsProvider({
   onToast,
   children,
 }: {
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
   children: ReactNode;
 }) {
   const { t } = useI18n();

@@ -60,6 +60,8 @@ export const KEYS = {
   settings: (userId: string) => `settings.${userId}`,
   settingsLastUser: "settingsLastUser",
   addonProgress: (userId: string) => `addonProgress.${userId}`,
+  addonLibrary: (userId: string) => `addonLibrary.${userId}`,
+  preferredSource: "preferredSource",
   iptv: (userId: string) => `iptv.${userId}`,
   iptvFavorites: (userId: string) => `iptvFavorites.${userId}`,
   iptvRecent: (userId: string) => `iptvRecent.${userId}`,

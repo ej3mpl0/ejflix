@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Globe, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { cn, formatRuntime, isRecentlyAdded } from "../lib/format";
@@ -7,6 +7,11 @@ import { FavoriteButton } from "./FavoriteButton";
 import { WatchedBadge } from "./WatchedBadge";
 import { useI18n } from "../lib/locale-context";
 import { useItemFlags } from "../lib/userdata-context";
+import { PosterPreview } from "./PosterPreview";
+
+const PREVIEW_DELAY_MS = 750;
+/** Only a real mouse gets the hover card (touch screens and pens would trip it on tap). */
+const finePointer = typeof matchMedia === "function" && matchMedia("(hover: hover) and (pointer: fine)").matches;
 
 /**
  * 2:3 poster card in one of three shapes:
@@ -37,6 +42,30 @@ export function PosterCard({
   const runtime = formatRuntime(movie.runtimeTicks);
   const meta = [movie.year ? String(movie.year) : null, runtime || null].filter(Boolean).join(" • ");
   const wall = layout === "wall";
+  const [preview, setPreview] = useState<DOMRect | null>(null);
+  const cardRef = useRef<HTMLDivElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+
+  const armPreview = () => {
+    if (!finePointer) return;
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      const rect = cardRef.current?.getBoundingClientRect();
+      if (rect) setPreview(rect);
+    }, PREVIEW_DELAY_MS);
+  };
+  const dropPreview = () => {
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setPreview(null), 120);
+  };
+  useEffect(() => {
+    if (!preview) return;
+    // Any scroll moves the poster away from the card: close it.
+    const close = () => setPreview(null);
+    window.addEventListener("scroll", close, true);
+    return () => window.removeEventListener("scroll", close, true);
+  }, [preview]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
 
   return (
     <div
@@ -48,6 +77,10 @@ export function PosterCard({
       )}
       style={{ animationDelay: `${delay}ms` }}
       data-item-id={movie.id}
+      data-poster
+      ref={cardRef}
+      onMouseEnter={armPreview}
+      onMouseLeave={dropPreview}
     >
       <div className="poster-card card-depth relative overflow-hidden rounded-poster bg-surface">
         <button
@@ -77,20 +110,21 @@ export function PosterCard({
             {t("newBadge")}
           </span>
         ) : null}
-        {movie.external ? (
-          <span className="pointer-events-none absolute top-2 right-2 grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white/80 backdrop-blur-sm" title={t("online")}>
-            <Globe size={13} />
-          </span>
-        ) : (
-          <div className="absolute top-2 right-2 flex flex-col items-end gap-1.5">
+        {/* Online titles keep their globe and get the "My list" heart too (saved locally). */}
+        <div className="absolute top-2 right-2 flex flex-col items-end gap-1.5">
+          {movie.external ? (
+            <span className="pointer-events-none grid h-6 w-6 place-items-center rounded-full bg-black/60 text-white/80 backdrop-blur-sm" title={t("online")}>
+              <Globe size={13} />
+            </span>
+          ) : (
             <WatchedBadge movie={movie} />
-            <FavoriteButton
-              movie={movie}
-              variant="icon"
-              className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
-            />
-          </div>
-        )}
+          )}
+          <FavoriteButton
+            movie={movie}
+            variant="icon"
+            className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
+          />
+        </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent p-2.5 pt-14 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           {wall ? (
             <p className="mb-1 line-clamp-2 text-[12.5px] leading-tight font-semibold text-white">{movie.name}</p>
@@ -124,6 +158,19 @@ export function PosterCard({
           {meta ? <p className="truncate text-[11px] text-dim tabular">{meta}</p> : null}
         </button>
       )}
+      {preview ? (
+        <PosterPreview
+          movie={movie}
+          anchor={preview}
+          onPlay={onPlay}
+          onOpen={(m) => {
+            setPreview(null);
+            onOpen(m);
+          }}
+          onEnter={() => window.clearTimeout(timer.current)}
+          onLeave={dropPreview}
+        />
+      ) : null}
     </div>
   );
 }

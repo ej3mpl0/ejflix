@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FlatList, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { FlatList, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { ExternalLink, Globe, Link2Off, Play } from "lucide-react-native";
 import type { AddonStream, Movie } from "../../lib/types";
@@ -13,6 +13,7 @@ import { useLayout } from "../../theme/responsive";
 import { text } from "../../theme/typography";
 import { Sheet } from "../ui/Sheet";
 import { Shimmer } from "../ui/Shimmer";
+import { Chip } from "../ui/Chip";
 
 export type StreamPickerSheetProps = {
   /** Online title (carries `external`); null keeps the sheet closed. */
@@ -24,6 +25,30 @@ export type StreamPickerSheetProps = {
 };
 
 type Row = { kind: "group"; key: string; name: string } | { kind: "stream"; key: string; stream: AddonStream };
+type SortMode = "default" | "quality" | "size" | "seeders";
+
+const QUALITY_ORDER = ["2160p", "4k", "1440p", "1080p", "720p", "576p", "480p", "360p"];
+
+/** Seeders as most torrent addons print them ("👤 123"). */
+function seedersOf(stream: AddonStream): number {
+  const match = /👤\s*(\d+)/u.exec(stream.title ?? "");
+  return match ? Number(match[1]) : -1;
+}
+
+/** Size in bytes: the addon's field, else "💾 1.4 GB" in the description. */
+function sizeOf(stream: AddonStream): number {
+  if (stream.videoSize) return stream.videoSize;
+  const match = /💾\s*([\d.,]+)\s*(TB|GB|MB)/iu.exec(stream.title ?? "");
+  if (!match) return -1;
+  const unit = match[2].toUpperCase();
+  return Number(match[1].replace(",", ".")) * 1024 ** (unit === "TB" ? 4 : unit === "GB" ? 3 : 2);
+}
+
+function qualityRank(stream: AddonStream): number {
+  const haystack = `${stream.name} ${stream.title}`.toLowerCase();
+  const index = QUALITY_ORDER.findIndex((q) => haystack.includes(q));
+  return index < 0 ? QUALITY_ORDER.length : index;
+}
 
 /**
  * Bottom sheet listing the online sources (Stremio addon streams) of a title, grouped
@@ -37,7 +62,11 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
   const { wide, width } = useLayout();
   const [streams, setStreams] = useState<AddonStream[] | null>(null);
   const [error, setError] = useState("");
+  const [sort, setSort] = useState<SortMode>("default");
   const ext = movie?.external ?? null;
+  const preferred = ext ? api.preferredSource(ext.metaId) : null;
+  const isPreferred = (stream: AddonStream) =>
+    Boolean(preferred && preferred.bingeGroup && stream.addonUrl === preferred.addonUrl && stream.bingeGroup === preferred.bingeGroup);
   const type = ext?.type;
   const videoId = ext?.videoId;
 
@@ -60,8 +89,14 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
   }, [visible, type, videoId]);
 
   const rows = useMemo<Row[]>(() => {
+    const rank = (stream: AddonStream) =>
+      sort === "quality" ? qualityRank(stream) : sort === "size" ? -sizeOf(stream) : sort === "seeders" ? -seedersOf(stream) : 0;
+    // The usual source first, then the chosen order (stable: the addon's order breaks ties).
+    const ordered = [...(streams ?? [])].sort(
+      (a, b) => Number(isPreferred(b)) - Number(isPreferred(a)) || rank(a) - rank(b),
+    );
     const groups = new Map<string, AddonStream[]>();
-    for (const stream of streams ?? []) {
+    for (const stream of ordered) {
       const list = groups.get(stream.addonName) ?? [];
       list.push(stream);
       groups.set(stream.addonName, list);
@@ -72,12 +107,14 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
       list.forEach((stream, i) => out.push({ kind: "stream", key: `${stream.addonUrl}:${name}:${i}`, stream }));
     }
     return out;
-  }, [streams]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streams, sort, preferred?.addonUrl, preferred?.bingeGroup]);
 
   const pick = useCallback(
     (stream: AddonStream) => {
       if (!movie?.external) return;
       if (stream.playable && stream.url) {
+        api.savePreferredSource(movie.external.metaId, stream);
         onClose();
         if (onPick) onPick(movie, stream);
         else openPlayer({ ...movie, external: { ...movie.external, stream } });
@@ -113,9 +150,17 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
             )}
           </View>
           <View style={s.labels}>
-            <Text numberOfLines={1} style={s.name}>
-              {stream.name}
-            </Text>
+            <View style={s.nameRow}>
+              <Text numberOfLines={1} style={[s.name, { flexShrink: 1 }]}>
+                {stream.name}
+              </Text>
+              {isPreferred(stream) ? (
+                <View style={s.usual}>
+                  <Text style={s.usualText}>{tr("usualSource")}</Text>
+                </View>
+              ) : null}
+              {seedersOf(stream) >= 0 ? <Text style={s.seeders}>👤 {seedersOf(stream)}</Text> : null}
+            </View>
             <Text numberOfLines={2} style={s.desc}>
               {stream.playable ? stream.title || stream.filename || "" : external ? tr("openLink") : tr("streamUnsupported")}
             </Text>
@@ -124,7 +169,8 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
         </Pressable>
       );
     },
-    [pick, s, t, tr],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pick, s, t, tr, preferred?.addonUrl, preferred?.bingeGroup],
   );
 
   const heading = movie ? (movie.kind === "Episode" ? (movie.seriesName ?? movie.name) : movie.name) : "";
@@ -176,6 +222,20 @@ export function StreamPickerSheet({ movie, visible, onClose, onPick }: StreamPic
           <Text style={s.emptyHint}>{tr("noStreamsHint")}</Text>
         </View>
       ) : null}
+      {streams && streams.length > 1 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.sorts}>
+          {(
+            [
+              ["default", tr("sortRecommended")],
+              ["quality", tr("sortQuality")],
+              ["size", tr("sortSize")],
+              ["seeders", tr("sortSeeders")],
+            ] as Array<[SortMode, string]>
+          ).map(([value, label]) => (
+            <Chip key={value} label={label} selected={sort === value} onPress={() => setSort(value)} />
+          ))}
+        </ScrollView>
+      ) : null}
       {rows.length ? (
         <FlatList
           data={rows}
@@ -214,6 +274,11 @@ const useStyles = makeStyles((t) => ({
   discPlayable: { backgroundColor: t.white(0.1) },
   labels: { flex: 1, minWidth: 0 },
   name: { ...text(14, "medium"), color: t.colors.text },
+  nameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  usual: { borderRadius: 5, backgroundColor: t.colors.accent, paddingHorizontal: 6, paddingVertical: 1 },
+  usualText: { ...text(10, "bold", { tracking: 0.04, uppercase: true }), color: t.colors.onAccent },
+  seeders: { ...text(11, "regular", { tabular: true }), color: t.colors.dim },
+  sorts: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingBottom: 8 },
   desc: { ...text(12, "regular", { lineHeight: 17 }), color: t.colors.muted, marginTop: 1 },
   size: { ...text(12, "regular", { tabular: true }), color: t.colors.dim },
 }));

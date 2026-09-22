@@ -131,6 +131,8 @@ pub struct AddonMetaFull {
     pub director: Vec<String>,
     pub videos: Vec<AddonVideo>,
     pub related: Vec<AddonRelated>,
+    /// Trailer pages (YouTube), from `trailers` / `trailerStreams`.
+    pub trailers: Vec<String>,
 }
 
 /// A title the user saved or ticked off. Online titles have no server to remember
@@ -867,7 +869,32 @@ fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {
         director: strings(v, "director"),
         videos,
         related: parse_related(v),
+        trailers: parse_trailers(v),
     })
+}
+
+/// Stremio metas give trailers as YouTube ids (`trailers[].source`,
+/// `trailerStreams[].ytId`); they are turned into watch URLs.
+fn parse_trailers(v: &Value) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |id: Option<&str>| {
+        if let Some(id) = id.map(str::trim) {
+            let ok = id.len() == 11 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            if ok && !ids.iter().any(|x| x == id) {
+                ids.push(id.to_string());
+            }
+        }
+    };
+    for t in v.get("trailerStreams").and_then(Value::as_array).into_iter().flatten() {
+        push(t.get("ytId").and_then(Value::as_str));
+    }
+    for t in v.get("trailers").and_then(Value::as_array).into_iter().flatten() {
+        let kind = t.get("type").and_then(Value::as_str).unwrap_or("Trailer");
+        if kind.eq_ignore_ascii_case("trailer") {
+            push(t.get("source").and_then(Value::as_str));
+        }
+    }
+    ids.into_iter().map(|id| format!("https://www.youtube.com/watch?v={id}")).collect()
 }
 
 /// The info hash and trackers of a `magnet:` link, when the addon sent one instead of

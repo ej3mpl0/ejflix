@@ -38,7 +38,11 @@ function CatalogRow({
   if (items == null) return <RowSkeleton />;
   if (!items.length) return null;
   const title = `${catalog.name} · ${catalog.addonName}`;
-  return <PosterRow title={title} items={items} onOpen={onOpen} onPlay={onPlay} />;
+  const loadMore = (loaded: number) =>
+    api
+      .addonCatalog({ addonUrl: catalog.addonUrl, type: catalog.type, id: catalog.id, skip: loaded })
+      .then((metas) => metas.map(metaToMovie));
+  return <PosterRow title={title} items={items} onOpen={onOpen} onPlay={onPlay} loadMore={loadMore} />;
 }
 
 /** One rail per addon catalog (movies and series), in addon priority order. */
@@ -76,7 +80,14 @@ export function AddonRows({
     };
   }, [key]);
 
-  if (catalogs == null) return null;
+  if (catalogs == null) {
+    return (
+      <>
+        <RowSkeleton />
+        <RowSkeleton />
+      </>
+    );
+  }
   if (!catalogs.length) return <>{empty}</>;
   return (
     <>

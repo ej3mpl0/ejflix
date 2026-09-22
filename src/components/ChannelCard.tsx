@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Play, Star } from "lucide-react";
 import type { Channel, EpgNow } from "../lib/types";
 import { cn } from "../lib/format";
-import { channelInitials, formatRange, programmeProgress } from "../lib/iptv";
+import { channelInitials, formatRange, formatTime, programmeProgress } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 
 /**
@@ -29,6 +29,7 @@ export function ChannelCard({
   const { t, locale } = useI18n();
   const [broken, setBroken] = useState(false);
   const now = epg?.now ?? null;
+  const next = epg?.next ?? null;
   const progress = now ? programmeProgress(now) : 0;
   const line = "block overflow-hidden text-ellipsis whitespace-nowrap";
 
@@ -73,7 +74,7 @@ export function ChannelCard({
             </div>
           ) : null}
         </div>
-        <div className="h-[56px] px-3 py-2.5">
+        <div className="h-[72px] px-3 py-2.5">
           <span className={cn(line, "text-[13px] leading-[18px] font-medium text-text group-hover:text-white")} title={channel.name}>
             {channel.name}
           </span>
@@ -86,6 +87,11 @@ export function ChannelCard({
           ) : (
             <span className={cn(line, "text-[11px] leading-[16px] text-dim")}>{channel.group || t("noGroup")}</span>
           )}
+          {next ? (
+            <span className={cn(line, "text-[11px] leading-[16px] text-dim/80")} title={next.title}>
+              {t("upNext")} <span className="tabular">{formatTime(next.start, locale)}</span> · {next.title}
+            </span>
+          ) : null}
         </div>
       </button>
       <button

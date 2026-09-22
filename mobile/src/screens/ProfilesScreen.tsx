@@ -309,7 +309,7 @@ const useStyles = makeStyles((t) => ({
   sectionHead: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 44, marginBottom: 20 },
   sectionLabel: { ...text(11, "semibold", { tracking: 0.14, uppercase: true }), color: t.colors.dim },
   form: { marginTop: 36, width: "100%", maxWidth: 340 },
-  error: { ...text(14), color: t.colors.accent, marginTop: 28, textAlign: "center" },
+  error: { ...text(14), color: t.colors.danger, marginTop: 28, textAlign: "center" },
   footer: { marginTop: 44, flexDirection: "row", flexWrap: "wrap", justifyContent: "center", alignItems: "center", gap: 8 },
   footerBtn: { flexDirection: "row", alignItems: "center", gap: 8, minHeight: 44, paddingHorizontal: 16, borderRadius: t.radii.pill },
   footerBtnOn: { backgroundColor: t.white(0.12) },

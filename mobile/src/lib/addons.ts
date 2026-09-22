@@ -4,12 +4,18 @@ import type {
   AddonStream,
   AddonVideo,
   ExternalRef,
+  LibraryEntry,
   Movie,
   ResumeEntry,
 } from "./types";
 
 /** Id prefix of online titles inside the app (never a Jellyfin id). */
 const PREFIX = "addon:";
+
+/** Episode of a series whose other episodes can be listed (Jellyfin or an addon series). */
+export function isSeriesEpisode(movie: Pick<Movie, "kind" | "seriesId" | "external">): boolean {
+  return movie.kind === "Episode" && Boolean(movie.seriesId || movie.external?.type === "series");
+}
 
 export function isExternal(movie: Pick<Movie, "external">): boolean {
   return Boolean(movie.external);
@@ -113,6 +119,7 @@ export function metaFullToMovie(meta: AddonMetaFull): Movie {
   return {
     ...movie,
     directors: meta.director,
+    remoteTrailers: meta.trailers ?? [],
     cast: meta.cast.map((name, i) => ({ id: `${meta.id}:cast:${i}`, name, role: null, kind: "Actor", imageUrl: null })),
     status: null,
   };
@@ -161,6 +168,52 @@ export function nextVideoOf(meta: AddonMetaFull, videoId: string): AddonVideo | 
 }
 
 /** Locally remembered progress → "Continue watching (online)" card. */
+/** Identity of an online title in the local list (flags and date added by the store). */
+export function libraryEntryOf(movie: Movie): Omit<LibraryEntry, "saved" | "watched" | "updatedMs"> | null {
+  const ext = movie.external;
+  if (!ext) return null;
+  return {
+    key: ext.videoId,
+    type: ext.type,
+    metaId: ext.metaId,
+    name: movie.name,
+    seriesName: movie.seriesName,
+    poster: movie.posterUrl,
+    background: movie.backdropUrl,
+    logo: movie.logoUrl,
+    year: movie.year,
+    season: ext.season,
+    episode: ext.episode,
+    imdb: ext.imdb,
+  };
+}
+
+/** A saved online title → poster card item. */
+export function libraryToMovie(entry: LibraryEntry): Movie {
+  const isEpisode = entry.type === "series" && entry.season != null;
+  const base = emptyMovie(externalId(entry.key), isEpisode ? "Episode" : entry.type === "series" ? "Series" : "Movie", entry.name);
+  return {
+    ...base,
+    external: {
+      type: kindOf(entry.type),
+      metaId: entry.metaId,
+      videoId: entry.key,
+      imdb: entry.imdb,
+      season: entry.season,
+      episode: entry.episode,
+    },
+    seriesName: entry.seriesName,
+    seasonNumber: entry.season,
+    episodeNumber: entry.episode,
+    year: entry.year,
+    posterUrl: entry.poster,
+    backdropUrl: entry.background ?? entry.poster,
+    logoUrl: entry.logo,
+    favorite: entry.saved,
+    played: entry.watched,
+  };
+}
+
 export function resumeToMovie(entry: ResumeEntry): Movie {
   const isEpisode = entry.type === "series" && entry.season != null;
   const base = emptyMovie(externalId(entry.key), isEpisode ? "Episode" : "Movie", entry.name);

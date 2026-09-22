@@ -24,7 +24,7 @@ export function AccountPanel({
 }: {
   initialMode?: "signin" | "signup" | "mfa";
   onSignedIn: () => void;
-  onToast: (message: string) => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t, locale } = useI18n();
   const [mode, setMode] = useState<PanelMode>(initialMode);

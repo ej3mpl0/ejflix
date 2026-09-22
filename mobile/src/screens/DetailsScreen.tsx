@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { Linking, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { Globe, Play, RotateCcw } from "lucide-react-native";
+import { Clapperboard, Globe, Play, RotateCcw } from "lucide-react-native";
 import { api } from "../lib/api";
 import { externalRefForJellyfin } from "../lib/addons";
 import { episodeCode, formatClock, ticksToSeconds } from "../lib/format";
@@ -13,7 +13,7 @@ import { usePlay } from "../lib/play";
 import { useSettings } from "../lib/settings-context";
 import { useStreamPicker } from "../lib/stream-picker-context";
 import { useUserData } from "../lib/userdata-context";
-import type { Movie } from "../lib/types";
+import type { Movie, Person } from "../lib/types";
 import { openDetails } from "../navigation/navigationRef";
 import type { MainScreenProps } from "../navigation/types";
 import { alpha, mix } from "../theme/color";
@@ -24,6 +24,7 @@ import { EmptyCard } from "../components/ui/EmptyCard";
 import { Pill } from "../components/ui/Pill";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/ui/Skeletons";
 import { CastRow } from "../components/media/CastRow";
+import { PersonSheet } from "../components/media/PersonSheet";
 import { ChaptersRail } from "../components/media/ChaptersRail";
 import { EpisodeList } from "../components/media/EpisodeList";
 import { FavoriteButton } from "../components/media/FavoriteButton";
@@ -68,6 +69,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const [episodes, setEpisodes] = useState<Movie[] | null>(null);
   const [nextUp, setNextUp] = useState<Movie | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
   const loadedSeason = useRef<string | null>(null);
   const scrollY = useSharedValue(0);
@@ -148,6 +150,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
 
   const onPlay = useCallback((item: Movie) => play(item), [play]);
   const onPush = useCallback((item: Movie) => openDetails(item), []);
+  const trailer = detail?.remoteTrailers?.find((url) => /youtu\.?be/.test(url)) ?? null;
   const back = useCallback(() => navigation.goBack(), [navigation]);
 
   const seasonChips = useMemo<SeasonChip[]>(
@@ -161,7 +164,8 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
         <View style={{ paddingTop: layout.insets.top + 96, paddingHorizontal: layout.pagePad }}>
           <EmptyCard title={tr("cannotConnect")} hint={error} actionLabel={tr("back")} onAction={back} />
         </View>
-        <FloatingTitleBar title={heading} scrollY={scrollY} onBack={back} />
+        <PersonSheet person={person} onClose={() => setPerson(null)} onOpen={onPush} onPlay={onPlay} />
+      <FloatingTitleBar title={heading} scrollY={scrollY} onBack={back} />
       </View>
     );
   }
@@ -300,6 +304,16 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
             {onlineRef ? (
               <Pill variant="tonal" pill size="lg" icon={Globe} label={tr("onlineSources")} onPress={() => openOnline(movie)} />
             ) : null}
+            {trailer ? (
+              <Pill
+                variant="tonal"
+                pill
+                size="lg"
+                icon={Clapperboard}
+                label={tr("trailer")}
+                onPress={() => void Linking.openURL(trailer).catch(() => undefined)}
+              />
+            ) : null}
           </View>
 
           <MetaChips movie={movie} seasons={isSeries ? seasons.length : undefined} />
@@ -353,7 +367,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
             </View>
           ) : null}
 
-          <CastRow people={movie.cast} />
+          <CastRow people={movie.cast} onPerson={setPerson} />
 
           {!isSeries ? <ChaptersRail movie={movie} onPlay={onPlay} /> : null}
 

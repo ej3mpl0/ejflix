@@ -23,6 +23,7 @@ import { GridSkeleton } from "../components/ui/Skeletons";
 import { TAB_BAR_HEIGHT } from "../components/ui/Toast";
 import { PickerPill } from "../components/settings/LanguagePicker";
 import { PosterGrid } from "../components/media/PosterGrid";
+import { X } from "lucide-react-native";
 
 type Source = "all" | "server" | "online";
 type Kind = "movie" | "series";
@@ -255,7 +256,7 @@ export function DiscoverScreen() {
       <View style={[s.filters, { paddingHorizontal: pagePad }]}>
         {hasServer && hasAddons ? (
           <SegmentedControl<Source>
-            label={tr("discover")}
+            label={tr("filterSource")}
             value={source}
             options={[
               { value: "all", label: tr("sourceAll") },
@@ -266,7 +267,7 @@ export function DiscoverScreen() {
           />
         ) : null}
         <SegmentedControl<Kind>
-          label={tr("discover")}
+          label={tr("filterType")}
           value={kind}
           options={[
             { value: "movie", label: tr("movies") },
@@ -279,6 +280,20 @@ export function DiscoverScreen() {
         />
         <PickerPill label={tr("year")} value={year == null ? tr("anyYear") : String(year)} onPress={() => setSheet("year")} />
         {useServer ? <PickerPill label={tr("sortBy")} value={sortLabel[sort]} onPress={() => setSheet("sort")} /> : null}
+        {genre != null || year != null || sort !== "popular" ? (
+          <Pill
+            variant="ghost"
+            size="sm"
+            pill
+            icon={X}
+            label={tr("clearFilters")}
+            onPress={() => {
+              setGenre(null);
+              setYear(null);
+              setSort("popular");
+            }}
+          />
+        ) : null}
       </View>
 
       {genres.length ? (

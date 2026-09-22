@@ -7,7 +7,7 @@ import { text } from "../../theme/typography";
 export type TextFieldProps = Omit<TextInputProps, "style"> & {
   /** Small uppercase label above the field (desktop 11 px / tracking .08em). */
   label?: string;
-  /** Message under the field in the accent colour. */
+  /** Message under the field in the error colour. */
   error?: string | null;
   /** Neutral hint under the field. */
   hint?: string | null;
@@ -79,6 +79,6 @@ const useStyles = makeStyles((t) => ({
   },
   fieldOn: { borderColor: t.colors.accent },
   input: { flex: 1, paddingVertical: 0, minWidth: 0 },
-  error: { ...text(13), color: t.colors.accent, marginTop: 8 },
+  error: { ...text(13), color: t.colors.danger, marginTop: 8 },
   hint: { ...text(12), color: t.colors.dim, marginTop: 8 },
 }));

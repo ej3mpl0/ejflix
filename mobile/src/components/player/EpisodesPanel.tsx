@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, ScrollView, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { Check } from "lucide-react-native";
-import type { Movie } from "../../lib/types";
+import type { AddonMetaFull, Movie, ResumeEntry } from "../../lib/types";
+import { sortedVideos, videoToMovie } from "../../lib/addons";
 import { api } from "../../lib/api";
 import { episodeCode, formatRuntime } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
@@ -42,12 +43,59 @@ export function EpisodesPanel({
   const s = useStyles();
   const t = useTheme();
   const { t: tr } = useI18n();
-  const seriesId = movie.kind === "Episode" ? movie.seriesId : null;
-  const [seasons, setSeasons] = useState<Movie[]>([]);
-  const [seasonId, setSeasonId] = useState<string | null>(movie.seasonId);
+  /** Addon series: the episode list comes from the addon metadata instead of Jellyfin. */
+  const online = movie.kind === "Episode" && movie.external?.type === "series" ? movie.external : null;
+  const seriesId = movie.kind === "Episode" && !online ? movie.seriesId : null;
+  const listed = Boolean(seriesId || online);
+  const [seasons, setSeasons] = useState<Array<{ id: string; name: string }>>([]);
+  const [seasonId, setSeasonId] = useState<string | null>(online ? String(online.season ?? 0) : movie.seasonId);
   const [episodes, setEpisodes] = useState<Movie[] | null>(null);
+  const [onlineMeta, setOnlineMeta] = useState<AddonMetaFull | null>(null);
+  const [progress, setProgress] = useState<ResumeEntry[]>([]);
   const [error, setError] = useState("");
   const listRef = useRef<FlatList<Movie>>(null);
+
+  useEffect(() => {
+    if (!online || !visible || onlineMeta) return;
+    let alive = true;
+    api
+      .addonMeta("series", online.metaId)
+      .then((meta) => {
+        if (!alive) return;
+        const numbers = [...new Set(sortedVideos(meta.videos).map((v) => v.season ?? 0))];
+        setSeasons(numbers.map((n) => ({ id: String(n), name: n === 0 ? tr("specials") : tr("seasonNumber", { n }) })));
+        setOnlineMeta(meta);
+      })
+      .catch((err) => {
+        if (alive) setError(err instanceof Error ? err.message : String(err));
+      });
+    api
+      .addonProgressList()
+      .then((list) => {
+        if (alive) setProgress(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online?.metaId, visible]);
+
+  useEffect(() => {
+    if (!onlineMeta || seasonId == null) return;
+    const prefer = online?.prefer;
+    setEpisodes(
+      sortedVideos(onlineMeta.videos)
+        .filter((v) => String(v.season ?? 0) === seasonId)
+        .map((v) => {
+          const item = videoToMovie(onlineMeta, v);
+          const entry = progress.find((p) => p.key === v.id);
+          const pct = entry && entry.durationSeconds > 0 ? (entry.positionSeconds / entry.durationSeconds) * 100 : 0;
+          return { ...item, external: item.external ? { ...item.external, prefer } : item.external, playedPercentage: Math.min(100, pct), played: pct >= 95 };
+        }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlineMeta, seasonId, progress]);
 
   useEffect(() => {
     if (!seriesId || !visible) return;
@@ -56,7 +104,7 @@ export function EpisodesPanel({
       .getSeasons(seriesId)
       .then((list) => {
         if (!alive) return;
-        setSeasons(list);
+        setSeasons(list.map((season) => ({ id: season.id, name: season.name })));
         setSeasonId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((err) => {
@@ -96,7 +144,7 @@ export function EpisodesPanel({
       title={movie.seriesName ?? movie.name}
       contentStyle={s.content}
     >
-      <Text style={s.kicker}>{seriesId ? tr("episodes") : tr("versions")}</Text>
+      <Text style={s.kicker}>{listed ? tr("episodes") : tr("versions")}</Text>
 
       {movie.mediaSources.length > 1 ? (
         <View style={s.section}>
@@ -116,7 +164,7 @@ export function EpisodesPanel({
         </View>
       ) : null}
 
-      {seriesId ? (
+      {listed ? (
         <>
           {seasons.length > 1 ? (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={[s.chips, s.seasons]}>
@@ -126,6 +174,7 @@ export function EpisodesPanel({
             </ScrollView>
           ) : null}
           {error ? <Text style={s.error}>{error}</Text> : null}
+          {episodes && !episodes.length && !error ? <Text style={s.error}>{tr("noEpisodes")}</Text> : null}
           {episodes == null && !error ? (
             <View style={s.skeleton}>
               <EpisodeListSkeleton count={6} />

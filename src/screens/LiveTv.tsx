@@ -11,6 +11,8 @@ import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { Select } from "../components/Select";
 import { useEpgNow } from "../hooks/useEpgNow";
+import { EpgGuide } from "../components/EpgGuide";
+import { SegmentedControl } from "../components/settings/SegmentedControl";
 
 const PAGE = 120;
 
@@ -45,6 +47,8 @@ export function LiveTv({
   const [groups, setGroups] = useState<ChannelGroup[]>([]);
   const [groupFilter, setGroupFilter] = useState("");
   const [selection, setSelection] = useState<Selection>({ type: "all" });
+  /** Channel tiles or the programme guide. */
+  const [layout, setLayout] = useState<"grid" | "guide">("grid");
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Channel[]>([]);
@@ -223,6 +227,15 @@ export function LiveTv({
               </button>
             ) : null}
           </label>
+          <SegmentedControl
+            label={t("guideLayout")}
+            value={layout}
+            onChange={setLayout}
+            options={[
+              { value: "grid", label: t("guideChannels") },
+              { value: "guide", label: t("guideTitle") },
+            ]}
+          />
           {enabled.length > 1 ? (
             <Select
               label={t("iptvSource")}
@@ -315,6 +328,17 @@ export function LiveTv({
                 </div>
               ))}
             </div>
+          ) : items.length && layout === "guide" ? (
+            <>
+              <EpgGuide channels={items} onPlay={play} />
+              {items.length < total ? (
+                <LoadMoreButton
+                  loading={loadingMore}
+                  onLoad={() => void loadChannels(false)}
+                  remaining={total - items.length}
+                />
+              ) : null}
+            </>
           ) : items.length ? (
             <>
               <div className={grid}>

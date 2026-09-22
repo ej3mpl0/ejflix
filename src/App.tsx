@@ -119,11 +119,12 @@ function AppInner() {
 
   const dismissToast = (id: number) => setToasts((list) => list.filter((item) => item.id !== id));
 
-  const toast = (message: string) => {
+  const toast = (message: string, action?: { label: string; run: () => void }) => {
     toastSeq.current += 1;
     const id = toastSeq.current;
-    setToasts((list) => [...list, { id, message }]);
-    window.setTimeout(() => dismissToast(id), 3200);
+    setToasts((list) => [...list, { id, message, action }]);
+    // A toast with an action stays long enough to reach it.
+    window.setTimeout(() => dismissToast(id), action ? 7000 : 3200);
   };
 
   const stopPlaying = () => {

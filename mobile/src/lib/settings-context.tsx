@@ -30,6 +30,7 @@ function mergePatch(base: Settings, patch: SettingsPatch): Settings {
     addons: { ...base.addons, ...(patch.addons ?? {}) },
     discord: { ...base.discord, ...(patch.discord ?? {}) },
     iptv: { ...base.iptv, ...(patch.iptv ?? {}) },
+    onboarding: { ...base.onboarding, ...(patch.onboarding ?? {}) },
   };
 }
 

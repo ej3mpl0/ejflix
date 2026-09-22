@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useSeeAll } from "../lib/see-all-context";
 import type { Movie } from "../lib/types";
 import { PosterCard } from "./PosterCard";
 import { ContinueCard } from "./ContinueCard";
@@ -12,14 +13,18 @@ export function PosterRow({
   variant = "poster",
   onOpen,
   onPlay,
+  loadMore,
 }: {
   title: string;
   items: Movie[];
   variant?: "poster" | "continue" | "nextUp";
+  /** Next page of the row's source, for its "See all" grid. */
+  loadMore?: (loaded: number) => Promise<Movie[]>;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
   const { t } = useI18n();
+  const openSeeAll = useSeeAll();
   const scroller = useRef<HTMLDivElement>(null);
   const [hover, setHover] = useState(false);
   const [edges, setEdges] = useState({ start: true, end: false });
@@ -72,7 +77,19 @@ export function PosterRow({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <h2 className="mb-1 px-page text-[18px] font-semibold text-text">{title}</h2>
+      <div className="mb-1 flex items-baseline justify-between gap-4 px-page">
+        <h2 className="min-w-0 truncate text-[18px] font-semibold text-text">{title}</h2>
+        {openSeeAll && variant === "poster" && (items.length >= 8 || loadMore) ? (
+          <button
+            type="button"
+            onClick={() => openSeeAll({ title, items, loadMore })}
+            className="inline-flex shrink-0 items-center gap-0.5 text-[13px] font-semibold text-muted transition-colors hover:text-text"
+          >
+            {t("seeAll")}
+            <ChevronRight size={15} />
+          </button>
+        ) : null}
+      </div>
       <div className="relative">
         <div
           ref={scroller}

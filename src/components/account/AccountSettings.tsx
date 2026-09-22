@@ -17,7 +17,7 @@ const danger =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold text-danger hover:bg-danger/15 disabled:opacity-60";
 
 /** Settings › Account: the ejFlix account of the active profile. */
-export function AccountSettings({ onToast }: { onToast: (message: string) => void }) {
+export function AccountSettings({ onToast }: { onToast: (message: string, action?: { label: string; run: () => void }) => void }) {
   const { t, locale } = useI18n();
   const [status, setStatus] = useState<AccountStatus | null>(null);
   const [loadError, setLoadError] = useState("");

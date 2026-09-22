@@ -211,7 +211,7 @@ const useStyles = makeStyles((t) => ({
   pinHint: { ...text(12), color: t.colors.dim, marginTop: 2 },
   pinField: { marginTop: 12, flexDirection: "row", alignItems: "center", gap: 12 },
   changePin: { ...text(13), color: t.colors.dim },
-  error: { ...text(13), color: t.colors.accent, marginTop: 16 },
+  error: { ...text(13), color: t.colors.danger, marginTop: 16 },
   actions: { marginTop: 24, flexDirection: "row", flexWrap: "wrap", gap: 12 },
   deleteRow: { marginTop: 20, flexDirection: "row", alignItems: "center", gap: 12 },
   deleteText: { ...text(13), color: t.colors.muted, flex: 1 },

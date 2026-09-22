@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { useI18n } from "../lib/locale-context";
 import type { MessageKey } from "../lib/i18n";
+import { useSettings } from "../lib/settings-context";
 
 const VOD: Array<[string[], MessageKey]> = [
   [["Space", "K"], "keyPlayPause"],
@@ -10,6 +11,8 @@ const VOD: Array<[string[], MessageKey]> = [
   [["M"], "keyMute"],
   [["F"], "keyFullscreen"],
   [["V"], "keySubtitles"],
+  [["Z", "X"], "keySubDelay"],
+  [["I"], "keyStats"],
   [["<", ">"], "keySpeed"],
   [["0–9"], "keyJump"],
   [["S", "Enter"], "keySkip"],
@@ -33,6 +36,7 @@ const LIVE: Array<[string[], MessageKey]> = [
 /** "?" overlay in the player: every keyboard shortcut of the current mode. */
 export function ShortcutsHelp({ live, onClose }: { live: boolean; onClose: () => void }) {
   const { t } = useI18n();
+  const seekStep = useSettings().settings.playback.seekStep;
   const rows = live ? LIVE : VOD;
   return (
     <div
@@ -75,7 +79,7 @@ export function ShortcutsHelp({ live, onClose }: { live: boolean; onClose: () =>
                   </kbd>
                 ))}
               </dt>
-              <dd className="text-muted">{t(label)}</dd>
+              <dd className="text-muted">{t(label, { n: seekStep })}</dd>
             </div>
           ))}
         </dl>

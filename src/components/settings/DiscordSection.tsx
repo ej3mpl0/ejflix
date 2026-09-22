@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Film } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Film, RotateCcw } from "lucide-react";
 import type { DiscordHeader, DiscordStatus } from "../../lib/types";
 import { SegmentedControl } from "./SegmentedControl";
 import { api } from "../../lib/api";
@@ -74,6 +74,34 @@ export function DiscordSection() {
     prefs.header === "name" ? "ejFlix" : prefs.header === "state" ? previewState || previewDetails : previewDetails;
 
   const commit = (patch: Partial<typeof prefs>) => void update({ discord: patch });
+  const detailsRef = useRef<HTMLInputElement>(null);
+  const stateRef = useRef<HTMLInputElement>(null);
+  /** Field the variable chips write into: the last one focused. */
+  const lastField = useRef<"details" | "state">("details");
+
+  /** Puts a variable at the caret of the last focused template and saves it. */
+  const insert = (variable: string) => {
+    const which = lastField.current;
+    const input = which === "details" ? detailsRef.current : stateRef.current;
+    const value = which === "details" ? details : state;
+    const start = input?.selectionStart ?? value.length;
+    const end = input?.selectionEnd ?? value.length;
+    const next = (value.slice(0, start) + variable + value.slice(end)).slice(0, 128);
+    if (which === "details") setDetails(next);
+    else setState(next);
+    commit({ [which]: next });
+    requestAnimationFrame(() => {
+      input?.focus();
+      const caret = Math.min(next.length, start + variable.length);
+      input?.setSelectionRange(caret, caret);
+    });
+  };
+
+  const resetTemplates = () => {
+    setDetails("{title}");
+    setState("{episode}");
+    commit({ details: "{title}", state: "{episode}" });
+  };
 
   const statusLine = !prefs.enabled
     ? null
@@ -129,8 +157,10 @@ export function DiscordSection() {
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-medium">{t("discordDetails")}</span>
               <input
+                ref={detailsRef}
                 value={details}
                 maxLength={128}
+                onFocus={() => (lastField.current = "details")}
                 onChange={(e) => setDetails(e.target.value)}
                 onBlur={() => details !== prefs.details && commit({ details })}
                 className={field}
@@ -139,19 +169,38 @@ export function DiscordSection() {
             <label className="block">
               <span className="mb-1.5 block text-[13px] font-medium">{t("discordState")}</span>
               <input
+                ref={stateRef}
                 value={state}
                 maxLength={128}
+                onFocus={() => (lastField.current = "state")}
                 onChange={(e) => setState(e.target.value)}
                 onBlur={() => state !== prefs.state && commit({ state })}
                 className={field}
               />
             </label>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {VARIABLES.map((v) => (
-                <span key={v} className="rounded-md bg-white/6 px-2 py-0.5 font-mono text-[12px] text-muted">
+                <button
+                  key={v}
+                  type="button"
+                  // Keep the caret in the field while clicking a chip.
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => insert(v)}
+                  title={t("discordInsertVar")}
+                  className="rounded-md bg-white/6 px-2 py-0.5 font-mono text-[12px] text-muted hover:bg-white/12 hover:text-text"
+                >
                   {v}
-                </span>
+                </button>
               ))}
+              <button
+                type="button"
+                onClick={resetTemplates}
+                disabled={details === "{title}" && state === "{episode}"}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[12px] font-medium text-dim hover:bg-white/8 hover:text-text disabled:opacity-40"
+              >
+                <RotateCcw size={12} />
+                {t("discordResetTemplates")}
+              </button>
             </div>
           </div>
 

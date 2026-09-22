@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FlatList, ScrollView, Text, View } from "react-native";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { CircleAlert, LayoutGrid, ListFilter, RefreshCw, Search, Settings as SettingsIcon, Tv, X } from "lucide-react-native";
+import { CalendarClock, CircleAlert, LayoutGrid, ListFilter, RefreshCw, Search, Settings as SettingsIcon, Tv, X } from "lucide-react-native";
 import type { Channel, ChannelGroup, EpgNow, IptvStatus } from "../lib/types";
 import { api } from "../lib/api";
 import { channelToMovie } from "../lib/iptv";
@@ -21,7 +21,7 @@ import { Shimmer } from "../components/ui/Shimmer";
 import { Spinner } from "../components/ui/Spinner";
 import { TextField } from "../components/ui/TextField";
 import { TAB_BAR_HEIGHT } from "../components/ui/Toast";
-import { ChannelCard, GroupsSheet, LiveSidebar, SIDEBAR_WIDTH, type Selection } from "../components/live";
+import { ChannelCard, EpgGuide, GroupsSheet, LiveSidebar, SIDEBAR_WIDTH, type Selection } from "../components/live";
 
 const PAGE = 120;
 const EPG_REFRESH_MS = 60_000;
@@ -53,6 +53,8 @@ export function LiveTvScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const { wide, sizeClass, pagePad, rail, insets } = layout;
 
+  /** Channel tiles or the programme guide. */
+  const [layoutMode, setLayoutMode] = useState<"grid" | "guide">("grid");
   const [status, setStatus] = useState<IptvStatus | null>(null);
   const [sourceId, setSourceId] = useState("");
   const [groups, setGroups] = useState<ChannelGroup[]>([]);
@@ -299,6 +301,13 @@ export function LiveTvScreen() {
 
   const controls = (
     <>
+      <Pill
+        pill
+        icon={layoutMode === "guide" ? LayoutGrid : CalendarClock}
+        label={layoutMode === "guide" ? tr("guideChannels") : tr("guideTitle")}
+        accessibilityLabel={tr("guideLayout")}
+        onPress={() => setLayoutMode((mode) => (mode === "guide" ? "grid" : "guide"))}
+      />
       {enabled.length > 1 ? (
         <Pill pill icon={ListFilter} label={short(sourceLabel)} accessibilityLabel={`${tr("iptvSource")}: ${sourceLabel}`} onPress={() => setSheet("source")} />
       ) : null}
@@ -446,7 +455,15 @@ export function LiveTvScreen() {
     );
   }
 
-  const grid = (
+  const grid = layoutMode === "guide" ? (
+    <EpgGuide
+      channels={items}
+      onPlay={playChannel}
+      header={wide ? undefined : header}
+      footer={footer}
+      contentPadding={{ horizontal: gridPad, bottom: bottomPad }}
+    />
+  ) : (
     <FlatList
       key={`live-${cols}`}
       data={items}
@@ -520,9 +537,9 @@ const useStyles = makeStyles((t) => ({
     borderRadius: t.radii.btn,
     backgroundColor: t.white(0.06),
   },
-  bannerError: { backgroundColor: t.colors.accentSoft },
+  bannerError: { backgroundColor: "rgba(255, 107, 107, 0.12)" },
   bannerText: { ...text(13, "regular", { lineHeight: 18 }), color: t.colors.muted, flex: 1 },
-  bannerTextError: { color: t.colors.accent },
+  bannerTextError: { color: t.colors.danger },
   panes: { flex: 1, flexDirection: "row" },
   gridPane: { flex: 1 },
   skeleton: { flexDirection: "row", flexWrap: "wrap" },

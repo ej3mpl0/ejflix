@@ -5,7 +5,7 @@ import { makeStyles } from "../../theme/ThemeProvider";
 import { text } from "../../theme/typography";
 import { Sheet } from "../ui/Sheet";
 
-export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2] as const;
+export const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const;
 
 export function formatSpeed(speed: number): string {
   return `${Number(speed.toFixed(2))}x`;

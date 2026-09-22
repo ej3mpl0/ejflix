@@ -4,8 +4,17 @@ import { PREVIEW_WIDTH } from "../lib/trickplay";
 import { TimelinePreview } from "./TimelinePreview";
 import { useI18n } from "../lib/locale-context";
 import { formatClock } from "../lib/format";
+import type { MessageKey } from "../lib/i18n";
 
 const SCRUB_THROTTLE_MS = 200;
+
+function segmentLabel(kind: string): MessageKey {
+  if (kind === "intro") return "segIntro";
+  if (kind === "recap") return "segRecap";
+  if (kind === "outro") return "segOutro";
+  if (kind === "preview") return "segPreview";
+  return "segCommercial";
+}
 const SCRUB_MIN_DELTA = 1;
 const PENDING_MS = 1200;
 const PENDING_TOLERANCE = 1.5;
@@ -91,6 +100,11 @@ export function Timeline({
   const progress = pct(shown);
   const buffered = interactive && cacheTime > shown ? pct(cacheTime) : 0;
   const previewSeconds = drag ?? hover?.seconds ?? null;
+  // The intro / recap / credits band under the pointer, named above the preview.
+  const hoverSegment =
+    previewSeconds == null
+      ? null
+      : (segments.find((s) => previewSeconds >= s.startSeconds && previewSeconds < s.endSeconds) ?? null);
   const previewLeft = hover
     ? Math.min(hover.width - PREVIEW_WIDTH / 2 - 4, Math.max(PREVIEW_WIDTH / 2 + 4, hover.x))
     : 0;
@@ -185,6 +199,13 @@ export function Timeline({
           className="pointer-events-none absolute bottom-[calc(100%+14px)] -translate-x-1/2"
           style={{ left: previewLeft }}
         >
+          {hoverSegment ? (
+            <p className="mb-1.5 text-center">
+              <span className="rounded-full bg-black/75 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white uppercase">
+                {t(segmentLabel(hoverSegment.kind))}
+              </span>
+            </p>
+          ) : null}
           <TimelinePreview key={movie.id} movie={movie} seconds={previewSeconds} />
         </div>
       ) : null}

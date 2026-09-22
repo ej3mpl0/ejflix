@@ -140,6 +140,8 @@ export type ThemeColors = {
   star: string;
   success: string;
   warning: string;
+  /** Errors: one colour whatever the accent (a white or green accent must not read as "ok"). */
+  danger: string;
   brand: BrandGradient;
 };
 
@@ -201,6 +203,7 @@ export function buildTheme(prefs: ThemePrefs): Theme {
     star: "#ffd45c",
     success: "#66bb6a",
     warning: "#ffc857",
+    danger: "#ff6b6b",
     brand: palette.brand,
   };
   const theme: Theme = {

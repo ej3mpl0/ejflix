@@ -14,6 +14,7 @@ import { Pill } from "../ui/Pill";
 import { TextField } from "../ui/TextField";
 import { Toggle } from "../ui/Toggle";
 import { SettingsBlock, SettingsRow, SettingsSection } from "./SettingsSection";
+import { AddonImport } from "./AddonImport";
 
 /** Settings › Addons: Stremio addon manifests (catalogs + online sources) and Cinemeta. */
 export function AddonsSection() {
@@ -57,9 +58,14 @@ export function AddonsSection() {
     }
   };
 
+  /** Removes at once and offers Undo, which adds the manifest back. */
   const remove = async (addon: AddonInfo) => {
     try {
       await api.addonRemove(addon.url);
+      toast(tr("addonRemoved", { name: addon.name }), {
+        label: tr("undo"),
+        run: () => void api.addonAdd(addon.url).catch((err) => toast(err instanceof Error ? err.message : String(err))),
+      });
     } catch (err) {
       toast(err instanceof Error ? err.message : String(err));
     }
@@ -116,12 +122,20 @@ export function AddonsSection() {
                   {addon.resources.includes("stream") ? ` · ${tr("streams")}` : ""}
                 </Text>
               </View>
-              <IconButton icon={Trash2} label={tr("removeAddon")} size={18} onPress={() => void remove(addon)} />
+              {/* Built-ins (Cinemeta) are switched below, never removed. */}
+              {addon.builtin ? null : (
+                <IconButton icon={Trash2} label={`${tr("removeAddon")}: ${addon.name}`} size={18} onPress={() => void remove(addon)} />
+              )}
             </View>
           ))
         ) : (
           <Text style={s.note}>{tr("noAddons")}</Text>
         )}
+      </SettingsSection>
+      <SettingsSection title={tr("importAddons")} description={tr("importAddonsHint")}>
+        <SettingsBlock>
+          <AddonImport />
+        </SettingsBlock>
       </SettingsSection>
       <SettingsSection title="Cinemeta">
         <SettingsRow label={tr("cinemetaRow")} hint={tr("cinemetaHint")}>
