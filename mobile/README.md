@@ -48,6 +48,7 @@ No hace falta un Mac ni una cuenta de desarrollador de pago: el workflow `.githu
 
 - Al subir una etiqueta `v*` el IPA se adjunta a esa release como `ejFlix-<version>-ios.ipa`. A mano: `gh workflow run ios.yml` y se descarga del artifact `ejflix-ios-ipa`.
 - El job `simulator` arranca la app en un iPhone con iOS 26 y guarda capturas y el log en el artifact `ejflix-ios-simulator`.
+- **Source de AltStore/SideStore**: cada release lleva `altstore-source.json`, generado por `scripts/altstore_source.py` a partir del propio IPA (versión, build, tamaño, permisos). Se añade en AltStore › Sources › + con `https://github.com/ej3mpl0/ejflix/releases/latest/download/altstore-source.json`; las versiones nuevas aparecen como actualización.
 - Instalación: **AltStore**, **SideStore** o **Sideloadly** firman el IPA con tu Apple ID gratuito. Con un ID gratuito la firma caduca a los 7 días (AltStore/SideStore la renuevan solos) y hay un límite de 3 apps instaladas así.
 - La primera vez iOS pide permiso de **red local** para llegar al servidor Jellyfin de casa: hay que aceptarlo.
 - Actualizaciones: la app avisa cuando la última release trae un `.ipa` y abre GitHub; se instala igual que la primera vez.
