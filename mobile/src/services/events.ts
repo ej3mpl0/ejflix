@@ -1,0 +1,68 @@
+import type { Movie, PlayerState, Settings, UpdateProgress } from "../lib/types";
+
+/** What went wrong, so the UI can offer the right way out. */
+export type PlayerErrorCode = "decoder" | "network" | "unknown";
+
+export type PlayerError = {
+  /** Ready-made sentence, used when the UI has nothing better to say. */
+  message: string;
+  /** Raw engine text, shown small under the message. */
+  detail: string;
+  code: PlayerErrorCode;
+  /** Stream URL when it can be handed to another app. */
+  url: string | null;
+};
+
+/** Events that replaced the Tauri `listen()` channels of the desktop app. */
+export type EventMap = {
+  "player://state": PlayerState;
+  "player://open": Movie;
+  "player://next": Movie;
+  "player://exit": void;
+  "player://close": void;
+  "player://hotkey": string;
+  /** Engine failure; the UI turns this into a card with a way out. */
+  "player://error": PlayerError;
+  "iptv://changed": void;
+  "settings://changed": Settings;
+  "update://progress": UpdateProgress;
+};
+
+type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;
+type AnyHandler = (payload: unknown) => void;
+
+const handlers = new Map<keyof EventMap, Set<AnyHandler>>();
+
+export function on<K extends keyof EventMap>(name: K, handler: Handler<K>): () => void {
+  let set = handlers.get(name);
+  if (!set) {
+    set = new Set();
+    handlers.set(name, set);
+  }
+  const wrapped = handler as unknown as AnyHandler;
+  set.add(wrapped);
+  return () => {
+    set?.delete(wrapped);
+  };
+}
+
+export function emit<K extends keyof EventMap>(
+  name: K,
+  ...args: EventMap[K] extends void ? [] : [EventMap[K]]
+): void {
+  const set = handlers.get(name);
+  if (!set) return;
+  const payload = args[0] as unknown;
+  for (const handler of Array.from(set)) {
+    try {
+      handler(payload);
+    } catch (error) {
+      console.warn(`[events] handler for ${name} threw`, error);
+    }
+  }
+}
+
+/** Tauri-style subscription: resolves to the unlisten function. */
+export function listen<K extends keyof EventMap>(name: K, handler: Handler<K>): Promise<() => void> {
+  return Promise.resolve(on(name, handler));
+}

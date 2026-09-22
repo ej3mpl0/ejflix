@@ -1,0 +1,151 @@
+## Builds the iOS app (mobile/) on a macOS runner as an UNSIGNED .ipa, meant to be
+## sideloaded with AltStore, SideStore or Sideloadly (they sign it with the user's own
+## Apple ID). On a tag the .ipa is attached to that release; run by hand
+## (workflow_dispatch) it is only kept as a workflow artifact.
+##
+## A second job builds for the simulator, launches the app on an iOS 26 iPhone and
+## keeps a screenshot plus the app log, so a build can be looked at without a Mac.
+
+name: iOS
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    working-directory: mobile
+
+jobs:
+  ipa:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      # Liquid Glass needs the iOS 26 SDK, i.e. Xcode 26 or newer.
+      - name: Xcode
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | awk '{ split($2, v, "."); if (v[1] < 26) { print "Xcode 26+ required"; exit 1 } }'
+
+      - run: npm ci
+
+      - name: Generate the native project
+        run: npx expo prebuild --platform ios --clean
+
+      - name: Archive without signing
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -workspace ios/ejFlix.xcworkspace \
+            -scheme ejFlix \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath "$RUNNER_TEMP/ejFlix.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tail -n 200
+
+      - name: Package the .ipa
+        id: ipa
+        run: |
+          version=$(node -p "require('./app.json').expo.version")
+          app="$RUNNER_TEMP/ejFlix.xcarchive/Products/Applications/ejFlix.app"
+          test -d "$app" || { echo "no .app in the archive"; exit 1; }
+          rm -rf "$RUNNER_TEMP/Payload" && mkdir "$RUNNER_TEMP/Payload"
+          cp -R "$app" "$RUNNER_TEMP/Payload/"
+          name="ejFlix-$version-ios.ipa"
+          (cd "$RUNNER_TEMP" && zip -qry "$name" Payload)
+          ls -lh "$RUNNER_TEMP/$name"
+          echo "path=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
+
+      - name: Attach it to the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          # The Windows workflow may be creating the same release right now: a failed
+          # create is fine as long as the release exists for the upload.
+          gh release view "$tag" > /dev/null 2>&1 || \
+            gh release create "$tag" --title "ejFlix ${tag#v}" --generate-notes || true
+          gh release upload "$tag" "${{ steps.ipa.outputs.path }}" --clobber
+
+      - name: Keep the .ipa as an artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ejflix-ios-ipa
+          path: ${{ steps.ipa.outputs.path }}
+
+  simulator:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - run: npm ci
+
+      - name: Generate the native project
+        run: npx expo prebuild --platform ios --clean
+
+      # Release: the JS bundle is embedded, so the app starts without Metro.
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -workspace ios/ejFlix.xcworkspace \
+            -scheme ejFlix \
+            -configuration Release \
+            -destination "generic/platform=iOS Simulator" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            CODE_SIGNING_ALLOWED=NO \
+            | tail -n 200
+
+      - name: Launch and take screenshots
+        run: |
+          app="$RUNNER_TEMP/dd/Build/Products/Release-iphonesimulator/ejFlix.app"
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)["devices"]
+          runtimes = sorted((r for r in data if "iOS-26" in r or "iOS-27" in r), reverse=True)
+          for r in runtimes:
+              for d in data[r]:
+                  if d["name"].startswith("iPhone") and "Pro" in d["name"]:
+                      print(d["udid"]); sys.exit()
+          ')
+          test -n "$udid" || { xcrun simctl list devices available; echo "no iOS 26 iPhone"; exit 1; }
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          xcrun simctl ui "$udid" appearance dark
+          xcrun simctl install "$udid" "$app"
+          mkdir -p "$RUNNER_TEMP/shots"
+          xcrun simctl launch "$udid" com.ejflix.ios
+          sleep 25
+          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/01-launch.png"
+          sleep 10
+          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/02-settled.png"
+          xcrun simctl spawn "$udid" log show --last 2m --style compact \
+            --predicate 'process == "ejFlix"' > "$RUNNER_TEMP/shots/app.log" || true
+          # Still running = it did not crash on start.
+          xcrun simctl spawn "$udid" launchctl list | grep -q com.ejflix.ios
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ejflix-ios-simulator
+          path: ${{ runner.temp }}/shots

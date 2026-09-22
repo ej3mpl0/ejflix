@@ -1,0 +1,113 @@
+{
+  "expo": {
+    "name": "ejFlix",
+    "slug": "ejflix",
+    "version": "0.4.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "scheme": "ejflix",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0d0d0d",
+    "ios": {
+      "bundleIdentifier": "com.ejflix.ios",
+      "buildNumber": "40",
+      "supportsTablet": true,
+      "requireFullScreen": false,
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true,
+          "NSAllowsLocalNetworking": true
+        },
+        "NSLocalNetworkUsageDescription": "ejFlix se conecta a tus servidores multimedia de la red local.",
+        "LSApplicationQueriesSchemes": [
+          "vlc-x-callback",
+          "vlc",
+          "infuse",
+          "outplayer"
+        ],
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "CFBundleDisplayName": "ejFlix"
+      }
+    },
+    "android": {
+      "package": "com.ejflix.android",
+      "versionCode": 40,
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "backgroundColor": "#ffffff",
+        "foregroundImage": "./assets/adaptive-foreground.png",
+        "monochromeImage": "./assets/adaptive-foreground.png"
+      },
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.WAKE_LOCK"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": [
+      [
+        "expo-status-bar",
+        {
+          "style": "light",
+          "translucent": true,
+          "backgroundColor": "#00000000"
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": false,
+          "supportsPictureInPicture": true
+        }
+      ],
+      "expo-image",
+      [
+        "expo-font",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf",
+            "./node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf",
+            "./node_modules/@expo-google-fonts/inter/700Bold/Inter_700Bold.ttf",
+            "./node_modules/@expo-google-fonts/inter/800ExtraBold/Inter_800ExtraBold.ttf",
+            "./node_modules/@expo-google-fonts/bebas-neue/400Regular/BebasNeue_400Regular.ttf"
+          ]
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 160,
+          "resizeMode": "contain",
+          "backgroundColor": "#0d0d0d"
+        }
+      ],
+      "expo-secure-store",
+      "expo-sqlite",
+      "expo-localization",
+      "expo-screen-orientation",
+      "expo-document-picker",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "ejFlix usa tus fotos para la imagen de perfil."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "./plugins/withGradleProps.js",
+      "./plugins/withReleaseSigning.js"
+    ]
+  }
+}
