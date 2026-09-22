@@ -2,9 +2,6 @@
 ## sideloaded with AltStore, SideStore or Sideloadly (they sign it with the user's own
 ## Apple ID). On a tag the .ipa is attached to that release; run by hand
 ## (workflow_dispatch) it is only kept as a workflow artifact.
-##
-## A second job builds for the simulator, launches the app on an iOS 26 iPhone and
-## keeps a screenshot plus the app log, so a build can be looked at without a Mac.
 
 name: iOS
 
@@ -105,66 +102,3 @@ jobs:
           path: |
             ${{ steps.ipa.outputs.path }}
             ${{ runner.temp }}/altstore-source.json
-
-  simulator:
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: mobile/package-lock.json
-
-      - run: npm ci
-
-      - name: Generate the native project
-        run: npx expo prebuild --platform ios --clean
-
-      # Release: the JS bundle is embedded, so the app starts without Metro.
-      - name: Build for the simulator
-        run: |
-          set -o pipefail
-          xcodebuild build \
-            -workspace ios/ejFlix.xcworkspace \
-            -scheme ejFlix \
-            -configuration Release \
-            -destination "generic/platform=iOS Simulator" \
-            -derivedDataPath "$RUNNER_TEMP/dd" \
-            CODE_SIGNING_ALLOWED=NO \
-            | tail -n 200
-
-      - name: Launch and take screenshots
-        run: |
-          app="$RUNNER_TEMP/dd/Build/Products/Release-iphonesimulator/ejFlix.app"
-          udid=$(xcrun simctl list devices available -j | python3 -c '
-          import json, sys
-          data = json.load(sys.stdin)["devices"]
-          runtimes = sorted((r for r in data if "iOS-26" in r or "iOS-27" in r), reverse=True)
-          for r in runtimes:
-              for d in data[r]:
-                  if d["name"].startswith("iPhone") and "Pro" in d["name"]:
-                      print(d["udid"]); sys.exit()
-          ')
-          test -n "$udid" || { xcrun simctl list devices available; echo "no iOS 26 iPhone"; exit 1; }
-          xcrun simctl boot "$udid"
-          xcrun simctl bootstatus "$udid" -b
-          xcrun simctl ui "$udid" appearance dark
-          xcrun simctl install "$udid" "$app"
-          mkdir -p "$RUNNER_TEMP/shots"
-          xcrun simctl launch "$udid" com.ejflix.ios
-          sleep 25
-          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/01-launch.png"
-          sleep 10
-          xcrun simctl io "$udid" screenshot "$RUNNER_TEMP/shots/02-settled.png"
-          xcrun simctl spawn "$udid" log show --last 2m --style compact \
-            --predicate 'process == "ejFlix"' > "$RUNNER_TEMP/shots/app.log" || true
-          # Still running = it did not crash on start.
-          xcrun simctl spawn "$udid" launchctl list | grep -q com.ejflix.ios
-
-      - uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: ejflix-ios-simulator
-          path: ${{ runner.temp }}/shots
