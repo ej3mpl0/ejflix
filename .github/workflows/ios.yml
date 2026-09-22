@@ -1,7 +1,10 @@
 ## Builds the iOS app (mobile/) on a macOS runner as an UNSIGNED .ipa, meant to be
 ## sideloaded with AltStore, SideStore or Sideloadly (they sign it with the user's own
-## Apple ID). On a tag the .ipa is attached to that release; run by hand
-## (workflow_dispatch) it is only kept as a workflow artifact.
+## Apple ID). On a tag the .ipa and the AltStore source are attached to that release.
+## Run by hand (workflow_dispatch) they are only kept as a workflow artifact, unless
+## `release` names an existing release to attach them to (rebuilding one):
+##
+##   gh workflow run ios.yml -f release=v0.6.4
 
 name: iOS
 
@@ -9,9 +12,17 @@ on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release:
+        description: "Existing release tag to attach the .ipa to (empty = artifact only)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release }}
 
 defaults:
   run:
@@ -66,15 +77,19 @@ jobs:
           echo "path=$RUNNER_TEMP/$name" >> "$GITHUB_OUTPUT"
 
       - name: Attach it to the release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: env.RELEASE_TAG != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          tag="${{ github.ref_name }}"
+          tag="$RELEASE_TAG"
           # The Windows workflow may be creating the same release right now: a failed
           # create is fine as long as the release exists for the upload.
           gh release view "$tag" > /dev/null 2>&1 || \
             gh release create "$tag" --title "ejFlix ${tag#v}" --generate-notes || true
+          # A rebuild with a new version must not leave the previous .ipa next to it.
+          for old in $(gh release view "$tag" --json assets --jq '.assets[].name | select(endswith(".ipa"))'); do
+            [ "$old" = "$(basename "${{ steps.ipa.outputs.path }}")" ] || gh release delete-asset "$tag" "$old" -y
+          done
           gh release upload "$tag" "${{ steps.ipa.outputs.path }}" --clobber
           # AltStore source, always at the same address:
           # https://github.com/ej3mpl0/ejflix/releases/latest/download/altstore-source.json
@@ -88,14 +103,14 @@ jobs:
 
       # By hand: the source is only kept for a look, its download link points at no release.
       - name: Keep the .ipa and the AltStore source as an artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: env.RELEASE_TAG == ''
         run: |
           python3 scripts/altstore_source.py \
             --ipa "${{ steps.ipa.outputs.path }}" --tag "untagged" \
             --entitlements ios/ejFlix/ejFlix.entitlements \
             --out "$RUNNER_TEMP/altstore-source.json"
 
-      - if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+      - if: env.RELEASE_TAG == ''
         uses: actions/upload-artifact@v7
         with:
           name: ejflix-ios-ipa

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ejFlix",
     "slug": "ejflix",
-    "version": "0.4.0",
+    "version": "0.6.4",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "scheme": "ejflix",
@@ -10,7 +10,7 @@
     "backgroundColor": "#0d0d0d",
     "ios": {
       "bundleIdentifier": "com.ejflix.ios",
-      "buildNumber": "40",
+      "buildNumber": "64",
       "supportsTablet": true,
       "requireFullScreen": false,
       "infoPlist": {
@@ -34,7 +34,7 @@
     },
     "android": {
       "package": "com.ejflix.android",
-      "versionCode": 40,
+      "versionCode": 64,
       "allowBackup": false,
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",

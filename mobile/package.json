@@ -1,6 +1,6 @@
 {
   "name": "ejflix-mobile",
-  "version": "0.4.0",
+  "version": "0.6.4",
   "main": "index.ts",
   "dependencies": {
     "@expo-google-fonts/bebas-neue": "^0.4.1",

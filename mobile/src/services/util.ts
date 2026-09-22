@@ -2,7 +2,7 @@ import * as Crypto from "expo-crypto";
 import * as Application from "expo-application";
 
 export const CLIENT_NAME = "ejFlix";
-export const CLIENT_VERSION = Application.nativeApplicationVersion ?? "0.4.0";
+export const CLIENT_VERSION = Application.nativeApplicationVersion ?? "0.6.4";
 
 export function nowMs(): number {
   return Date.now();
