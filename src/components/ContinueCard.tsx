@@ -1,8 +1,9 @@
-import { Play } from "lucide-react";
+import { Check, Play, X } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { episodeCode, formatRuntime, remainingMinutes } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
-import { useItemFlags } from "../lib/userdata-context";
+import { useItemFlags, useUserData } from "../lib/userdata-context";
+import { KebabMenu } from "./KebabMenu";
 
 /** 16:9 card for "Continue watching" and "Next up" (movies and episodes). */
 export function ContinueCard({
@@ -19,6 +20,7 @@ export function ContinueCard({
 }) {
   const { t } = useI18n();
   const flags = useItemFlags(movie);
+  const { setPlayed, removeProgress } = useUserData();
   const progress = flags.playedPercentage || 0;
   const started = flags.playbackPositionTicks > 0 && progress > 0;
   const remaining = remainingMinutes(movie.runtimeTicks, flags.playbackPositionTicks);
@@ -34,7 +36,13 @@ export function ContinueCard({
       <div className="img-outline card-depth relative aspect-video w-full overflow-hidden rounded-poster bg-surface">
         <button type="button" onClick={() => onOpen(movie)} className="absolute inset-0" aria-label={label}>
           {image ? (
-            <img src={image} alt="" loading="lazy" className="h-full w-full object-cover" />
+            <img
+              src={image}
+              alt=""
+              loading="lazy"
+              className="h-full w-full object-cover opacity-0 transition-opacity duration-300"
+              onLoad={(e) => e.currentTarget.classList.remove("opacity-0")}
+            />
           ) : (
             <div className="grid h-full place-items-center px-3 text-center text-sm text-muted">{title}</div>
           )}
@@ -53,6 +61,30 @@ export function ContinueCard({
         >
           <Play size={20} fill="currentColor" />
         </button>
+        {variant === "resume" ? (
+          <div className="absolute top-1.5 right-1.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100">
+            <KebabMenu
+              label={t("moreOptions")}
+              className="bg-black/55 text-white/90 backdrop-blur-sm hover:bg-black/75"
+              actions={[
+                {
+                  id: "remove",
+                  label: t("removeFromContinue"),
+                  icon: <X size={15} />,
+                  onSelect: () => void removeProgress(movie),
+                },
+                {
+                  id: "watched",
+                  label: t("markWatched"),
+                  icon: <Check size={15} />,
+                  // Online progress lives apart from the watched flag: drop it as well.
+                  onSelect: () =>
+                    void setPlayed(movie, true).then(() => (movie.external ? removeProgress(movie) : undefined)),
+                },
+              ]}
+            />
+          </div>
+        ) : null}
         {started ? (
           <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
             <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />

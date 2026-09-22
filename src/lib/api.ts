@@ -7,6 +7,7 @@ import type {
   MfaEnrollment,
   SyncReport,
   AddonInfo,
+  ImportedAddon,
   AddonMeta,
   AddonMetaFull,
   AddonStream,
@@ -95,6 +96,9 @@ export const api = {
   // Stremio addons
   addonsList: () => invoke<AddonInfo[]>("addons_list"),
   addonAdd: (url: string) => invoke<AddonInfo>("addon_add", { url }),
+  /** Addons of a Stremio account (the password goes to Stremio only, never stored). */
+  stremioAddons: (email: string, password: string) =>
+    invoke<ImportedAddon[]>("stremio_addons", { email, password }),
   addonRemove: (url: string) => invoke<void>("addon_remove", { url }),
   addonCatalog: (args: {
     addonUrl: string;

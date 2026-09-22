@@ -14,13 +14,14 @@ import type { Channel, EpgNow, Movie, PlayerState } from "../lib/types";
 import { channelToMovie } from "../lib/iptv";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
-import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
+import { isSeriesEpisode, nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
 import { usePauseInfo } from "../hooks/usePauseInfo";
+import { ShortcutsHelp } from "../components/ShortcutsHelp";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -70,6 +71,10 @@ export function Player({
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
+  /** "?" overlay with the keyboard shortcuts. */
+  const [help, setHelp] = useState(false);
+  /** Subtitle track to bring back when V turns subtitles on again. */
+  const lastSub = useRef<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
   const [ready, setReady] = useState(false);
   const [splash, setSplash] = useState(true);
@@ -486,7 +491,8 @@ export function Player({
   const pauseInfo = usePauseInfo(state.paused, visible);
 
   const escape = () => {
-    if (panel) setPanel(false);
+    if (help) setHelp(false);
+    else if (panel) setPanel(false);
     else if (menu) setMenu(null);
     else if (fullscreen) void toggleFullscreen();
     else onExit();
@@ -556,6 +562,15 @@ export function Player({
     bump();
     if (lockedRef.current) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
+    // A focused control owns its own keys: the volume slider its arrows, a button Enter/Space.
+    const target = e.target instanceof HTMLElement ? e.target : null;
+    if (target && e.key !== "Escape") {
+      const tag = target.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target.isContentEditable) return;
+      if ((e.key === " " || e.key === "Enter") && (tag === "BUTTON" || target.getAttribute("role") === "menuitemradio")) {
+        return;
+      }
+    }
     const current = stateRef.current;
     switch (e.key) {
       case " ":
@@ -633,11 +648,29 @@ export function Player({
         break;
       case "e":
       case "E":
-        if (live || (isEpisode && movie.seriesId) || movie.mediaSources.length > 1) togglePanel();
+        if (live || isSeriesEpisode(movie) || movie.mediaSources.length > 1) togglePanel();
         break;
       case "c":
       case "C":
         if (live) togglePanel();
+        break;
+      case "v":
+      case "V": {
+        if (live) break;
+        const subs = current.tracks.filter((track) => track.kind === "sub");
+        const on = subs.find((track) => track.selected);
+        if (on) {
+          lastSub.current = on.id;
+          void api.playerSetTrack("sub", 0);
+        } else if (subs.length) {
+          const back = subs.find((track) => track.id === lastSub.current) ?? subs[0];
+          void api.playerSetTrack("sub", back.id);
+        }
+        break;
+      }
+      case "?":
+        setHelp((open) => !open);
+        setMenu(null);
         break;
       default:
         if (!live && /^[0-9]$/.test(e.key) && current.duration > 0) {
@@ -714,6 +747,7 @@ export function Player({
           countdown={nextCard.countdown}
           onPlay={playNext}
           onDismiss={nextCard.dismiss}
+          shifted={panel}
         />
       ) : skipPrompt.prompt ? (
         <SkipButton
@@ -721,8 +755,10 @@ export function Player({
           label={t(skipPrompt.prompt.labelKey)}
           onSkip={skipPrompt.skip}
           onDismiss={skipPrompt.dismiss}
+          shifted={panel}
         />
       ) : null}
+      {help && !locked ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
       {locked ? (
         <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
       ) : (

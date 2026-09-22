@@ -16,7 +16,7 @@ export function UpdatesSection({ version }: { version: string | null }) {
 
   let status: { text: string; tone: string; action?: "view" } | null = null;
   if (checking) status = { text: t("updateChecking"), tone: "text-dim" };
-  else if (checkError) status = { text: t("updateError", { error: checkError }), tone: "text-accent" };
+  else if (checkError) status = { text: t("updateError", { error: checkError }), tone: "text-danger" };
   else if (check?.available) status = { text: t("updateFound", { version: check.latest }), tone: "text-success", action: "view" };
   else if (check) status = { text: t("updateUpToDate"), tone: "text-dim" };
   else if (prefs.skipped) status = { text: t("updateSkippedHint", { version: prefs.skipped }), tone: "text-dim" };

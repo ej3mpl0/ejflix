@@ -16,6 +16,11 @@ export function isExternal(movie: Pick<Movie, "external">): boolean {
   return Boolean(movie.external);
 }
 
+/** Episode of a series whose other episodes can be listed (Jellyfin or an addon series). */
+export function isSeriesEpisode(movie: Pick<Movie, "kind" | "seriesId" | "external">): boolean {
+  return movie.kind === "Episode" && Boolean(movie.seriesId || movie.external?.type === "series");
+}
+
 function externalId(videoId: string): string {
   return `${PREFIX}${videoId}`;
 }

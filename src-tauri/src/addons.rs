@@ -35,6 +35,16 @@ pub struct AddonCatalog {
     pub genres: Vec<String>,
 }
 
+/// An addon found in another app's account (Stremio), offered for import.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportedAddon {
+    pub url: String,
+    pub name: String,
+    /// Shipped by Stremio itself (OpenSubtitles, WatchHub…), not installed by the person.
+    pub official: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AddonInfo {
@@ -288,6 +298,84 @@ impl AddonClient {
             .unwrap()
             .insert(url, (Instant::now(), info.clone()));
         Ok(info)
+    }
+
+    /// Addons installed in a Stremio account, read with its email and password. The
+    /// password is only sent to Stremio's API and never stored; the auth key it returns is
+    /// dropped as soon as the collection has been read. Errors are stable codes
+    /// (`stremio_auth`, `stremio_network`, `stremio_unexpected`) the UI translates.
+    pub async fn stremio_collection(&self, email: &str, password: &str) -> Result<Vec<ImportedAddon>, String> {
+        const API: &str = "https://api.strem.io/api";
+        let login: Value = self
+            .http
+            .post(format!("{API}/login"))
+            .json(&serde_json::json!({
+                "type": "Login",
+                "email": email.trim(),
+                "password": password,
+                "facebook": false,
+            }))
+            .send()
+            .await
+            .map_err(|_| "stremio_network".to_string())?
+            .json()
+            .await
+            .map_err(|_| "stremio_unexpected".to_string())?;
+        if login.get("error").is_some() {
+            return Err("stremio_auth".into());
+        }
+        let auth_key = login
+            .pointer("/result/authKey")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "stremio_auth".to_string())?
+            .to_string();
+
+        let collection: Value = self
+            .http
+            .post(format!("{API}/addonCollectionGet"))
+            .json(&serde_json::json!({ "type": "AddonCollectionGet", "authKey": auth_key, "update": true }))
+            .send()
+            .await
+            .map_err(|_| "stremio_network".to_string())?
+            .json()
+            .await
+            .map_err(|_| "stremio_unexpected".to_string())?;
+        // Best effort: end the session we just opened.
+        let _ = self
+            .http
+            .post(format!("{API}/logout"))
+            .json(&serde_json::json!({ "type": "Logout", "authKey": auth_key }))
+            .send()
+            .await;
+
+        if collection.get("error").is_some() {
+            return Err("stremio_unexpected".into());
+        }
+        let list = collection
+            .pointer("/result/addons")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut out: Vec<ImportedAddon> = Vec::new();
+        for addon in list {
+            let Some(url) = addon.get("transportUrl").and_then(Value::as_str) else { continue };
+            // The local streaming-server addon and Cinemeta (built in here) are skipped.
+            let Ok(url) = normalize_manifest_url(url) else { continue };
+            if url == CINEMETA_URL || url.contains("127.0.0.1") || url.contains("localhost") {
+                continue;
+            }
+            if out.iter().any(|a| a.url == url) {
+                continue;
+            }
+            let name = addon
+                .pointer("/manifest/name")
+                .and_then(Value::as_str)
+                .unwrap_or(&url)
+                .to_string();
+            let official = addon.pointer("/flags/official").and_then(Value::as_bool).unwrap_or(false);
+            out.push(ImportedAddon { url, name, official });
+        }
+        Ok(out)
     }
 
     pub fn forget(&self, url: &str) {

@@ -3,11 +3,10 @@ import { LoaderCircle, MailCheck, ShieldCheck } from "lucide-react";
 import { api } from "../../lib/api";
 import { useI18n } from "../../lib/locale-context";
 import { authErrorText } from "../../lib/account-errors";
+import { fieldClass as field } from "../../lib/ui";
 
 export type PanelMode = "signin" | "signup" | "forgot" | "linkSent" | "confirm" | "mfa";
 
-const field =
-  "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
 const primary =
   "btn-press inline-flex h-11 w-full items-center justify-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60";
 const tonal =
@@ -96,7 +95,7 @@ export function AccountPanel({
   };
 
   const spinner = busy ? <LoaderCircle size={16} className="animate-spin" /> : null;
-  const errorLine = error ? <p className="text-[13px] text-accent">{error}</p> : null;
+  const errorLine = error ? <p className="text-[13px] text-danger">{error}</p> : null;
 
   const emailInput = (
     <input

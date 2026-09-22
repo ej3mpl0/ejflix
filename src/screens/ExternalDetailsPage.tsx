@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Globe, Play } from "lucide-react";
+import { Globe, Play, RotateCcw } from "lucide-react";
 import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
@@ -10,7 +10,6 @@ import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { Pill } from "../components/Pill";
-import { Chip } from "../components/Chip";
 import { MetaChips } from "../components/MetaChips";
 import { CastRow } from "../components/CastRow";
 import { FavoriteButton } from "../components/FavoriteButton";
@@ -19,6 +18,7 @@ import { OnlineSimilarRail } from "../components/OnlineSimilarRail";
 import { ProductionInfo } from "../components/ProductionInfo";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
+import { SeasonChips } from "../components/SeasonChips";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -38,7 +38,7 @@ export function ExternalDetailsPage({
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { settings } = useSettings();
   const seed = route.seed;
   const ext = seed?.external ?? null;
@@ -47,6 +47,7 @@ export function ExternalDetailsPage({
   const [season, setSeason] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  const [reload, setReload] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const movie = meta ? metaFullToMovie(meta) : seed;
   const tint = useDominantColor(movie?.backdropUrl);
@@ -57,6 +58,7 @@ export function ExternalDetailsPage({
   useEffect(() => {
     if (!ext) return;
     let alive = true;
+    setError("");
     api
       .addonMeta(ext.type, ext.metaId)
       .then((full) => {
@@ -74,7 +76,7 @@ export function ExternalDetailsPage({
     return () => {
       alive = false;
     };
-  }, [ext?.type, ext?.metaId]);
+  }, [ext?.type, ext?.metaId, reload]);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasons = useMemo(() => {
@@ -98,7 +100,54 @@ export function ExternalDetailsPage({
     setSeason(preferred);
   }, [seasons, season, resumeEntry]);
 
-  if (!ext || !movie) return null;
+  const retryBar = error ? (
+    <div className="flex flex-wrap items-center gap-4 rounded-btn bg-surface px-5 py-4">
+      <p className="min-w-0 flex-1 text-sm text-muted">
+        {t("cannotConnect")} <span className="text-dim">· {error}</span>
+      </p>
+      <Pill variant="tonal" icon={<RotateCcw size={14} />} onClick={() => setReload((n) => n + 1)}>
+        {t("retry")}
+      </Pill>
+    </div>
+  ) : null;
+
+  // Without a seed there is nothing to draw until the addon answers; keep the title bar so
+  // the page can always be left.
+  if (!ext || !movie) {
+    return (
+      <div className={cn("absolute inset-0 z-30 overflow-hidden bg-base text-text", route.leaving ? "page-exit" : "page-enter")} aria-hidden={!top}>
+        {ext && !error ? (
+          <div className="absolute inset-0 overflow-y-auto">
+            <DetailsSkeleton />
+          </div>
+        ) : (
+          <div className="grid h-full place-items-center px-6 text-center">
+            <div>
+              <p className="mb-4 text-lg">{t("cannotConnect")}</p>
+              {error ? <p className="mb-6 text-sm text-muted">{error}</p> : null}
+              <div className="flex justify-center gap-3">
+                {ext ? (
+                  <Pill variant="primary" icon={<RotateCcw size={14} />} onClick={() => setReload((n) => n + 1)}>
+                    {t("retry")}
+                  </Pill>
+                ) : null}
+                <Pill variant="tonal" onClick={onBack}>
+                  {t("back")}
+                </Pill>
+              </div>
+            </div>
+          </div>
+        )}
+        <FloatingTitleBar title={seed?.name ?? ""} onBack={onBack} />
+      </div>
+    );
+  }
+
+  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
+  const releaseLabel = (iso: string) => {
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : releaseFormat.format(date);
+  };
 
   const positionOf = (videoId: string) => progress.find((p) => p.key === videoId) ?? null;
   const withPosition = (item: Movie): Movie => {
@@ -140,11 +189,10 @@ export function ExternalDetailsPage({
         className="absolute inset-0 overflow-y-auto"
         onScroll={(e) => root.current?.style.setProperty("--scroll-y", String(e.currentTarget.scrollTop))}
       >
-        {!meta && !error && !seed ? (
-          <DetailsSkeleton />
-        ) : (
+        {(
           <>
-            <section className="relative h-[58vh] min-h-[420px] w-full overflow-hidden">
+            {/* Grows with its content instead of clipping it on a short window. */}
+            <section className="relative flex min-h-[max(58vh,420px)] w-full items-end overflow-hidden">
               <div className="absolute inset-0 will-change-transform" style={{ transform: "translateY(calc(var(--scroll-y, 0) * 0.5px))" }}>
                 {movie.backdropUrl ? (
                   <img src={movie.backdropUrl} alt="" className="fade-in absolute inset-0 h-full w-full scale-[1.08] object-cover" />
@@ -160,7 +208,7 @@ export function ExternalDetailsPage({
                     "linear-gradient(180deg, transparent 0%, color-mix(in oklab, var(--details-tint) 40%, transparent) 45%, color-mix(in oklab, var(--details-tint) 85%, transparent) 80%, var(--details-tint) 100%)",
                 }}
               />
-              <div className="absolute bottom-8 left-page max-w-[min(720px,70%)]">
+              <div className="relative w-full max-w-[768px] px-page pt-28 pb-8 md:max-w-[min(768px,75%)]">
                 {movie.logoUrl ? (
                   <img src={movie.logoUrl} alt={movie.name} className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]" />
                 ) : (
@@ -185,8 +233,8 @@ export function ExternalDetailsPage({
                   >
                     {playLabel}
                   </Pill>
-                  <FavoriteButton movie={movie} pill />
-                  <WatchedButton movie={movie} pill />
+                  <FavoriteButton movie={movie} pill className="h-12" />
+                  <WatchedButton movie={movie} pill className="h-12" />
                 </div>
               </div>
             </section>
@@ -199,7 +247,7 @@ export function ExternalDetailsPage({
               }}
             >
               <MetaChips movie={movie} seasons={isSeries ? seasons.filter((s) => s !== 0).length : undefined} />
-              {error ? <p className="text-sm text-muted">{error}</p> : null}
+              {retryBar}
               {/* Synopsis on the left, the production details in a column beside it. */}
               <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
                 <div className="max-w-[72ch]">
@@ -220,16 +268,18 @@ export function ExternalDetailsPage({
               {ext.type === "series" ? (
                 <section>
                   <h2 className="mb-4 text-[18px] font-semibold">{t("episodes")}</h2>
-                  {seasons.length > 1 ? (
-                    <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto pb-1">
-                      {seasons.map((s) => (
-                        <Chip key={s} selected={s === season} onClick={() => setSeason(s)}>
-                          {s === 0 ? t("specials") : `${t("season")} ${s}`}
-                        </Chip>
-                      ))}
-                    </div>
-                  ) : null}
-                  {!meta ? (
+                  <div className="mb-4 empty:hidden">
+                    <SeasonChips
+                      seasons={seasons.map((s) => ({
+                        id: String(s),
+                        name: s === 0 ? t("specials") : t("seasonNumber", { n: s }),
+                        childCount: videos.filter((v) => (v.season ?? 0) === s).length,
+                      }))}
+                      value={season == null ? null : String(season)}
+                      onChange={(id) => setSeason(Number(id))}
+                    />
+                  </div>
+                  {!meta && error ? null : !meta ? (
                     <EpisodeListSkeleton />
                   ) : episodes.length ? (
                     <div className="space-y-1">
@@ -263,7 +313,7 @@ export function ExternalDetailsPage({
                                   {video.episode != null ? `${video.episode}. ` : ""}
                                   {video.title}
                                 </p>
-                                {video.released ? <span className="shrink-0 text-[12px] text-dim tabular">{video.released.slice(0, 10)}</span> : null}
+                                {video.released ? <span className="shrink-0 text-[12px] text-dim tabular">{releaseLabel(video.released)}</span> : null}
                               </div>
                               {video.overview ? <p className="mt-1 line-clamp-2 text-[13px] leading-[1.5] text-muted">{video.overview}</p> : null}
                             </div>

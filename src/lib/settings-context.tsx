@@ -33,6 +33,7 @@ function mergePatch(base: Settings, patch: SettingsPatch): Settings {
     discord: { ...base.discord, ...(patch.discord ?? {}) },
     iptv: { ...base.iptv, ...(patch.iptv ?? {}) },
     torrents: { ...base.torrents, ...(patch.torrents ?? {}) },
+    onboarding: { ...base.onboarding, ...(patch.onboarding ?? {}) },
   };
 }
 

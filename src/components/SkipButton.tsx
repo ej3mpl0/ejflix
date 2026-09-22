@@ -11,14 +11,23 @@ export function SkipButton({
   label,
   onSkip,
   onDismiss,
+  shifted = false,
 }: {
   label: string;
   onSkip: () => void;
   onDismiss: () => void;
+  /** A side panel is open: sit to its left instead of under it. */
+  shifted?: boolean;
 }) {
   const { t } = useI18n();
   return (
-    <div className="skip-in absolute right-8 bottom-[176px] z-30 flex items-center gap-2">
+    <div
+      role="status"
+      aria-live="polite"
+      className={`skip-in absolute bottom-[176px] z-30 flex items-center gap-2 transition-[right] duration-300 ${
+        shifted ? "right-[452px]" : "right-8"
+      }`}
+    >
       <button
         type="button"
         onClick={onSkip}

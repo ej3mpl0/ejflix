@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, Clock, LoaderCircle, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
-import type { Channel, ChannelGroup, EpgNow, IptvSource, Movie } from "../lib/types";
+import { Clock, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
+import type { Channel, ChannelGroup, IptvSource, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { channelToMovie } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 import { ChannelCard } from "../components/ChannelCard";
 import { Shimmer } from "../components/Shimmer";
+import { EmptyState } from "../components/EmptyState";
+import { LoadMoreButton } from "../components/LoadMoreButton";
+import { Select } from "../components/Select";
+import { useEpgNow } from "../hooks/useEpgNow";
 
 const PAGE = 120;
-const EPG_REFRESH_MS = 60_000;
 
 type Selection =
   | { type: "all" }
@@ -48,7 +51,6 @@ export function LiveTv({
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [epg, setEpg] = useState<Record<string, EpgNow>>({});
   const request = useRef(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -122,27 +124,7 @@ export function LiveTv({
   }, [groups, selection]);
 
   // Programme guide for the channels on screen, refreshed every minute.
-  const ids = useMemo(() => items.filter((c) => c.epg).map((c) => c.id), [items]);
-  const idsKey = ids.join(",");
-  useEffect(() => {
-    if (!ids.length) return;
-    let alive = true;
-    const load = () => {
-      api
-        .iptvEpgNow(ids)
-        .then((map) => {
-          if (alive) setEpg((previous) => ({ ...previous, ...map }));
-        })
-        .catch(() => undefined);
-    };
-    load();
-    const handle = window.setInterval(load, EPG_REFRESH_MS);
-    return () => {
-      alive = false;
-      window.clearInterval(handle);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  const epg = useEpgNow(items);
 
   const play = (channel: Channel) => {
     onPlay(channelToMovie(channel, names.get(channel.sourceId) ?? ""));
@@ -195,20 +177,13 @@ export function LiveTv({
   if (!sources.length) {
     return (
       <div className="page-enter px-page pt-24 pb-16">
-        <div className="mx-auto max-w-[560px] rounded-card bg-surface px-8 py-12 text-center">
-          <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent">
-            <Tv size={26} />
-          </span>
-          <p className="text-[18px] font-semibold">{t("iptvNoSources")}</p>
-          <p className="mt-1 text-[13px] text-dim">{t("iptvNoSourcesHint")}</p>
-          <button
-            type="button"
-            onClick={onSettings}
-            className="btn-press mt-6 h-11 rounded-btn bg-accent px-6 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-          >
-            {t("iptvGoToSettings")}
-          </button>
-        </div>
+        <EmptyState
+          large
+          icon={<Tv size={26} />}
+          title={t("iptvNoSources")}
+          hint={t("iptvNoSourcesHint")}
+          action={{ label: t("iptvGoToSettings"), onClick: onSettings }}
+        />
       </div>
     );
   }
@@ -235,7 +210,7 @@ export function LiveTv({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("searchChannels")}
-              className="h-10 w-[240px] rounded-pill bg-white/6 pr-9 pl-9 text-[13px] text-text outline-none placeholder:text-dim hover:bg-white/8 focus:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
+              className="field-own-focus h-10 w-[240px] max-w-full rounded-pill bg-white/6 pr-9 pl-9 text-[13px] text-text outline-none placeholder:text-dim hover:bg-white/8 focus:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
             />
             {search ? (
               <button
@@ -249,27 +224,16 @@ export function LiveTv({
             ) : null}
           </label>
           {enabled.length > 1 ? (
-            <label className="relative inline-flex items-center">
-              <span className="sr-only">{t("iptvSource")}</span>
-              <select
-                value={sourceId}
-                onChange={(e) => {
-                  setSourceId(e.target.value);
-                  setSelection({ type: "all" });
-                }}
-                className="h-10 appearance-none rounded-pill bg-white/6 pr-9 pl-4 text-[13px] font-medium text-text outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
-              >
-                <option value="" className="bg-panel text-text">
-                  {t("iptvAllSources")}
-                </option>
-                {enabled.map((s) => (
-                  <option key={s.id} value={s.id} className="bg-panel text-text">
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={15} className="pointer-events-none absolute right-3 text-dim" />
-            </label>
+            <Select
+              label={t("iptvSource")}
+              value={sourceId}
+              onChange={(next) => {
+                setSourceId(next);
+                setSelection({ type: "all" });
+              }}
+              variant="pill"
+              options={[{ value: "", label: t("iptvAllSources") }, ...enabled.map((s) => ({ value: s.id, label: s.name }))]}
+            />
           ) : null}
           <button
             type="button"
@@ -294,7 +258,7 @@ export function LiveTv({
       </div>
 
       {enabled.some((s) => s.error) ? (
-        <div className="mb-6 rounded-card bg-accent-soft px-5 py-3 text-[13px] text-accent">
+        <div className="mb-6 rounded-card bg-danger/12 px-5 py-3 text-[13px] text-danger">
           {enabled
             .filter((s) => s.error)
             .map((s) => `${s.name}: ${s.error}`)
@@ -302,8 +266,12 @@ export function LiveTv({
         </div>
       ) : null}
 
-      <div className="grid gap-8 md:grid-cols-[250px_1fr]">
-        <nav aria-label={t("iptvGroupsLabel")} className="md:sticky md:top-24 md:max-h-[calc(100vh-140px)] md:overflow-y-auto md:pr-1">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[250px_minmax(0,1fr)] md:gap-8">
+        <nav
+          aria-label={t("iptvGroupsLabel")}
+          // Narrow windows stack the list above the channels: cap it so the channels stay in reach.
+          className="max-md:max-h-[40vh] max-md:overflow-y-auto max-md:rounded-card max-md:bg-surface max-md:p-2 md:sticky md:top-24 md:max-h-[calc(100vh-140px)] md:overflow-y-auto md:pr-1"
+        >
           <div className="space-y-0.5">
             {sideButton(t("allChannels"), selection.type === "all", () => setSelection({ type: "all" }), String(channelTotal), <Tv size={15} />)}
             {sideButton(t("favorites"), selection.type === "favorites", () => setSelection({ type: "favorites" }), undefined, <Star size={15} />)}
@@ -318,7 +286,7 @@ export function LiveTv({
                   onChange={(e) => setGroupFilter(e.target.value)}
                   placeholder={t("filterGroups")}
                   aria-label={t("filterGroups")}
-                  className="mb-2 h-9 w-full rounded-btn bg-white/6 px-3 text-[13px] text-text outline-none placeholder:text-dim focus:bg-white/10"
+                  className="field-own-focus mb-2 h-9 w-full rounded-btn bg-white/6 px-3 text-[13px] text-text outline-none placeholder:text-dim focus:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
                 />
               ) : null}
               <div className="space-y-0.5">
@@ -362,32 +330,26 @@ export function LiveTv({
                 ))}
               </div>
               {items.length < total ? (
-                <div className="mt-10 flex justify-center">
-                  <button
-                    type="button"
-                    disabled={loadingMore}
-                    onClick={() => void loadChannels(false)}
-                    className="btn-press inline-flex h-11 items-center gap-2 rounded-pill bg-white/10 px-6 text-[14px] font-semibold hover:bg-white/16 disabled:opacity-60"
-                  >
-                    {loadingMore ? <LoaderCircle size={16} className="animate-spin" /> : null}
-                    {t("loadMore")} ({total - items.length})
-                  </button>
-                </div>
+                <LoadMoreButton
+                  loading={loadingMore}
+                  onLoad={() => void loadChannels(false)}
+                  remaining={total - items.length}
+                />
               ) : null}
             </>
           ) : (
-            <div className="rounded-card bg-surface px-8 py-12 text-center">
-              <p className="text-[16px] font-medium">
-                {selection.type === "favorites"
+            <EmptyState
+              title={
+                selection.type === "favorites"
                   ? t("noFavoriteChannels")
                   : selection.type === "recent"
                     ? t("noRecentChannels")
                     : anyLoading
                       ? t("iptvLoading")
-                      : t("noChannels")}
-              </p>
-              {selection.type === "favorites" ? <p className="mt-1 text-[13px] text-dim">{t("noFavoriteChannelsHint")}</p> : null}
-            </div>
+                      : t("noChannels")
+              }
+              hint={selection.type === "favorites" ? t("noFavoriteChannelsHint") : undefined}
+            />
           )}
         </div>
       </div>

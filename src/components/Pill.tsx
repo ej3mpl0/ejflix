@@ -1,10 +1,11 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "../lib/format";
 
-type Variant = "primary" | "tonal" | "ghost";
+type Variant = "primary" | "tonal" | "ghost" | "danger";
 
 /**
- * Button primitive: accent-filled `primary`, translucent `tonal`, borderless `ghost`.
+ * Button primitive: accent-filled `primary`, translucent `tonal`, borderless `ghost`, and
+ * `danger` for destructive actions (never the accent: a white or green accent reads as "ok").
  * `pill` rounds it fully (hero / details actions); otherwise the button radius applies.
  */
 export function Pill({
@@ -15,7 +16,7 @@ export function Pill({
   className,
   children,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & {
+}: ComponentProps<"button"> & {
   variant?: Variant;
   pill?: boolean;
   size?: "sm" | "md" | "lg";
@@ -34,6 +35,7 @@ export function Pill({
         variant === "primary" && "bg-accent text-on-accent hover:bg-accent-hover",
         variant === "tonal" && "bg-white/12 text-text hover:bg-white/18",
         variant === "ghost" && "bg-transparent text-text hover:bg-white/8",
+        variant === "danger" && "bg-danger text-white hover:bg-[color-mix(in_oklab,var(--color-danger)_88%,white)]",
         className,
       )}
     >

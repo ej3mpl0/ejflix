@@ -20,9 +20,8 @@ import { useSettings } from "../../lib/settings-context";
 import { SegmentedControl } from "./SegmentedControl";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
+import { fieldClass as field } from "../../lib/ui";
 
-const field =
-  "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
 const primary =
@@ -220,7 +219,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
     }
     if (source.error) {
       return (
-        <span className="flex items-center gap-1.5 text-accent">
+        <span className="flex items-center gap-1.5 text-danger">
           <AlertCircle size={12} />
           {source.error}
         </span>
@@ -266,7 +265,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
               </div>
               {confirmId === source.id ? (
                 <div className="flex shrink-0 items-center gap-2">
-                  <button type="button" onClick={() => void remove(source)} className="btn-press h-9 rounded-btn bg-accent px-3 text-[13px] font-semibold text-on-accent">
+                  <button type="button" onClick={() => void remove(source)} className="btn-press h-9 rounded-btn bg-danger px-3 text-[13px] font-semibold text-white">
                     {t("delete")}
                   </button>
                   <button type="button" onClick={() => setConfirmId(null)} className="btn-press h-9 rounded-btn bg-white/10 px-3 text-[13px] font-semibold">
@@ -292,7 +291,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
                       setError("");
                       setAccount(null);
                     }}
-                    aria-label={t("editProfile")}
+                    aria-label={`${t("iptvEditSource")}: ${source.name}`}
                     title={t("edit")}
                     className="icon-hit grid h-9 w-9 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
                   >
@@ -390,7 +389,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
                   <input
                     value={form.path}
                     onChange={(e) => set("path", e.target.value)}
-                    placeholder="C:\\Users\\…\\lista.m3u"
+                    placeholder={t("iptvPathPlaceholder")}
                     className={field}
                     spellCheck={false}
                   />
@@ -403,7 +402,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
               <div className="space-y-3">
                 <label className="block">
                   <span className="mb-1.5 block text-[13px] font-medium">{t("iptvXtreamUrl")}</span>
-                  <input value={form.url} onChange={(e) => set("url", e.target.value)} placeholder="http://servidor.tv:8080" className={field} spellCheck={false} />
+                  <input value={form.url} onChange={(e) => set("url", e.target.value)} placeholder={t("iptvServerPlaceholder")} className={field} spellCheck={false} />
                   <span className="mt-1 block text-[12px] text-dim">{t("iptvXtreamUrlHint")}</span>
                 </label>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -464,7 +463,7 @@ export function IptvSection({ onToast }: { onToast: (message: string) => void })
             ) : null}
 
             {error ? (
-              <p className="flex items-center gap-1.5 text-[13px] text-accent">
+              <p className="flex items-center gap-1.5 text-[13px] text-danger">
                 <AlertCircle size={14} />
                 {error}
               </p>

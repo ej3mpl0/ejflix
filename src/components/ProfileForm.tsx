@@ -7,6 +7,7 @@ import { AVATAR_PRESETS, fileToAvatar, presetGradient, presetId } from "../lib/a
 import { useI18n } from "../lib/locale-context";
 import { Avatar } from "./Avatar";
 import { Toggle } from "./settings/Toggle";
+import { fieldLgClass as field } from "../lib/ui";
 
 /**
  * Create / edit a local profile: name, picture (preset gradient or an uploaded photo)
@@ -86,8 +87,6 @@ export function ProfileForm({
     }
   };
 
-  const field =
-    "h-12 w-full rounded-btn border border-white/10 bg-black/40 px-4 text-[15px] text-text outline-none placeholder:text-dim focus:border-accent focus:ring-2 focus:ring-accent/30";
 
   return (
     <form
@@ -180,7 +179,7 @@ export function ProfileForm({
         </div>
       ) : null}
 
-      {error ? <p className="mt-4 text-[13px] text-accent">{error}</p> : null}
+      {error ? <p className="mt-4 text-[13px] text-danger">{error}</p> : null}
 
       <div className="mt-6 flex flex-wrap items-center gap-3">
         <button
@@ -208,9 +207,17 @@ export function ProfileForm({
                 type="button"
                 onClick={() => void remove()}
                 disabled={busy}
-                className="btn-press h-9 rounded-pill bg-accent px-4 text-[13px] font-semibold text-on-accent"
+                className="btn-press h-9 rounded-pill bg-danger px-4 text-[13px] font-semibold text-white"
               >
                 {t("delete")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={busy}
+                className="btn-press h-9 rounded-pill bg-white/10 px-4 text-[13px] font-semibold text-text hover:bg-white/15"
+              >
+                {t("cancel")}
               </button>
             </span>
           ) : (

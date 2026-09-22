@@ -57,7 +57,9 @@ export function PosterRow({
       className={cn(
         "btn-press absolute top-[calc(50%-24px)] z-10 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/15 bg-black/60 text-white shadow-[0_8px_24px_rgb(0_0_0_/_0.5)] backdrop-blur-md transition-opacity duration-200 hover:bg-black/80",
         dir < 0 ? "left-2" : "right-2",
-        hover && !disabled ? "opacity-100" : "pointer-events-none opacity-0",
+        hover && !disabled
+          ? "opacity-100"
+          : cn("pointer-events-none opacity-0", !disabled && "focus-visible:pointer-events-auto focus-visible:opacity-100"),
       )}
     >
       {dir < 0 ? <ChevronLeft size={22} /> : <ChevronRight size={22} />}
@@ -70,13 +72,13 @@ export function PosterRow({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <h2 className="mb-3 px-page text-[18px] font-semibold text-text">{title}</h2>
+      <h2 className="mb-1 px-page text-[18px] font-semibold text-text">{title}</h2>
       <div className="relative">
         <div
           ref={scroller}
           onScroll={measure}
           className={cn(
-            "no-scrollbar flex snap-x snap-mandatory gap-rail overflow-x-auto px-page scroll-px-page pt-2 pb-3",
+            "no-scrollbar flex snap-x snap-mandatory gap-rail overflow-x-auto px-page scroll-px-page pt-4 pb-3",
             !edges.end && "row-mask",
           )}
         >

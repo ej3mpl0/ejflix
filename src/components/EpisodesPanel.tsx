@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { Check, Play, X } from "lucide-react";
-import type { Movie } from "../lib/types";
+import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import { api } from "../lib/api";
+import { sortedVideos, videoToMovie } from "../lib/addons";
 import { cn, episodeCode, formatRuntime } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { Chip } from "./Chip";
 import { Shimmer } from "./Shimmer";
+import { SeasonChips } from "./SeasonChips";
 
 /**
  * Side panel inside the player: versions of the current item (when it has several
@@ -28,11 +30,65 @@ export function EpisodesPanel({
   onHoldUi: (hold: boolean) => void;
 }) {
   const { t } = useI18n();
-  const seriesId = movie.kind === "Episode" ? movie.seriesId : null;
-  const [seasons, setSeasons] = useState<Movie[]>([]);
-  const [seasonId, setSeasonId] = useState<string | null>(movie.seasonId);
+  /** Addon series: the episode list comes from the addon metadata instead of Jellyfin. */
+  const online = movie.kind === "Episode" && movie.external?.type === "series" ? movie.external : null;
+  const seriesId = movie.kind === "Episode" && !online ? movie.seriesId : null;
+  const listed = Boolean(seriesId || online);
+  const [seasons, setSeasons] = useState<Array<{ id: string; name: string }>>([]);
+  const [seasonId, setSeasonId] = useState<string | null>(
+    online ? String(online.season ?? 0) : movie.seasonId,
+  );
   const [episodes, setEpisodes] = useState<Movie[] | null>(null);
+  const [onlineMeta, setOnlineMeta] = useState<AddonMetaFull | null>(null);
+  const [progress, setProgress] = useState<ResumeEntry[]>([]);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!online) return;
+    let alive = true;
+    api
+      .addonMeta("series", online.metaId)
+      .then((meta) => {
+        if (!alive) return;
+        const numbers = [...new Set(sortedVideos(meta.videos).map((v) => v.season ?? 0))];
+        setSeasons(numbers.map((n) => ({ id: String(n), name: n === 0 ? t("specials") : t("seasonNumber", { n }) })));
+        setOnlineMeta(meta);
+      })
+      .catch((err) => {
+        if (alive) setError(err instanceof Error ? err.message : String(err));
+      });
+    api
+      .addonProgressList()
+      .then((list) => {
+        if (alive) setProgress(list);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online?.metaId]);
+
+  useEffect(() => {
+    if (!onlineMeta || seasonId == null) return;
+    const prefer = online?.prefer;
+    setEpisodes(
+      sortedVideos(onlineMeta.videos)
+        .filter((v) => String(v.season ?? 0) === seasonId)
+        .map((v) => {
+          const item = videoToMovie(onlineMeta, v);
+          const entry = progress.find((p) => p.key === v.id);
+          const pct = entry && entry.durationSeconds > 0 ? (entry.positionSeconds / entry.durationSeconds) * 100 : 0;
+          return {
+            ...item,
+            external: { ...item.external!, prefer },
+            playedPercentage: Math.min(100, pct),
+            played: pct >= 95,
+          };
+        }),
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlineMeta, seasonId, progress]);
 
   useEffect(() => {
     if (!seriesId) return;
@@ -41,7 +97,7 @@ export function EpisodesPanel({
       .getSeasons(seriesId)
       .then((list) => {
         if (!alive) return;
-        setSeasons(list);
+        setSeasons(list.map((season) => ({ id: season.id, name: season.name })));
         setSeasonId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((err) => {
@@ -89,7 +145,7 @@ export function EpisodesPanel({
       <div className="flex items-center gap-3 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">
-            {seriesId ? t("episodes") : t("versions")}
+            {listed ? t("episodes") : t("versions")}
           </p>
           <p className="truncate text-[16px] font-semibold">{movie.seriesName ?? movie.name}</p>
         </div>
@@ -122,19 +178,18 @@ export function EpisodesPanel({
         </div>
       ) : null}
 
-      {seriesId ? (
+      {listed ? (
         <>
           {seasons.length > 1 ? (
-            <div className="no-scrollbar flex gap-2 overflow-x-auto px-5 pb-3">
-              {seasons.map((season) => (
-                <Chip key={season.id} selected={season.id === seasonId} onClick={() => setSeasonId(season.id)}>
-                  {season.name}
-                </Chip>
-              ))}
+            <div className="px-5 pb-3">
+              <SeasonChips seasons={seasons} value={seasonId} onChange={setSeasonId} />
             </div>
           ) : null}
           <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-4">
             {error ? <p className="px-2 text-sm text-muted">{error}</p> : null}
+            {episodes && !episodes.length && !error ? (
+              <p className="px-2 text-sm text-muted">{t("noEpisodes")}</p>
+            ) : null}
             {episodes == null && !error
               ? Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="flex gap-3 p-2">

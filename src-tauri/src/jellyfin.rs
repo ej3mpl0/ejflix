@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::RwLock;
 
 const CLIENT_NAME: &str = "ejFlix";
-const CLIENT_VERSION: &str = "0.6.3";
+const CLIENT_VERSION: &str = "0.6.4";
 const DEVICE_NAME: &str = "Windows";
 pub const IMAGE_SCHEME: &str = "jfimg";
 const IMAGE_ORIGIN: &str = "http://jfimg.localhost";

@@ -24,6 +24,8 @@
   --color-star: #ffd45c;
   --color-success: #66bb6a;
   --color-warning: #ffc857;
+  /* Errors keep one colour whatever the accent: a white or green accent must not read as "ok". */
+  --color-danger: #ff6b6b;
 
   --radius-poster: 12px;
   --radius-card: 24px;
@@ -53,10 +55,22 @@
   --opacity-muted: 0.6;
   --opacity-selected: 0.15;
   --opacity-scrim: 0.56;
-  --brand-gradient: linear-gradient(180deg, #f6121d, #b00710);
   --poster-w: clamp(150px, 16vw, 210px);
   --poster-min: 150px;
   --details-tint: var(--color-base);
+}
+
+/* Page gutter follows the window: tighter on narrow windows, roomier on very wide screens
+   so rows and text do not run edge to edge. */
+@media (max-width: 900px) {
+  :root {
+    --spacing-page: 24px;
+  }
+}
+@media (min-width: 2200px) {
+  :root {
+    --spacing-page: max(48px, calc((100vw - 2100px) / 2));
+  }
 }
 
 /* Accent palettes. Unlayered so they beat the @theme defaults. */
@@ -65,12 +79,10 @@
   --color-on-accent: #ffffff;
   --color-accent-hover: #f6121d;
   --color-accent-press: #b00710;
-  --brand-gradient: linear-gradient(180deg, #f6121d, #b00710);
 }
 :root[data-theme="white"] {
   --color-accent: #f5f5f5;
   --color-on-accent: #0d0d0d;
-  --brand-gradient: linear-gradient(180deg, #ffffff, #b8bec5);
 }
 :root[data-theme="gold"] {
   --color-accent: #e8a91c;
@@ -78,7 +90,6 @@
   --color-base: #0f0e0b;
   --color-surface: #1b1913;
   --color-panel: #252217;
-  --brand-gradient: linear-gradient(90deg, #8a5700, #e8a91c, #fff1a8, #ffd45c, #9a6200);
 }
 :root[data-theme="jade"] {
   --color-accent: #22d37c;
@@ -86,7 +97,6 @@
   --color-base: #0b100d;
   --color-surface: #151c17;
   --color-panel: #1e2620;
-  --brand-gradient: linear-gradient(90deg, #7bf08d, #22d37c, #0bbf9a);
 }
 :root[data-theme="rose_gold"] {
   --color-accent: #e8b4a0;
@@ -94,7 +104,6 @@
   --color-base: #100d0c;
   --color-surface: #1c1715;
   --color-panel: #26201d;
-  --brand-gradient: linear-gradient(90deg, #b76e5a, #e8b4a0, #f7dccf, #e8b4a0, #b76e5a);
 }
 :root[data-theme="arctic"] {
   --color-accent: #3185f5;
@@ -102,12 +111,10 @@
   --color-base: #0b0e14;
   --color-surface: #151a22;
   --color-panel: #1e242e;
-  --brand-gradient: linear-gradient(90deg, #4de3ff, #3185f5, #4d55e8);
 }
 :root[data-theme="graphite"] {
   --color-accent: #9aa3ad;
   --color-on-accent: #0d0d0d;
-  --brand-gradient: linear-gradient(90deg, #c9d1d9, #9aa3ad, #6b7480);
 }
 :root[data-theme="ocean"] {
   --color-accent: #1e88e5;
@@ -115,7 +122,6 @@
   --color-base: #0b0f14;
   --color-surface: #151b22;
   --color-panel: #1e262e;
-  --brand-gradient: linear-gradient(90deg, #64b5f6, #1e88e5, #0d47a1);
 }
 :root[data-theme="violet"] {
   --color-accent: #a044c4;
@@ -123,7 +129,6 @@
   --color-base: #0f0b12;
   --color-surface: #1a151e;
   --color-panel: #241d29;
-  --brand-gradient: linear-gradient(90deg, #ce93d8, #8e24aa, #4a148c);
 }
 :root[data-theme="emerald"] {
   --color-accent: #34c759;
@@ -131,7 +136,6 @@
   --color-base: #0b100c;
   --color-surface: #151c16;
   --color-panel: #1e261f;
-  --brand-gradient: linear-gradient(90deg, #7ee29a, #34c759, #1b8f3f);
 }
 :root[data-theme="amber"] {
   --color-accent: #ffb300;
@@ -139,7 +143,6 @@
   --color-base: #100e0a;
   --color-surface: #1c1913;
   --color-panel: #262218;
-  --brand-gradient: linear-gradient(90deg, #ffe082, #ffb300, #ff8f00);
 }
 :root[data-theme="rose"] {
   --color-accent: #ec407a;
@@ -147,7 +150,6 @@
   --color-base: #120c0f;
   --color-surface: #1e1519;
   --color-panel: #281d22;
-  --brand-gradient: linear-gradient(90deg, #f8bbd0, #ec407a, #ad1457);
 }
 /* AMOLED: pure black surfaces, after the palettes so it wins the tint. */
 :root[data-amoled] {
@@ -429,7 +431,8 @@ p {
 /* Glass surfaces. In the main window the blur is real; the player overlay is a separate
    transparent window, so there it only softens the overlay's own gradients. */
 .glass-header {
-  background: rgb(28 28 30 / 0.55);
+  /* Follows the palette's surface tint, like every other panel. */
+  background: color-mix(in oklab, var(--color-surface) 58%, transparent);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
@@ -467,21 +470,6 @@ p {
 }
 
 /* Header tab indicator: springs a little when it lands. */
-@keyframes jelly {
-  0% {
-    transform: scale(1, 1);
-  }
-  45% {
-    transform: scale(1.18, 0.8);
-  }
-  100% {
-    transform: scale(1, 1);
-  }
-}
-.jelly {
-  animation: jelly 400ms var(--ease-std) both;
-}
-
 /* Full-page views (details, settings) */
 @keyframes page-in {
   from {
@@ -630,7 +618,6 @@ p {
   .btn-press,
   .icon-hit,
   .shimmer::after,
-  .jelly,
   .page-enter,
   .page-exit,
   .hero-in,

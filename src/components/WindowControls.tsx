@@ -7,9 +7,28 @@ export function WindowControls() {
   const { t } = useI18n();
   const [maximized, setMaximized] = useState(false);
 
+  // Follow every resize: a double-click on the header or a Windows snap also maximizes.
   useEffect(() => {
-    const win = getCurrentWindow();
-    win.isMaximized().then(setMaximized).catch(() => undefined);
+    let unlisten: (() => void) | null = null;
+    let alive = true;
+    try {
+      const win = getCurrentWindow();
+      const sync = () => win.isMaximized().then((v) => alive && setMaximized(v)).catch(() => undefined);
+      void sync();
+      win
+        .onResized(() => void sync())
+        .then((fn) => {
+          if (alive) unlisten = fn;
+          else fn();
+        })
+        .catch(() => undefined);
+    } catch {
+      /* browser preview */
+    }
+    return () => {
+      alive = false;
+      unlisten?.();
+    };
   }, []);
 
   const act = async (fn: () => Promise<void>) => {

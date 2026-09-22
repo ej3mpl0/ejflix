@@ -25,8 +25,19 @@ export function DownloadsButton() {
     const onDown = (e: MouseEvent) => {
       if (!ref.current?.contains(e.target as Node)) setOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Capture phase: closing the panel must not also close the page behind it.
+      e.stopPropagation();
+      setOpen(false);
+      ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    };
     document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, [open]);
 
   // Nothing to show: the button disappears instead of opening an empty panel.
@@ -98,7 +109,7 @@ export function DownloadsButton() {
                     <p className="truncate text-[13px] font-medium text-text" title={item.name}>
                       {item.name}
                     </p>
-                    <p className={cn("truncate text-[11px] tabular", item.status === "error" ? "text-accent" : "text-dim")}>
+                    <p className={cn("truncate text-[11px] tabular", item.status === "error" ? "text-danger" : "text-dim")}>
                       {line(item)}
                     </p>
                   </div>

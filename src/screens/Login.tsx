@@ -6,6 +6,8 @@ import { LanguageSelect } from "../components/LanguageSelect";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
 import type { SavedServer } from "../lib/types";
+import { fieldLgClass } from "../lib/ui";
+import { cn } from "../lib/format";
 
 export function Login({
   onConnected,
@@ -63,7 +65,7 @@ export function Login({
       </div>
       <div className="relative z-10 flex flex-1 items-center justify-center px-6">
         <form
-          className="w-[420px] rounded-2xl bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]"
+          className="w-[420px] max-w-full rounded-2xl bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]"
           onSubmit={(e) => {
             e.preventDefault();
             void connect();
@@ -80,9 +82,9 @@ export function Login({
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="http://192.168.1.10:8096"
-            className="mb-2 h-12 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/30"
+            className={cn("mb-2", fieldLgClass)}
           />
-          {error ? <p className="mb-3 text-sm text-accent">{error}</p> : <div className="mb-3 h-5" />}
+          {error ? <p className="mb-3 text-sm text-danger">{error}</p> : <div className="mb-3 h-5" />}
           <button
             type="submit"
             disabled={loading || !url.trim()}

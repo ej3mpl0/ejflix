@@ -12,19 +12,28 @@ import { UpdateAvailableModal } from "./components/UpdateAvailableModal";
 import { ProfileForm } from "./components/ProfileForm";
 import { WindowControls } from "./components/WindowControls";
 import { LanguageSelect } from "./components/LanguageSelect";
-import { SettingsProvider } from "./lib/settings-context";
+import { SettingsProvider, useSettings } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
 import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { DownloadsProvider } from "./lib/downloads-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
 import type { AccountStatus, Movie, SavedServer, Session, Toast } from "./lib/types";
+import { SetupStep } from "./screens/SetupStep";
 
 /** Screens shown while there is no session. */
 type Gate = "welcome" | "login" | "profiles" | "create";
 
 /** What stands between a fresh session and Home: the account offer, or its second factor. */
 type AccountGate = "checking" | "none" | "intro" | "mfa";
+
+/** First-run setup (torrents, addon import) of a profile that has not been through it. */
+function SetupGate() {
+  const { settings, ready } = useSettings();
+  const [closed, setClosed] = useState(false);
+  if (!ready || closed || settings.onboarding.setupDone) return null;
+  return <SetupStep onDone={() => setClosed(true)} />;
+}
 
 export default function App() {
   return (
@@ -47,6 +56,7 @@ function AppInner() {
   // Bumped when the player could not start, so Home can bring the sources sheet back.
   const [playFailed, setPlayFailed] = useState(0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastSeq = useRef(0);
   const [version, setVersion] = useState<string | null>(null);
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   // The ejFlix account is offered once per profile ("not now" is remembered by Rust),
@@ -107,12 +117,13 @@ function AppInner() {
     };
   }, [session?.userId]);
 
+  const dismissToast = (id: number) => setToasts((list) => list.filter((item) => item.id !== id));
+
   const toast = (message: string) => {
-    const id = Date.now();
+    toastSeq.current += 1;
+    const id = toastSeq.current;
     setToasts((list) => [...list, { id, message }]);
-    window.setTimeout(() => {
-      setToasts((list) => list.filter((item) => item.id !== id));
-    }, 3200);
+    window.setTimeout(() => dismissToast(id), 3200);
   };
 
   const stopPlaying = () => {
@@ -196,6 +207,7 @@ function AppInner() {
                   onToast={toast}
                 />
               ) : null}
+              {accountGate === "none" ? <SetupGate /> : null}
               {/* Home stays mounted while playing so the view and scroll survive the trip. */}
               <Home
                 session={session}
@@ -231,7 +243,7 @@ function AppInner() {
         {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
         {/* New release on GitHub: never over the "what's new" card nor while watching. */}
         {updateAvailable && !updateVersion && !playing ? <UpdateAvailableModal /> : null}
-        <ToastStack toasts={toasts} />
+        <ToastStack toasts={toasts} onDismiss={dismissToast} />
       </>
     );
   }
@@ -253,8 +265,10 @@ function AppInner() {
       ) : gate === "create" ? (
         <div className="grain relative flex h-full flex-col bg-base">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
-          <div className="relative z-10 flex h-[60px] items-center justify-between px-6">
-            <Logo />
+          <div className="relative z-10 flex h-[60px] items-center justify-between px-6" data-tauri-drag-region>
+            <div data-tauri-drag-region>
+              <Logo />
+            </div>
             <div className="flex items-center gap-2">
               <LanguageSelect />
               <WindowControls />
@@ -290,7 +304,7 @@ function AppInner() {
       )}
       {updateVersion ? <UpdateModal version={updateVersion} onClose={closeUpdate} /> : null}
       {updateAvailable && !updateVersion ? <UpdateAvailableModal /> : null}
-      <ToastStack toasts={toasts} />
+      <ToastStack toasts={toasts} onDismiss={dismissToast} />
     </SettingsProvider>
   );
 }

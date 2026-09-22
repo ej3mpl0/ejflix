@@ -33,7 +33,7 @@ export function MetaChips({ movie, seasons }: { movie: Movie; seasons?: number }
         </span>
       ) : null}
       {runtime ? chip(runtime) : null}
-      {seasons ? chip(seasons === 1 ? `1 ${t("season").toLowerCase()}` : t("seasonsCount", { n: seasons })) : null}
+      {seasons ? chip(seasons === 1 ? t("seasonsOne") : t("seasonsCount", { n: seasons })) : null}
       {movie.communityRating ? (
         <span className="inline-flex h-7 items-center gap-1 rounded-md bg-white/8 px-2 text-[13px] tabular">
           <span className="text-star">★</span>

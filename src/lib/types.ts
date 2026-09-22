@@ -471,7 +471,12 @@ export type Settings = {
     /** Download cap in KB/s; 0 = none. */
     downloadKbps: number;
   };
+  /** First-run setup of the profile (torrents, addon import). */
+  onboarding: { setupDone: boolean };
 };
+
+/** An addon found in another app's account, offered for import. */
+export type ImportedAddon = { url: string; name: string; official: boolean };
 
 export type DiscordHeader = "name" | "details" | "state";
 
@@ -681,4 +686,6 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
   torrents: { enabled: true, share: true, cacheGb: 5, uploadKbps: 512, downloadKbps: 0 },
+  // Until the real settings arrive nothing asks for the setup step.
+  onboarding: { setupDone: true },
 };

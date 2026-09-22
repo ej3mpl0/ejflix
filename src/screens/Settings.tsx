@@ -35,12 +35,12 @@ import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
+import { ConfirmButton } from "../components/ConfirmButton";
+import { fieldClass as field } from "../lib/ui";
 
 type Section = "appearance" | "playback" | "addons" | "iptv" | "discord" | "language" | "account" | "about";
 export type SettingsSectionId = Section;
 
-const field =
-  "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
 
@@ -161,10 +161,16 @@ function LocalAccount({
               </div>
             </div>
             <div className="py-4">
-              <button type="button" disabled={busy} onClick={() => void unlink()} className={tonal}>
-                {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Unlink size={16} />}
-                {t("disconnectServer")}
-              </button>
+              <ConfirmButton
+                confirmLabel={t("disconnectServer")}
+                onConfirm={() => unlink()}
+                trigger={(ask) => (
+                  <button type="button" disabled={busy} onClick={ask} className={tonal}>
+                    {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Unlink size={16} />}
+                    {t("disconnectServer")}
+                  </button>
+                )}
+              />
             </div>
           </>
         ) : (
@@ -199,7 +205,7 @@ function LocalAccount({
                 className={field}
               />
             </div>
-            {error ? <p className="text-[13px] text-accent">{error}</p> : null}
+            {error ? <p className="text-[13px] text-danger">{error}</p> : null}
             <button
               type="submit"
               disabled={busy || !url.trim() || !username.trim()}
@@ -214,6 +220,9 @@ function LocalAccount({
     </>
   );
 }
+
+/** Reopening Settings lands on the section used last (for the rest of the session). */
+let lastSection: Section = "appearance";
 
 export function Settings({
   session,
@@ -239,7 +248,8 @@ export function Settings({
 }) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
-  const [section, setSection] = useState<Section>(initialSection ?? "appearance");
+  const [section, setSection] = useState<Section>(initialSection ?? lastSection);
+  lastSection = section;
   const { appearance, playback } = settings;
 
   useEffect(() => {
@@ -282,8 +292,12 @@ export function Settings({
         </button>
         <h1 className="text-[28px] font-semibold tracking-[-0.02em]">{t("settings")}</h1>
       </div>
-      <div className="grid gap-10 md:grid-cols-[240px_1fr]">
-        <nav aria-label={t("settings")} className="space-y-1">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[240px_minmax(0,1fr)] md:gap-10">
+        {/* A scrolling strip of sections on narrow windows, a column beside the content otherwise. */}
+        <nav
+          aria-label={t("settings")}
+          className="no-scrollbar -mx-page flex gap-1 overflow-x-auto px-page md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0"
+        >
           {sections.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -291,7 +305,7 @@ export function Settings({
               aria-current={section === id ? "page" : undefined}
               onClick={() => setSection(id)}
               className={cn(
-                "flex h-11 w-full items-center gap-3 rounded-btn px-3 text-left text-[14px] transition-colors duration-150",
+                "flex h-11 shrink-0 items-center gap-3 rounded-btn px-3 text-left text-[14px] whitespace-nowrap transition-colors duration-150 md:w-full",
                 section === id ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-white/6 hover:text-text",
               )}
             >
@@ -450,10 +464,16 @@ export function Settings({
                       <Users size={16} />
                       {t("switchProfile")}
                     </button>
-                    <button type="button" onClick={onLogout} className={tonal}>
-                      <LogOut size={16} />
-                      {t("signOut")}
-                    </button>
+                    <ConfirmButton
+                      confirmLabel={t("signOut")}
+                      onConfirm={onLogout}
+                      trigger={(ask) => (
+                        <button type="button" onClick={ask} className={tonal}>
+                          <LogOut size={16} />
+                          {t("signOut")}
+                        </button>
+                      )}
+                    />
                   </div>
                 </SettingsSection>
               )}

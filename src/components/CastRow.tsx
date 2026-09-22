@@ -1,5 +1,6 @@
 import type { Person } from "../lib/types";
 import { useI18n } from "../lib/locale-context";
+import { ScrollRow } from "./ScrollRow";
 
 function initials(name: string): string {
   return name
@@ -17,7 +18,7 @@ export function CastRow({ people }: { people: Person[] }) {
   return (
     <section>
       <h2 className="mb-4 text-[18px] font-semibold">{t("cast")}</h2>
-      <div className="no-scrollbar flex gap-4 overflow-x-auto pb-2">
+      <ScrollRow className="pb-2">
         {people.map((person) => (
           <div key={person.id} className="w-[116px] shrink-0 text-center">
             <div className="img-outline mx-auto grid h-[88px] w-[88px] place-items-center overflow-hidden rounded-full bg-panel text-[22px] font-semibold text-muted">
@@ -41,7 +42,7 @@ export function CastRow({ people }: { people: Person[] }) {
             </div>
           </div>
         ))}
-      </div>
+      </ScrollRow>
     </section>
   );
 }

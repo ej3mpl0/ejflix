@@ -1,15 +1,30 @@
+import { X } from "lucide-react";
 import type { Toast as ToastType } from "../lib/types";
+import { useI18n } from "../lib/locale-context";
 
-export function ToastStack({ toasts }: { toasts: ToastType[] }) {
-  if (!toasts.length) return null;
+export function ToastStack({ toasts, onDismiss }: { toasts: ToastType[]; onDismiss: (id: number) => void }) {
+  const { t } = useI18n();
+  // The live region stays mounted so screen readers announce each toast as it is added.
   return (
-    <div className="pointer-events-none fixed right-6 bottom-6 z-[80] flex flex-col gap-2">
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed right-6 bottom-6 z-[80] flex max-w-[min(420px,calc(100vw-48px))] flex-col items-end gap-2"
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className="toast-enter pointer-events-auto rounded-xl bg-panel/95 px-4 py-3 text-sm text-text shadow-[0_12px_32px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
+          className="toast-enter pointer-events-auto flex items-start gap-2 rounded-2xl bg-panel/95 py-3 pr-2 pl-4 text-sm text-text shadow-[0_12px_32px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
         >
-          {toast.message}
+          <span className="min-w-0 flex-1 py-0.5 [overflow-wrap:anywhere]">{toast.message}</span>
+          <button
+            type="button"
+            aria-label={t("close")}
+            onClick={() => onDismiss(toast.id)}
+            className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-dim hover:bg-white/10 hover:text-text"
+          >
+            <X size={13} />
+          </button>
         </div>
       ))}
     </div>

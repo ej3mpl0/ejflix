@@ -22,6 +22,7 @@ import { SimilarRail } from "../components/SimilarRail";
 import { ProductionInfo } from "../components/ProductionInfo";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
+import { ScrollRow } from "../components/ScrollRow";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -54,6 +55,9 @@ export function DetailsPage({
   const [nextUp, setNextUp] = useState<Movie | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  /** Seasons or episodes failed: shown in the episodes section with a retry, not as an endless skeleton. */
+  const [listError, setListError] = useState("");
+  const [reload, setReload] = useState(0);
   const root = useRef<HTMLDivElement>(null);
   const loadedSeason = useRef<string | null>(null);
   const isSeries = route.kind === "Series";
@@ -71,22 +75,29 @@ export function DetailsPage({
       .catch((err) => {
         if (alive && !route.seed) setError(err instanceof Error ? err.message : String(err));
       });
-    if (isSeries) {
-      Promise.all([api.getSeasons(route.id), api.getSeriesNextUp(route.id).catch(() => null)])
-        .then(([list, next]) => {
-          if (!alive) return;
-          setSeasons(list);
-          setNextUp(next);
-          setSeasonId((current) => current ?? next?.seasonId ?? list[0]?.id ?? null);
-        })
-        .catch((err) => {
-          if (alive) setError(err instanceof Error ? err.message : String(err));
-        });
-    }
     return () => {
       alive = false;
     };
-  }, [route.id, route.seed, isSeries]);
+  }, [route.id, route.seed]);
+
+  useEffect(() => {
+    if (!isSeries) return;
+    let alive = true;
+    setListError("");
+    Promise.all([api.getSeasons(route.id), api.getSeriesNextUp(route.id).catch(() => null)])
+      .then(([list, next]) => {
+        if (!alive) return;
+        setSeasons(list);
+        setNextUp(next);
+        setSeasonId((current) => current ?? next?.seasonId ?? list[0]?.id ?? null);
+      })
+      .catch((err) => {
+        if (alive) setListError(err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [route.id, isSeries, reload]);
 
   useEffect(() => {
     if (!isSeries || !seasonId) return;
@@ -94,6 +105,7 @@ export function DetailsPage({
     // Keep the rows while a watched/favorite toggle refreshes the same season; blank
     // them when another season is selected.
     if (loadedSeason.current !== seasonId) setEpisodes(null);
+    setListError("");
     api
       .getEpisodes(route.id, seasonId)
       .then((list) => {
@@ -102,12 +114,12 @@ export function DetailsPage({
         setEpisodes(list);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setListError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       alive = false;
     };
-  }, [isSeries, route.id, seasonId, userDataVersion]);
+  }, [isSeries, route.id, seasonId, userDataVersion, reload]);
 
   const movie = detail;
   const heading = movie?.name ?? route.seed?.name ?? "";
@@ -177,7 +189,8 @@ export function DetailsPage({
           </div>
         ) : (
           <>
-            <section className="relative h-[58vh] min-h-[420px] w-full overflow-hidden">
+            {/* Grows with its content instead of clipping it on a short window. */}
+            <section className="relative flex min-h-[max(58vh,420px)] w-full items-end overflow-hidden">
               <div
                 className="absolute inset-0 will-change-transform"
                 style={{ transform: "translateY(calc(var(--scroll-y, 0) * 0.5px))" }}
@@ -200,7 +213,7 @@ export function DetailsPage({
                     "linear-gradient(180deg, transparent 0%, color-mix(in oklab, var(--details-tint) 40%, transparent) 45%, color-mix(in oklab, var(--details-tint) 85%, transparent) 80%, var(--details-tint) 100%)",
                 }}
               />
-              <div className="absolute bottom-8 left-page max-w-[min(720px,70%)]">
+              <div className="relative w-full max-w-[768px] px-page pt-28 pb-8 md:max-w-[min(768px,75%)]">
                 {movie.logoUrl ? (
                   <img
                     src={movie.logoUrl}
@@ -299,7 +312,16 @@ export function DetailsPage({
                   <div className="mb-4">
                     <SeasonChips seasons={seasons} value={seasonId} onChange={setSeasonId} />
                   </div>
-                  {episodes == null ? (
+                  {listError ? (
+                    <div className="flex flex-wrap items-center gap-4 rounded-btn bg-surface px-5 py-4">
+                      <p className="min-w-0 flex-1 text-sm text-muted">
+                        {t("cannotConnect")} <span className="text-dim">· {listError}</span>
+                      </p>
+                      <Pill variant="tonal" icon={<RotateCcw size={14} />} onClick={() => setReload((n) => n + 1)}>
+                        {t("retry")}
+                      </Pill>
+                    </div>
+                  ) : episodes == null ? (
                     <EpisodeListSkeleton />
                   ) : episodes.length ? (
                     <EpisodeList
@@ -318,7 +340,7 @@ export function DetailsPage({
               {chapters.length ? (
                 <section>
                   <h2 className="mb-4 text-[18px] font-semibold">{t("chapters")}</h2>
-                  <div className="no-scrollbar flex snap-x gap-3 overflow-x-auto pb-1">
+                  <ScrollRow gap="gap-3" className="snap-x pb-1">
                     {chapters.map((chapter) => {
                       const image = chapterImageUrl(movie.id, chapter);
                       const name = chapter.name ?? `${t("chapter")} ${chapter.index + 1}`;
@@ -347,7 +369,7 @@ export function DetailsPage({
                         </button>
                       );
                     })}
-                  </div>
+                  </ScrollRow>
                 </section>
               ) : null}
 

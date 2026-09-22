@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Compass, LoaderCircle } from "lucide-react";
+import { Compass, X } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
-import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
 import { Select } from "../components/Select";
 import { Shimmer } from "../components/Shimmer";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
+import { EmptyState } from "../components/EmptyState";
+import { LoadMoreButton } from "../components/LoadMoreButton";
 
 type Source = "all" | "server" | "online";
 type Kind = "movie" | "series";
@@ -38,6 +39,15 @@ function titleKey(movie: Movie): string {
  * posters. The same filters apply to the Jellyfin library and to every addon catalog
  * that supports them; server copies win over online duplicates of the same IMDb id.
  */
+/** Filters survive leaving the tab (the screen unmounts) for the rest of the session. */
+let lastFilters: { source: Source; kind: Kind; genre: string | null; year: number | null; sort: BrowseSort } = {
+  source: "all",
+  kind: "movie",
+  genre: null,
+  year: null,
+  sort: "popular",
+};
+
 export function Discover({
   hasServer,
   onOpen,
@@ -54,11 +64,12 @@ export function Discover({
   const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [serverGenres, setServerGenres] = useState<string[]>([]);
-  const [source, setSource] = useState<Source>("all");
-  const [kind, setKind] = useState<Kind>("movie");
-  const [genre, setGenre] = useState<string | null>(null);
-  const [year, setYear] = useState<number | null>(null);
-  const [sort, setSort] = useState<BrowseSort>("popular");
+  const [source, setSource] = useState<Source>(lastFilters.source);
+  const [kind, setKind] = useState<Kind>(lastFilters.kind);
+  const [genre, setGenre] = useState<string | null>(lastFilters.genre);
+  const [year, setYear] = useState<number | null>(lastFilters.year);
+  const [sort, setSort] = useState<BrowseSort>(lastFilters.sort);
+  lastFilters = { source, kind, genre, year, sort };
   const [items, setItems] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
@@ -273,7 +284,7 @@ export function Discover({
 
       <div className="mb-6 flex flex-wrap items-center gap-2.5">
         <SegmentedControl<Kind>
-          label={t("discover")}
+          label={t("filterType")}
           value={kind}
           options={[
             { value: "movie", label: t("movies") },
@@ -286,7 +297,7 @@ export function Discover({
         />
         {hasServer && hasAddons ? (
           <SegmentedControl<Source>
-            label={t("discover")}
+            label={t("filterSource")}
             value={source}
             options={[
               { value: "all", label: t("sourceAll") },
@@ -304,15 +315,29 @@ export function Discover({
           value={year == null ? "" : String(year)}
           options={yearOptions}
           onChange={(v) => setYear(v ? Number(v) : null)}
-          label={t("anyYear")}
+          label={t("filterYear")}
         />
-        <Select value={sort} options={sortOptions} onChange={setSort} label={t("sortPopular")} />
+        <Select value={sort} options={sortOptions} onChange={setSort} label={t("sortBy")} />
         <Select
           value={genre ?? ""}
           options={genreOptions}
           onChange={(v) => setGenre(v || null)}
-          label={t("anyGenre")}
+          label={t("filterGenre")}
         />
+        {genre != null || year != null || sort !== "popular" ? (
+          <button
+            type="button"
+            onClick={() => {
+              setGenre(null);
+              setYear(null);
+              setSort("popular");
+            }}
+            className="btn-press inline-flex h-10 items-center gap-1.5 rounded-pill px-3 text-[13px] font-medium text-muted hover:bg-white/8 hover:text-text"
+          >
+            <X size={14} />
+            {t("clearFilters")}
+          </button>
+        ) : null}
       </div>
 
       {loading ? (
@@ -336,26 +361,11 @@ export function Discover({
             ))}
           </div>
           {more ? (
-            <div className="mt-10 flex justify-center">
-              <button
-                type="button"
-                disabled={loadingMore}
-                onClick={() => void fetchPage(false)}
-                className={cn(
-                  "btn-press inline-flex h-11 items-center gap-2 rounded-pill bg-white/10 px-6 text-[14px] font-semibold hover:bg-white/16 disabled:opacity-60",
-                )}
-              >
-                {loadingMore ? <LoaderCircle size={16} className="animate-spin" /> : null}
-                {t("loadMore")}
-              </button>
-            </div>
+            <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (
-        <div className="rounded-card bg-surface px-8 py-12 text-center">
-          <p className="text-[16px] font-medium">{t("noDiscoverResults")}</p>
-          {!hasServer && !hasAddons ? <p className="mt-1 text-[13px] text-dim">{t("noAddonsYetHint")}</p> : null}
-        </div>
+        <EmptyState title={t("noDiscoverResults")} hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined} />
       )}
     </div>
   );

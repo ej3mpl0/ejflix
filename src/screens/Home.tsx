@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Puzzle } from "lucide-react";
+import { Puzzle, RotateCcw, WifiOff } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
 import { PosterCard } from "../components/PosterCard";
@@ -29,6 +29,7 @@ import { useUserData } from "../lib/userdata-context";
 import { useBackNavigation } from "../lib/use-back";
 import { routeFor, type DetailsRoute } from "../lib/view-stack";
 import { mixFeatured, useAddonFeatured } from "../hooks/useAddonFeatured";
+import { EmptyState } from "../components/EmptyState";
 
 const PAGE_EXIT_MS = 250;
 
@@ -94,6 +95,7 @@ export function Home({
   const [scrolled, setScrolled] = useState(false);
   const scrolledRef = useRef(false);
   const scroller = useRef<HTMLDivElement>(null);
+  const scrollOf = useRef(new Map<NavView, number>());
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
 
@@ -275,13 +277,19 @@ export function Home({
   /** "My list" is the server's favourites plus the online titles saved locally. */
   const myList = useMemo(() => [...onlineList, ...(favorites ?? [])], [onlineList, favorites]);
 
+  /** Push the current view on the back stack together with where it was scrolled to. */
+  const remember = () => {
+    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    scrollOf.current.set(view, scroller.current?.scrollTop ?? 0);
+  };
+
   const openView = (next: NavView) => {
     setStack([]);
     if (next !== "settings") setSettingsSection(undefined);
     // Leaving the search view empties the box, so the header stops showing a stale query.
     if (next !== "search") setSearch("");
     if (next === view) return;
-    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    remember();
     setView(next);
     scroller.current?.scrollTo({ top: 0 });
   };
@@ -290,6 +298,9 @@ export function Home({
     const previous = history.current.pop() ?? "home";
     if (previous !== "search") setSearch("");
     setView(previous);
+    const top = scrollOf.current.get(previous) ?? 0;
+    // Wait for the previous view to render before putting it back where it was.
+    requestAnimationFrame(() => requestAnimationFrame(() => scroller.current?.scrollTo({ top })));
   };
 
   /** Switching to the search view without wiping what is being typed. */
@@ -297,7 +308,7 @@ export function Home({
     if (view === "search") return;
     setStack([]);
     setSettingsSection(undefined);
-    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    remember();
     setView("search");
     scroller.current?.scrollTo({ top: 0 });
   };
@@ -306,7 +317,7 @@ export function Home({
   const openSettings = (section: SettingsSectionId) => {
     setSettingsSection(section);
     if (view === "settings") return;
-    history.current = [...history.current.slice(-(HISTORY_MAX - 1)), view];
+    remember();
     setStack([]);
     setView("settings");
     scroller.current?.scrollTo({ top: 0 });
@@ -376,18 +387,18 @@ export function Home({
   };
 
   const retry = (
-    <div className="grid h-full place-items-center px-6 text-center">
-      <div>
-        <p className="mb-4 text-lg">{t("cannotConnect")}</p>
-        <p className="mb-6 text-sm text-muted">{error || libError}</p>
-        <button
-          type="button"
-          onClick={() => (activeLibrary ? void loadLibrary(activeLibrary) : void load())}
-          className="btn-press h-11 rounded-btn bg-accent px-6 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-        >
-          {t("retry")}
-        </button>
-      </div>
+    <div className="grid h-full place-items-center px-6">
+      <EmptyState
+        large
+        icon={<WifiOff size={26} />}
+        title={t("cannotConnect")}
+        hint={error || libError}
+        action={{
+          label: t("retry"),
+          icon: <RotateCcw size={16} />,
+          onClick: () => (activeLibrary ? void loadLibrary(activeLibrary) : void load()),
+        }}
+      />
     </div>
   );
 
@@ -408,10 +419,7 @@ export function Home({
           ))}
         </div>
       ) : empty ? (
-        <div className="rounded-card bg-surface px-8 py-12 text-center">
-          <p className="text-[16px] font-medium">{empty.text}</p>
-          <p className="mt-1 text-[13px] text-dim">{empty.hint}</p>
-        </div>
+        <EmptyState title={empty.text} hint={empty.hint} />
       ) : null}
     </div>
   );
@@ -419,20 +427,13 @@ export function Home({
   // Nothing at all to show (online profile without addons): point at Settings › Addons.
   const noAddons = (
     <div className="px-page pt-16">
-      <div className="mx-auto max-w-[560px] rounded-card bg-surface px-8 py-12 text-center">
-        <span className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent">
-          <Puzzle size={26} />
-        </span>
-        <p className="text-[18px] font-semibold">{t("noAddonsYet")}</p>
-        <p className="mt-1 text-[13px] text-dim">{t("noAddonsYetHint")}</p>
-        <button
-          type="button"
-          onClick={() => openView("settings")}
-          className="btn-press mt-6 h-11 rounded-btn bg-accent px-6 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-        >
-          {t("goToAddons")}
-        </button>
-      </div>
+      <EmptyState
+        large
+        icon={<Puzzle size={26} />}
+        title={t("noAddonsYet")}
+        hint={t("noAddonsYetHint")}
+        action={{ label: t("goToAddons"), onClick: () => openView("settings") }}
+      />
     </div>
   );
 

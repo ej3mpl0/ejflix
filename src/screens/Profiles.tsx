@@ -10,6 +10,7 @@ import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import type { LocalProfile, PublicUser, SavedServer, Session } from "../lib/types";
+import { fieldLgClass } from "../lib/ui";
 
 const MAX_LOCAL = 8;
 
@@ -139,8 +140,10 @@ export function Profiles({
   const canAddLocal = locals.length < MAX_LOCAL;
 
   const topBar = (
-    <div className="relative z-10 flex h-[60px] items-center justify-between px-6">
-      <Logo />
+    <div className="relative z-10 flex h-[60px] items-center justify-between px-6" data-tauri-drag-region>
+      <div data-tauri-drag-region>
+        <Logo />
+      </div>
       <div className="flex items-center gap-2">
         <LanguageSelect />
         <WindowControls />
@@ -160,7 +163,7 @@ export function Profiles({
             {t("enterPin", { name: locked.name })}
           </h1>
           <PinInput error={pinError} disabled={signing} onSubmit={(pin) => void enterLocal(locked, pin)} />
-          <p className="mt-4 h-5 text-[13px] text-accent">{pinError ? t("wrongPin") : ""}</p>
+          <p className="mt-4 h-5 text-[13px] text-danger">{pinError ? t("wrongPin") : ""}</p>
           <button
             type="button"
             onClick={() => setLocked(null)}
@@ -358,7 +361,7 @@ export function Profiles({
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder={t("usernamePlaceholder")}
-                  className="mb-4 h-12 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/30"
+                  className={cn("mb-4", fieldLgClass)}
                 />
               </>
             ) : null}
@@ -371,9 +374,9 @@ export function Profiles({
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder={t("passwordPlaceholder")}
-              className="mb-3 h-12 w-full rounded-lg border border-white/10 bg-black/40 px-3 text-sm outline-none focus:border-accent focus:ring-2 focus:ring-accent/30"
+              className={cn("mb-3", fieldLgClass)}
             />
-            {error ? <p className="mb-3 text-sm text-accent">{error}</p> : <div className="mb-3 h-5" />}
+            {error ? <p className="mb-3 text-sm text-danger">{error}</p> : <div className="mb-3 h-5" />}
             <div className="flex gap-2">
               <button
                 type="submit"
@@ -398,7 +401,7 @@ export function Profiles({
             </div>
           </form>
         ) : error && !loading ? (
-          <p className="mt-8 text-sm text-accent">{error}</p>
+          <p className="mt-8 text-sm text-danger">{error}</p>
         ) : null}
 
         {!loading ? (

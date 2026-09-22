@@ -26,6 +26,8 @@ type UserDataContextValue = {
   flags: (movie: Movie) => ItemFlags;
   setFavorite: (movie: Movie, favorite: boolean) => Promise<void>;
   setPlayed: (movie: Movie, played: boolean) => Promise<void>;
+  /** Take a title out of "Continue watching" without marking it watched. */
+  removeProgress: (movie: Movie) => Promise<void>;
   /** True while a request for that id is in flight (buttons disable themselves). */
   pending: (id: string) => boolean;
   /** Bumps after every successful mutation; Home refreshes its data on it. */
@@ -160,6 +162,24 @@ export function UserDataProvider({
     [patch, mark, setOnlineFlag],
   );
 
+  const removeProgress = useCallback(
+    async (movie: Movie) => {
+      const key = movie.external?.videoId;
+      if (!key) {
+        // Jellyfin keeps the position on the item: clearing the played state resets it.
+        await setPlayed(movie, false);
+        return;
+      }
+      try {
+        await api.addonProgressRemove(key);
+        setVersion((n) => n + 1);
+      } catch {
+        onErrorRef.current(tRef.current("watchedError"));
+      }
+    },
+    [setPlayed],
+  );
+
   const value = useMemo<UserDataContextValue>(
     () => ({
       flags: (movie) => {
@@ -175,12 +195,13 @@ export function UserDataProvider({
       },
       setFavorite,
       setPlayed,
+      removeProgress,
       pending: (id) => pendingIds.has(id),
       version,
       clearOverrides: () => setOverrides({}),
       onlineList: library.filter((entry) => entry.saved).map(libraryToMovie),
     }),
-    [overrides, pendingIds, version, setFavorite, setPlayed, library],
+    [overrides, pendingIds, version, setFavorite, setPlayed, removeProgress, library],
   );
 
   return <UserDataContext.Provider value={value}>{children}</UserDataContext.Provider>;

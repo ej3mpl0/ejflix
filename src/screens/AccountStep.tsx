@@ -44,15 +44,14 @@ export function AccountStep({
     }
   };
 
-  const home = mode === "mfa" ? () => onDone("later") : skip;
-
   return (
     <div className="grain relative flex h-full flex-col bg-base">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
-      <div className="relative z-10 flex h-[60px] items-center justify-between px-6">
-        <button type="button" onClick={home} aria-label={t("home")} className="btn-press inline-flex items-center">
+      {/* The logo is plain branding here: skipping the account is an explicit choice below. */}
+      <div className="relative z-10 flex h-[60px] items-center justify-between px-6" data-tauri-drag-region>
+        <div data-tauri-drag-region>
           <Logo />
-        </button>
+        </div>
         <div className="flex items-center gap-2">
           <LanguageSelect />
           <WindowControls />

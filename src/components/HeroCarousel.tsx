@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Info, Play } from "lucide-react";
+import { Info, Pause, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { cn, formatRuntime } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
@@ -30,6 +30,9 @@ export function HeroCarousel({
   const [previous, setPrevious] = useState<Movie | null>(null);
   const [dir, setDir] = useState<1 | -1>(1);
   const [hover, setHover] = useState(false);
+  /** Keyboard focus inside the hero pauses it too (WCAG 2.2.2), and so does the pause button. */
+  const [focused, setFocused] = useState(false);
+  const [paused, setPaused] = useState(false);
   const dragStart = useRef<number | null>(null);
   const dragged = useRef(false);
   const reduced = useRef(
@@ -61,14 +64,14 @@ export function HeroCarousel({
   }, [previous]);
 
   useEffect(() => {
-    if (count < 2 || hover || reduced.current) return;
+    if (count < 2 || hover || focused || paused || reduced.current) return;
     const handle = window.setInterval(() => {
       if (document.hidden) return;
       go(1);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count, hover, safeIndex]);
+  }, [count, hover, focused, paused, safeIndex]);
 
   if (!current) return null;
 
@@ -79,9 +82,16 @@ export function HeroCarousel({
 
   return (
     <section
-      className="group/hero relative h-[min(78vh,720px)] min-h-[480px] w-full overflow-hidden rounded-b-[var(--radius-hero)] bg-surface outline-none"
+      className="group/hero relative h-[min(78vh,720px)] min-h-[min(480px,70vh)] w-full overflow-hidden rounded-b-[var(--radius-hero)] bg-surface outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       tabIndex={0}
       aria-roledescription="carousel"
+      aria-label={t("featured")}
+      onFocus={(e) => {
+        if (e.currentTarget.matches(":focus-visible, :has(:focus-visible)")) setFocused(true);
+      }}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
+      }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onKeyDown={(e) => {
@@ -189,13 +199,24 @@ export function HeroCarousel({
       </div>
 
       {count > 1 ? (
-        <div className="absolute right-page bottom-16 flex items-center gap-2" role="tablist">
+        <div className="absolute right-page bottom-16 flex items-center gap-2">
+          {reduced.current ? null : (
+            <button
+              type="button"
+              onClick={() => setPaused((v) => !v)}
+              aria-label={paused ? t("playSlides") : t("pauseSlides")}
+              aria-pressed={paused}
+              className="mr-1 grid h-7 w-7 place-items-center rounded-full bg-black/40 text-white/80 opacity-0 transition-opacity duration-150 group-hover/hero:opacity-100 hover:bg-black/60 hover:text-white focus-visible:opacity-100 data-[paused=true]:opacity-100"
+              data-paused={paused}
+            >
+              {paused ? <Play size={12} fill="currentColor" /> : <Pause size={12} fill="currentColor" />}
+            </button>
+          )}
           {items.map((item, i) => (
             <button
               key={item.id}
               type="button"
-              role="tab"
-              aria-selected={i === safeIndex}
+              aria-current={i === safeIndex ? "true" : undefined}
               aria-label={t("slide", { n: i + 1 })}
               onClick={() => goTo(i)}
               className="grid h-6 place-items-center px-0.5"

@@ -8,6 +8,7 @@ import { useI18n } from "../../lib/locale-context";
 import { useSettings } from "../../lib/settings-context";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
+import { fieldClass as field } from "../../lib/ui";
 
 const VARIABLES = ["{title}", "{episode}", "{year}", "{type}", "{source}"];
 
@@ -62,7 +63,7 @@ export function DiscordSection() {
       title: t("discordSampleTitle"),
       episode: t("discordSampleEpisode"),
       year: "1999",
-      type: locale === "en" ? "Movie" : "Película",
+      type: t("movie"),
       source: "Jellyfin",
     }),
     [t, locale],
@@ -73,8 +74,6 @@ export function DiscordSection() {
     prefs.header === "name" ? "ejFlix" : prefs.header === "state" ? previewState || previewDetails : previewDetails;
 
   const commit = (patch: Partial<typeof prefs>) => void update({ discord: patch });
-  const field =
-    "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
 
   const statusLine = !prefs.enabled
     ? null

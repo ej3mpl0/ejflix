@@ -26,6 +26,23 @@ pub struct Settings {
     pub discord: DiscordPrefs,
     pub iptv: IptvPrefs,
     pub torrents: TorrentPrefs,
+    pub onboarding: OnboardingPrefs,
+}
+
+/// First-run setup of a profile (torrents, addon import).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct OnboardingPrefs {
+    /// The setup step was completed or skipped. Profiles saved before the step existed
+    /// count as done (see `legacy_done`), so updating never shows it to them.
+    pub setup_done: bool,
+}
+
+/// A stored settings object from before the setup step has no `onboarding` key.
+fn legacy_done(value: &Value, settings: &mut Settings) {
+    if value.get("onboarding").is_none() {
+        settings.onboarding.setup_done = true;
+    }
 }
 
 /// Built-in torrent playback (addon sources that come as a bare info hash).
@@ -291,7 +308,8 @@ pub fn load(app: &tauri::AppHandle, user_id: &str) -> Result<Settings, String> {
     let Some(value) = store.get(key(user_id)) else {
         return Ok(Settings::default());
     };
-    let settings: Settings = serde_json::from_value(value).unwrap_or_default();
+    let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_default();
+    legacy_done(&value, &mut settings);
     Ok(settings.sanitized())
 }
 
@@ -313,7 +331,11 @@ pub fn merge_and_save(
     // refused rather than resetting every setting.
     let stored: Settings = store
         .get(key(user_id))
-        .and_then(|v| serde_json::from_value(v).ok())
+        .and_then(|v| {
+            let mut settings: Settings = serde_json::from_value(v.clone()).ok()?;
+            legacy_done(&v, &mut settings);
+            Some(settings)
+        })
         .unwrap_or_default();
     let mut current = serde_json::to_value(&stored).map_err(|e| e.to_string())?;
     deep_merge(&mut current, patch);

@@ -8,6 +8,10 @@ import { useSettings } from "../../lib/settings-context";
 import { Select } from "../Select";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
+import { ConfirmButton } from "../ConfirmButton";
+import { fieldClass } from "../../lib/ui";
+import { cn } from "../../lib/format";
+import { AddonImport } from "../AddonImport";
 
 /** Disk the torrent cache may take, in GB. */
 const CACHE_SIZES = [2, 5, 10, 20, 50, 100];
@@ -117,7 +121,7 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
             onChange={(e) => setUrl(e.target.value)}
             placeholder={t("addonUrlPlaceholder")}
             aria-label={t("addAddon")}
-            className="h-11 min-w-0 flex-1 rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent"
+            className={cn(fieldClass, "min-w-0 flex-1")}
           />
           <button
             type="submit"
@@ -171,20 +175,34 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
                   <Settings2 size={16} />
                 </button>
               ) : null}
-              <button
-                type="button"
-                onClick={() => void remove(addon)}
-                aria-label={t("removeAddon")}
-                title={t("removeAddon")}
-                className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
-              >
-                <Trash2 size={16} />
-              </button>
+              {/* Built-ins (Cinemeta) are switched in their own section, never removed. */}
+              {!addon.builtin ? (
+                <ConfirmButton
+                  confirmLabel={t("remove")}
+                  onConfirm={() => remove(addon)}
+                  trigger={(ask) => (
+                    <button
+                      type="button"
+                      onClick={ask}
+                      aria-label={`${t("removeAddon")}: ${addon.name}`}
+                      title={t("removeAddon")}
+                      className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                />
+              ) : null}
             </div>
           ))
         ) : (
           <p className="py-4 text-[13px] text-dim">{t("noAddons")}</p>
         )}
+      </SettingsSection>
+      <SettingsSection title={t("importAddons")} description={t("importAddonsHint")}>
+        <div className="max-w-[520px] py-4">
+          <AddonImport />
+        </div>
       </SettingsSection>
       <SettingsSection title="Cinemeta">
         <SettingsRow label={t("cinemetaRow")} hint={t("cinemetaHint")}>
@@ -240,15 +258,21 @@ export function AddonsSection({ onToast }: { onToast: (message: string) => void 
               className="h-11 min-w-[110px]"
               options={CACHE_SIZES.map((gb) => ({ value: String(gb), label: `${gb} GB` }))}
             />
-            <button
-              type="button"
-              disabled={!cache?.torrents}
-              onClick={() => void clearCache()}
-              className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-4 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60"
-            >
-              <Trash2 size={16} />
-              {t("torrentsClearCache")}
-            </button>
+            <ConfirmButton
+              confirmLabel={t("torrentsClearCache")}
+              onConfirm={() => clearCache()}
+              trigger={(ask) => (
+                <button
+                  type="button"
+                  disabled={!cache?.torrents}
+                  onClick={ask}
+                  className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-4 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60"
+                >
+                  <Trash2 size={16} />
+                  {t("torrentsClearCache")}
+                </button>
+              )}
+            />
           </div>
         </SettingsRow>
       </SettingsSection>

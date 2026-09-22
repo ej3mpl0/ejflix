@@ -17,10 +17,11 @@ import {
 } from "lucide-react";
 import type { MediaSegment, Movie, PlayerState, Programme } from "../lib/types";
 import { cn, episodeCode, formatClock } from "../lib/format";
+import { isSeriesEpisode } from "../lib/addons";
 import { aspectLabel } from "../lib/aspect";
 import { formatRange, programmeProgress } from "../lib/iptv";
 import { VolumeSlider } from "./VolumeSlider";
-import { TrackMenu } from "./TrackMenu";
+import { TrackMenu, trackShortName } from "./TrackMenu";
 import { SpeedMenu, formatSpeed } from "./SpeedMenu";
 import { Timeline } from "./Timeline";
 import { QualityBadges } from "./QualityBadge";
@@ -59,7 +60,7 @@ function ControlChip({
       )}
     >
       {icon}
-      <span className="tabular">{label}</span>
+      <span className="max-w-[140px] truncate tabular">{label}</span>
     </button>
   );
 }
@@ -137,12 +138,17 @@ export function PlayerControls({
       : `${formatClock(shownTime)} / ${formatClock(state.duration)}`;
 
   const toggleMenu = (next: Exclude<PlayerMenu, null>) => onMenu(menu === next ? null : next);
-  const isEpisode = movie.kind === "Episode" && Boolean(movie.seriesId);
+  const isEpisode = isSeriesEpisode(movie);
   const heading = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
   const episodeLine = isEpisode
     ? [episodeCode(movie, t("episodeCode")), movie.name].filter(Boolean).join(" · ")
     : "";
   const hasVersions = movie.mediaSources.length > 1;
+  // The chips name the track in use ("English"), not just the kind of menu they open.
+  const currentSub = state.tracks.find((track) => track.kind === "sub" && track.selected) ?? null;
+  const currentAudio = state.tracks.find((track) => track.kind === "audio" && track.selected) ?? null;
+  const subLabel = currentSub ? trackShortName(currentSub, locale) : t("subtitlesOff");
+  const audioLabel = currentAudio ? trackShortName(currentAudio, locale) : t("audio");
   const showPanelChip = isEpisode || hasVersions || live != null;
   const panelLabel = live ? t("channels") : isEpisode ? t("episodes") : t("versions");
   const liveLine = live
@@ -278,31 +284,36 @@ export function PlayerControls({
             />
           )}
 
-          <div className="relative flex h-12 items-center">
-            <VolumeSlider volume={state.volume} mute={state.mute} onVolume={onVolume} onMute={onMute} />
-            {live ? (
-              <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-accent uppercase">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                {t("liveBadge")}
-              </span>
-            ) : (
-              <button
-                type="button"
-                className="icon-hit ml-2 rounded px-1.5 py-1 text-[13px] text-white/90 tabular hover:bg-white/8"
-                onClick={onToggleRemaining}
-                aria-label={remaining ? t("elapsedTime") : t("remainingTime")}
-                title={remaining ? t("elapsedTime") : t("remainingTime")}
-              >
-                {clock}
-              </button>
-            )}
+          {/* Three columns, so the centred transport can never run into the clock or the
+              expanded volume on a narrow window. */}
+          <div className="grid h-12 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+            <div className="flex min-w-0 items-center">
+              <VolumeSlider volume={state.volume} mute={state.mute} onVolume={onVolume} onMute={onMute} />
+              {live ? (
+                <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-accent uppercase">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                  {t("liveBadge")}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="icon-hit ml-2 min-w-0 truncate rounded px-1.5 py-1 text-[13px] whitespace-nowrap text-white/90 tabular hover:bg-white/8"
+                  onClick={onToggleRemaining}
+                  aria-label={remaining ? t("elapsedTime") : t("remainingTime")}
+                  title={remaining ? t("elapsedTime") : t("remainingTime")}
+                >
+                  {clock}
+                </button>
+              )}
+            </div>
 
-            <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
+            <div className="flex items-center gap-2">
               <button
                 type="button"
                 className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
                 onClick={() => onSeek(-10)}
                 aria-label={t("seekBack")}
+                title={`${t("seekBack")} (J)`}
                 tabIndex={live ? -1 : undefined}
               >
                 <RotateCcw size={20} />
@@ -312,6 +323,7 @@ export function PlayerControls({
                 className="btn-press grid h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20"
                 onClick={onTogglePause}
                 aria-label={state.paused ? t("play") : t("pause")}
+                title={`${state.paused ? t("play") : t("pause")} (K)`}
               >
                 <span className="relative grid h-6 w-6 place-items-center">
                   <Play
@@ -331,18 +343,20 @@ export function PlayerControls({
                 className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
                 onClick={() => onSeek(10)}
                 aria-label={t("seekForward")}
+                title={`${t("seekForward")} (L)`}
                 tabIndex={live ? -1 : undefined}
               >
                 <RotateCw size={20} />
               </button>
             </div>
 
-            <div className="ml-auto flex items-center gap-1">
+            <div className="flex items-center justify-end gap-1">
               <button
                 type="button"
                 className="icon-hit grid h-10 w-10 place-items-center text-white"
                 onClick={onFullscreen}
-                aria-label={t("fullscreen")}
+                aria-label={fullscreen ? t("exitFullscreen") : t("fullscreen")}
+                aria-pressed={fullscreen}
               >
                 <span className="relative grid h-5 w-5 place-items-center">
                   <Minimize size={20} className={`icon-swap absolute ${fullscreen ? "icon-swap-on" : "icon-swap-off"}`} />
@@ -353,7 +367,7 @@ export function PlayerControls({
           </div>
 
           <div className="mt-2 flex justify-center">
-            <div className="glass-pill relative flex items-center gap-1 rounded-3xl px-2 py-1.5">
+            <div className="glass-pill relative flex max-w-full flex-wrap items-center justify-center gap-1 rounded-3xl px-2 py-1.5">
               <ControlChip
                 icon={<Ratio size={16} />}
                 label={aspectLabel(state.aspect, t)}
@@ -385,9 +399,10 @@ export function PlayerControls({
               <div className="relative">
                 <ControlChip
                   icon={<Subtitles size={16} />}
-                  label={t("subtitles")}
+                  label={subLabel}
+                  ariaLabel={`${t("subtitles")}: ${subLabel}`}
+                  active={menu === "sub" || currentSub != null}
                   expanded={menu === "sub"}
-                  active={menu === "sub"}
                   onClick={() => toggleMenu("sub")}
                 />
                 {menu === "sub" ? (
@@ -404,7 +419,8 @@ export function PlayerControls({
               <div className="relative">
                 <ControlChip
                   icon={<AudioLines size={16} />}
-                  label={t("audio")}
+                  label={audioLabel}
+                  ariaLabel={`${t("audio")}: ${audioLabel}`}
                   expanded={menu === "audio"}
                   active={menu === "audio"}
                   onClick={() => toggleMenu("audio")}

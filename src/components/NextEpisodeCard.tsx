@@ -9,18 +9,27 @@ export function NextEpisodeCard({
   countdown,
   onPlay,
   onDismiss,
+  shifted = false,
 }: {
   episode: Movie;
   countdown: number | null;
   onPlay: () => void;
   onDismiss: () => void;
+  /** A side panel is open: sit to its left instead of under it. */
+  shifted?: boolean;
 }) {
   const { t } = useI18n();
   const code = episodeCode(episode, t("episodeCode"));
   const image = episode.thumbUrl ?? episode.backdropUrl ?? episode.posterUrl;
 
   return (
-    <div className="slide-in-right absolute right-6 bottom-[176px] z-30 w-[292px] rounded-2xl border border-white/12 bg-[#191919]/89 p-3 text-white shadow-[0_12px_32px_rgb(0_0_0_/_0.55)] backdrop-blur-md">
+    <div
+      role="status"
+      aria-live="polite"
+      className={`slide-in-right absolute bottom-[176px] z-30 w-[292px] rounded-2xl border border-white/12 bg-surface/90 p-3 transition-[right] duration-300 ${
+        shifted ? "right-[452px]" : "right-8"
+      } text-white shadow-[0_12px_32px_rgb(0_0_0_/_0.55)] backdrop-blur-md`}
+    >
       <button
         type="button"
         onClick={onDismiss}

@@ -6,15 +6,34 @@ import { useI18n } from "../../lib/locale-context";
 
 export function ThemePicker({ value, onChange }: { value: ThemeId; onChange: (id: ThemeId) => void }) {
   const { t } = useI18n();
+  const selected = Math.max(
+    0,
+    THEMES.findIndex((theme) => theme.id === value),
+  );
   return (
-    <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-3">
-      {THEMES.map((theme) => {
+    <div
+      role="radiogroup"
+      aria-label={t("appearance")}
+      className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-3"
+      onKeyDown={(e) => {
+        const step =
+          e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+        if (!step) return;
+        e.preventDefault();
+        onChange(THEMES[(selected + step + THEMES.length) % THEMES.length].id);
+        const group = e.currentTarget;
+        requestAnimationFrame(() => group.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus());
+      }}
+    >
+      {THEMES.map((theme, index) => {
         const active = theme.id === value;
         return (
           <button
             key={theme.id}
             type="button"
-            aria-pressed={active}
+            role="radio"
+            aria-checked={active}
+            tabIndex={index === selected ? 0 : -1}
             onClick={() => onChange(theme.id)}
             className="group flex flex-col items-center gap-2 rounded-xl p-2 hover:bg-white/5"
           >

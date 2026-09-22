@@ -1,14 +1,35 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Star, X } from "lucide-react";
-import type { Channel, EpgNow, LiveRef } from "../lib/types";
+import type { Channel, LiveRef } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { channelInitials, programmeProgress } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 import { Chip } from "./Chip";
 import { Shimmer } from "./Shimmer";
+import { useEpgNow } from "../hooks/useEpgNow";
 
 type Tab = "group" | "favorites";
+
+/** Logo tile of a row; falls back to the initials when the image is missing or broken. */
+function RowLogo({ channel }: { channel: Channel }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="grid h-12 w-[84px] shrink-0 place-items-center overflow-hidden rounded-md bg-white/6 p-1.5">
+      {channel.logo && !broken ? (
+        <img
+          src={channel.logo}
+          alt=""
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="max-h-full max-w-full object-contain"
+        />
+      ) : (
+        <span className="text-[13px] font-bold text-white/70">{channelInitials(channel.name)}</span>
+      )}
+    </div>
+  );
+}
 
 /**
  * Side panel inside the player while a channel plays: the channels of the same group
@@ -31,7 +52,6 @@ export function ChannelsPanel({
   const { t } = useI18n();
   const [tab, setTab] = useState<Tab>("group");
   const [favorites, setFavorites] = useState<Channel[] | null>(null);
-  const [epg, setEpg] = useState<Record<string, EpgNow>>({});
   const list = tab === "group" ? channels : favorites ?? [];
 
   useEffect(() => {
@@ -50,22 +70,7 @@ export function ChannelsPanel({
     };
   }, [tab, favorites]);
 
-  const ids = useMemo(() => list.filter((c) => c.epg).map((c) => c.id), [list]);
-  const idsKey = ids.join(",");
-  useEffect(() => {
-    if (!ids.length) return;
-    let alive = true;
-    api
-      .iptvEpgNow(ids)
-      .then((map) => {
-        if (alive) setEpg((previous) => ({ ...previous, ...map }));
-      })
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idsKey]);
+  const epg = useEpgNow(list);
 
   // Keep the current channel in view when the panel opens.
   useEffect(() => {
@@ -134,13 +139,7 @@ export function ChannelsPanel({
               aria-current={current ? "true" : undefined}
             >
               {current ? <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent" /> : null}
-              <div className="grid h-12 w-[84px] shrink-0 place-items-center overflow-hidden rounded-md bg-white/6 p-1.5">
-                {channel.logo ? (
-                  <img src={channel.logo} alt="" loading="lazy" className="max-h-full max-w-full object-contain" />
-                ) : (
-                  <span className="text-[13px] font-bold text-white/70">{channelInitials(channel.name)}</span>
-                )}
-              </div>
+              <RowLogo channel={channel} />
               <div className="min-w-0 flex-1">
                 <p className={cn("truncate text-[13px]", current ? "font-semibold text-white" : "text-text")}>
                   {channel.number != null ? <span className="mr-1.5 text-dim tabular">{channel.number}</span> : null}

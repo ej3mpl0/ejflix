@@ -33,12 +33,15 @@ export function VolumeSlider({
           />
         </span>
       </button>
-      <div className="w-0 overflow-hidden transition-[width] duration-200 ease-out group-hover/vol:w-24">
+      {/* Opens on hover and on keyboard focus, so Tab can reach the slider. */}
+      <div className="w-0 overflow-hidden transition-[width] duration-200 ease-out group-hover/vol:w-24 group-focus-within/vol:w-24">
         <input
           type="range"
           min={0}
           max={100}
           value={mute ? 0 : volume}
+          aria-label={t("volume")}
+          aria-valuetext={`${Math.round(mute ? 0 : volume)}%`}
           onChange={(e) => onVolume(Number(e.target.value))}
           className={cn("vol-range mx-1 w-20 cursor-pointer appearance-none accent-accent")}
         />

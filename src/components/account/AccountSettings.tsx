@@ -7,20 +7,20 @@ import { authErrorText } from "../../lib/account-errors";
 import { SettingsRow, SettingsSection } from "../settings/SettingsSection";
 import { Toggle } from "../settings/Toggle";
 import { AccountPanel } from "./AccountPanel";
+import { fieldClass as field } from "../../lib/ui";
 
-const field =
-  "h-11 w-full rounded-btn border border-white/12 bg-black/40 px-3 text-sm text-text outline-none placeholder:text-dim focus:border-accent";
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
 const primary =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60";
 const danger =
-  "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold text-accent hover:bg-accent-soft disabled:opacity-60";
+  "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold text-danger hover:bg-danger/15 disabled:opacity-60";
 
 /** Settings › Account: the ejFlix account of the active profile. */
 export function AccountSettings({ onToast }: { onToast: (message: string) => void }) {
   const { t, locale } = useI18n();
   const [status, setStatus] = useState<AccountStatus | null>(null);
+  const [loadError, setLoadError] = useState("");
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [enroll, setEnroll] = useState<MfaEnrollment | null>(null);
@@ -29,12 +29,14 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const reload = useCallback(async () => {
+    setLoadError("");
     try {
       setStatus(await api.accountStatus());
-    } catch {
+    } catch (err) {
       setStatus(null);
+      setLoadError(authErrorText(err, t));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
@@ -58,7 +60,26 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
     }
   };
 
-  if (!status) return null;
+  if (!status) {
+    return (
+      <SettingsSection title={t("accountEjflix")}>
+        {loadError ? (
+          <div className="flex flex-wrap items-center gap-4 py-4">
+            <p className="min-w-0 flex-1 text-[13px] text-danger">{loadError}</p>
+            <button type="button" className={tonal} onClick={() => void reload()}>
+              <RefreshCw size={15} />
+              {t("retry")}
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 py-4 text-[13px] text-dim">
+            <LoaderCircle size={15} className="animate-spin" />
+            {t("accountWorking")}
+          </div>
+        )}
+      </SettingsSection>
+    );
+  }
 
   if (!status.signedIn || status.mfaRequired) {
     return (
@@ -261,7 +282,7 @@ export function AccountSettings({ onToast }: { onToast: (message: string) => voi
         <div className="py-4">
           {confirmDelete ? (
             <div className="space-y-3">
-              <p className="text-[13px] font-medium text-accent">{t("accountDeleteConfirm")}</p>
+              <p className="text-[13px] font-medium text-danger">{t("accountDeleteConfirm")}</p>
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"

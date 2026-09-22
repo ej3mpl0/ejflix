@@ -1546,6 +1546,19 @@ async fn addon_add(app: tauri::AppHandle, state: State<'_, AppState>, url: Strin
     Ok(info)
 }
 
+/// Addons of a Stremio account, for the import in the first-run setup and in Settings.
+#[tauri::command]
+async fn stremio_addons(
+    state: State<'_, AppState>,
+    email: String,
+    password: String,
+) -> Result<Vec<addons::ImportedAddon>, String> {
+    if email.trim().is_empty() || password.is_empty() {
+        return Err("stremio_auth".into());
+    }
+    state.addons.stremio_collection(&email, &password).await
+}
+
 #[tauri::command]
 async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: String) -> Result<(), String> {
     let url = addons::normalize_manifest_url(&url)?;
@@ -2078,6 +2091,7 @@ pub fn run() {
             addons_list,
             addon_add,
             addon_remove,
+            stremio_addons,
             addon_catalog,
             addon_meta,
             addon_streams,

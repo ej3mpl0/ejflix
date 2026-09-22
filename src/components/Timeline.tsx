@@ -3,6 +3,7 @@ import type { MediaSegment, Movie } from "../lib/types";
 import { PREVIEW_WIDTH } from "../lib/trickplay";
 import { TimelinePreview } from "./TimelinePreview";
 import { useI18n } from "../lib/locale-context";
+import { formatClock } from "../lib/format";
 
 const SCRUB_THROTTLE_MS = 200;
 const SCRUB_MIN_DELTA = 1;
@@ -102,6 +103,26 @@ export function Timeline({
       aria-valuemin={0}
       aria-valuemax={Math.round(duration)}
       aria-valuenow={Math.round(shown)}
+      aria-valuetext={t("timeOf", { time: formatClock(shown), total: formatClock(duration) })}
+      tabIndex={interactive ? 0 : -1}
+      onKeyDown={(e) => {
+        if (!interactive) return;
+        // The bar owns its keys while focused: finer steps than the player's global 10 s.
+        const step = e.shiftKey ? 30 : 5;
+        let target: number | null = null;
+        if (e.key === "ArrowLeft" || e.key === "ArrowDown") target = shown - step;
+        else if (e.key === "ArrowRight" || e.key === "ArrowUp") target = shown + step;
+        else if (e.key === "PageDown") target = shown - 60;
+        else if (e.key === "PageUp") target = shown + 60;
+        else if (e.key === "Home") target = 0;
+        else if (e.key === "End") target = Math.max(0, duration - 5);
+        if (target == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const seconds = Math.min(duration, Math.max(0, target));
+        setPending({ seconds, at: performance.now() });
+        onSeekTo(seconds);
+      }}
       data-dragging={drag != null}
       className={`group/bar relative mb-3 h-1 rounded-full bg-white/20 transition-[height] duration-150 select-none touch-none before:absolute before:inset-x-0 before:-top-3 before:-bottom-3 before:content-[''] hover:h-1.5 data-[dragging=true]:h-1.5 ${
         interactive ? "cursor-pointer" : "cursor-default"

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe, History, LoaderCircle, Server, X } from "lucide-react";
+import { Globe, History, LoaderCircle, SearchX, Server, X } from "lucide-react";
 import type { AddonCatalog, GenreRow, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
@@ -15,6 +15,8 @@ import { PosterCard } from "../components/PosterCard";
 import { Chip } from "../components/Chip";
 import { Shimmer } from "../components/Shimmer";
 import { metaToMovie } from "../lib/addons";
+import { EmptyState } from "../components/EmptyState";
+import { SegmentedControl } from "../components/settings/SegmentedControl";
 
 const MAX_SEARCH_CATALOGS = 6;
 const DEBOUNCE_MS = 300;
@@ -82,6 +84,8 @@ export function SearchPage({
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<string[]>(() => loadSearchHistory(userId));
   const [genre, setGenre] = useState<string | null>(null);
+  /** Movies / series filter over the results (both sources). */
+  const [kind, setKind] = useState<"all" | "Movie" | "Series">("all");
   const [catalogs, setCatalogs] = useState<AddonCatalog[]>([]);
   const request = useRef(0);
   const onErrorRef = useRef(onError);
@@ -182,6 +186,11 @@ export function SearchPage({
   const showDiscover = query.trim().length < 2;
   const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail";
   const nothing = searched && !loading && !results.length && !online.length;
+  const ofKind = (list: Movie[]) => (kind === "all" ? list : list.filter((movie) => movie.kind === kind));
+  const shownResults = ofKind(results);
+  const shownOnline = ofKind(online);
+  const kinds = new Set([...results, ...online].map((movie) => movie.kind));
+  const canFilter = kinds.has("Movie") && kinds.has("Series");
 
   return (
     <div className="page-enter px-page pt-24 pb-16">
@@ -222,7 +231,8 @@ export function SearchPage({
                     </button>
                     <button
                       type="button"
-                      aria-label={`${t("close")} ${item}`}
+                      aria-label={`${t("removeFromHistory")}: ${item}`}
+                      title={t("removeFromHistory")}
                       onClick={() => setHistory(removeSearchHistory(userId, item))}
                       className="grid w-8 place-items-center text-dim hover:bg-white/12 hover:text-text"
                     >
@@ -255,6 +265,24 @@ export function SearchPage({
         </>
       ) : (
         <section className={cn("transition-opacity duration-200", loading && searched && "opacity-70")}>
+          {/* Announced to screen readers once a search settles. */}
+          <p className="sr-only" role="status" aria-live="polite">
+            {searched && !loading ? t("resultsCount", { n: results.length + online.length }) : ""}
+          </p>
+          {canFilter ? (
+            <div className="mb-6">
+              <SegmentedControl
+                label={t("filterType")}
+                value={kind}
+                onChange={setKind}
+                options={[
+                  { value: "all", label: t("sourceAll") },
+                  { value: "Movie", label: t("movies") },
+                  { value: "Series", label: t("series") },
+                ]}
+              />
+            </div>
+          ) : null}
           {!searched && loading ? (
             <div className={grid}>
               {Array.from({ length: 12 }).map((_, i) => (
@@ -262,35 +290,37 @@ export function SearchPage({
               ))}
             </div>
           ) : null}
-          {results.length ? (
+          {shownResults.length ? (
             <>
               <h2 className="mb-4 flex items-center gap-2 text-[18px] font-semibold">
                 <Server size={17} className="text-dim" />
                 {t("myServer")}
-                <span className="text-[13px] font-normal text-dim tabular">{results.length}</span>
+                <span className="text-[13px] font-normal text-dim tabular">{shownResults.length}</span>
               </h2>
               <div className={grid}>
-                {results.map((movie, i) => (
+                {shownResults.map((movie, i) => (
                   <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
             </>
           ) : null}
-          {online.length ? (
+          {shownOnline.length ? (
             <>
-              <h2 className={cn("mb-4 flex items-center gap-2 text-[18px] font-semibold", results.length > 0 && "mt-10")}>
+              <h2 className={cn("mb-4 flex items-center gap-2 text-[18px] font-semibold", shownResults.length > 0 && "mt-10")}>
                 <Globe size={17} className="text-dim" />
                 {t("online")}
-                <span className="text-[13px] font-normal text-dim tabular">{online.length}</span>
+                <span className="text-[13px] font-normal text-dim tabular">{shownOnline.length}</span>
               </h2>
               <div className={grid}>
-                {online.map((movie, i) => (
+                {shownOnline.map((movie, i) => (
                   <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
             </>
           ) : null}
-          {nothing ? <p className="text-muted">{t("noResults")}</p> : null}
+          {nothing ? (
+            <EmptyState icon={<SearchX size={26} />} title={t("noResults")} hint={t("noResultsHint")} large />
+          ) : null}
         </section>
       )}
     </div>

@@ -31,12 +31,13 @@ export function SettingsRow({
   stacked?: boolean;
 }) {
   return (
-    <div className={stacked ? "py-4" : "flex min-h-14 items-center justify-between gap-6 py-3"}>
-      <div className="min-w-0">
+    // A wide control drops under its label instead of squeezing it on a narrow window.
+    <div className={stacked ? "py-4" : "flex min-h-14 flex-wrap items-center justify-between gap-x-6 gap-y-3 py-3"}>
+      <div className="min-w-[min(220px,100%)] flex-1">
         <p className="text-[14px] font-medium text-text">{label}</p>
         {hint ? <p className="mt-0.5 text-[12px] text-dim">{hint}</p> : null}
       </div>
-      <div className={stacked ? "mt-3" : "shrink-0"}>{children}</div>
+      <div className={stacked ? "mt-3" : "max-w-full"}>{children}</div>
     </div>
   );
 }
