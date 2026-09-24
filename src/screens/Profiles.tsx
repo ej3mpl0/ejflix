@@ -9,6 +9,7 @@ import { PinInput } from "../components/PinInput";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import type { LocalProfile, PublicUser, SavedServer, Session } from "../lib/types";
 import { fieldLgClass } from "../lib/ui";
 
@@ -53,6 +54,8 @@ export function Profiles({
   /** Local profile waiting for its PIN. */
   const [locked, setLocked] = useState<LocalProfile | null>(null);
   const [pinError, setPinError] = useState(false);
+  /** PIN typed to edit a protected profile (changing or deleting it asks for it again in Rust). */
+  const [unlockPin, setUnlockPin] = useState<string | null>(null);
 
   const loadLocals = useCallback(async () => {
     try {
@@ -74,7 +77,7 @@ export function Profiles({
             if (!cancelled) setUsers(list);
           })
           .catch((err) => {
-            if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+            if (!cancelled) setError(errorText(t, err));
           }),
       );
     }
@@ -93,7 +96,7 @@ export function Profiles({
     try {
       onReady(await api.login(server.serverUrl, name.trim(), pw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     } finally {
       setSigning(false);
     }
@@ -111,8 +114,29 @@ export function Profiles({
     setSelected(user);
   };
 
-  const enterLocal = async (profile: LocalProfile, pin?: string) => {
-    if (editing) {
+  const enterLocal = async (profile: LocalProfile, pin?: string, force = false) => {
+    if (editing && !force) {
+      // A protected profile is only edited with its PIN: otherwise anyone could remove
+      // it here and walk into the profile (or out of a parental restriction).
+      if (profile.hasPin && pin == null) {
+        setPinError(false);
+        setLocked(profile);
+        return;
+      }
+      if (profile.hasPin && pin != null) {
+        setSigning(true);
+        try {
+          await api.localProfileCheckPin(profile.id, pin);
+        } catch {
+          setPinError(true);
+          window.setTimeout(() => setPinError(false), 600);
+          return;
+        } finally {
+          setSigning(false);
+        }
+      }
+      setLocked(null);
+      setUnlockPin(pin ?? null);
       setEditor(profile);
       return;
     }
@@ -129,7 +153,7 @@ export function Profiles({
         setPinError(true);
         window.setTimeout(() => setPinError(false), 600);
       } else {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(t, err));
       }
     } finally {
       setSigning(false);
@@ -191,11 +215,16 @@ export function Profiles({
             </h1>
             <ProfileForm
               initial={initial}
+              unlockPin={initial ? unlockPin : null}
               onCancel={() => setEditor(null)}
               onSaved={(profile, pin) => {
                 setEditor(null);
                 void loadLocals();
-                if (!initial) void enterLocal(profile, pin ?? undefined);
+                if (!initial) {
+                  // Created from edit mode too: enter it, not its editor.
+                  setEditing(false);
+                  void enterLocal(profile, pin ?? undefined, true);
+                }
               }}
               onDeleted={() => {
                 setEditor(null);

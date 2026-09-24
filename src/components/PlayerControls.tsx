@@ -7,7 +7,10 @@ import {
   Lock,
   Maximize,
   Minimize,
+  Moon,
+  PartyPopper,
   Pause,
+  PictureInPicture2,
   Play,
   Ratio,
   RotateCcw,
@@ -32,7 +35,13 @@ import { useSettings } from "../lib/settings-context";
 export type PlayerMenu = "speed" | "audio" | "sub" | null;
 
 /** What the controls show while an IPTV channel plays. */
-export type LiveInfo = { number: number | null; now: Programme | null; next: Programme | null };
+export type LiveInfo = {
+  number: number | null;
+  now: Programme | null;
+  next: Programme | null;
+  /** A past programme from the archive: its own progress, not the clock's. */
+  catchup?: boolean;
+};
 
 function ControlChip({
   icon,
@@ -99,6 +108,12 @@ export function PlayerControls({
   onPanel,
   onReveal,
   onHoldUi,
+  onNight,
+  onMini,
+  onSearchSubs,
+  party = null,
+  partyOpen = false,
+  onParty,
 }: {
   movie: Movie;
   /** Movie with trickplay/chapter detail for the timeline (may be a fuller copy). */
@@ -134,6 +149,17 @@ export function PlayerControls({
   onPanel: () => void;
   onReveal: () => void;
   onHoldUi: (hold: boolean) => void;
+  /** Night mode (dynamic range compression) on/off. */
+  onNight: () => void;
+  /** Into the always-on-top mini player. */
+  onMini: () => void;
+  /** Opens the OpenSubtitles search. */
+  onSearchSubs: () => void;
+  /** Watch party in progress: how many are in (the button shows it). */
+  party?: { count: number } | null;
+  partyOpen?: boolean;
+  /** Opens the watch party panel; no button without it (live TV). */
+  onParty?: () => void;
 }) {
   const { t, locale } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
@@ -144,6 +170,18 @@ export function PlayerControls({
     remaining && state.duration > 0
       ? `-${formatClock(Math.max(0, state.duration - shownTime))}`
       : `${formatClock(shownTime)} / ${formatClock(state.duration)}`;
+
+  // Only the bars hold the controls on screen; the layer between them is the video.
+  const holdHandlers = {
+    onMouseEnter: () => {
+      overChrome.current = true;
+      onHoldUi(true);
+    },
+    onMouseLeave: () => {
+      overChrome.current = false;
+      onHoldUi(false);
+    },
+  };
 
   const toggleMenu = (next: Exclude<PlayerMenu, null>) => onMenu(menu === next ? null : next);
   const isEpisode = isSeriesEpisode(movie);
@@ -182,22 +220,18 @@ export function PlayerControls({
         style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? "auto" : "none" }}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.target === e.currentTarget && menu) onMenu(null);
+          // The empty area is the video: close what is open, else play / pause.
+          if (e.target === e.currentTarget) onVideoClick();
         }}
-        onDoubleClick={(e) => e.stopPropagation()}
-        onMouseEnter={() => {
-          overChrome.current = true;
-          onHoldUi(true);
-        }}
-        onMouseLeave={() => {
-          overChrome.current = false;
-          onHoldUi(false);
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (e.target === e.currentTarget) onVideoDoubleClick();
         }}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[160px] bg-gradient-to-b from-black/80 via-black/40 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[280px] bg-gradient-to-t from-black via-black/70 to-transparent" />
 
-        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4">
+        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4" {...holdHandlers}>
           <button
             type="button"
             className="icon-hit grid h-10 w-10 place-items-center text-white"
@@ -212,7 +246,7 @@ export function PlayerControls({
               {live ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-[4px] bg-accent px-1.5 py-px text-[9px] font-bold tracking-wide text-on-accent uppercase">
                   <span className="h-1.5 w-1.5 rounded-full bg-on-accent" />
-                  {t("liveBadge")}
+                  {live.catchup ? t("catchup") : t("liveBadge")}
                 </span>
               ) : null}
               {live && live.number != null ? <span className="tabular">{live.number}</span> : null}
@@ -223,6 +257,27 @@ export function PlayerControls({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {onParty ? (
+              <button
+                type="button"
+                className={cn(
+                  "icon-hit relative grid h-10 w-10 place-items-center rounded-full text-white/85",
+                  partyOpen && "bg-white/15 text-white",
+                  party && "text-accent",
+                )}
+                onClick={onParty}
+                aria-label={t("partyTitle")}
+                title={`${t("partyTitle")} (W)`}
+                aria-pressed={partyOpen}
+              >
+                <PartyPopper size={19} />
+                {party && party.count > 0 ? (
+                  <span className="absolute top-0.5 right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent tabular">
+                    {party.count}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             <button
               type="button"
               className="icon-hit grid h-10 w-10 place-items-center text-white/85"
@@ -231,6 +286,15 @@ export function PlayerControls({
               title={t("lockControls")}
             >
               <Lock size={19} />
+            </button>
+            <button
+              type="button"
+              className="icon-hit grid h-10 w-10 place-items-center text-white/85"
+              onClick={onMini}
+              aria-label={t("miniPlayer")}
+              title={`${t("miniPlayer")} (P)`}
+            >
+              <PictureInPicture2 size={19} />
             </button>
             {showPanelChip ? (
               <button
@@ -250,7 +314,7 @@ export function PlayerControls({
           </div>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-6 pb-4">
+        <div className="absolute inset-x-0 bottom-0 px-6 pb-4" {...holdHandlers}>
           {live ? (
             live.now ? (
               <div className="mb-2 px-1">
@@ -266,7 +330,13 @@ export function PlayerControls({
                   ) : null}
                 </div>
                 <div className="mt-1.5 h-[3px] w-full rounded-full bg-white/15">
-                  <div className="h-full rounded-full bg-accent" style={{ width: `${programmeProgress(live.now)}%` }} />
+                  <div className="h-full rounded-full bg-accent" style={{
+                      width: `${
+                        live.catchup
+                          ? Math.min(100, (state.time / Math.max(1, live.now.stop - live.now.start)) * 100)
+                          : programmeProgress(live.now)
+                      }%`,
+                    }} />
                 </div>
               </div>
             ) : null
@@ -300,9 +370,15 @@ export function PlayerControls({
               {live ? (
                 <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-accent uppercase">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                  {t("liveBadge")}
+                  {live.catchup ? t("catchup") : t("liveBadge")}
                 </span>
-              ) : (
+              ) : null}
+              {live?.catchup ? (
+                <span className="ml-2 min-w-0 truncate text-[13px] whitespace-nowrap text-white/90 tabular">
+                  {formatClock(shownTime)} /{" "}
+                  {formatClock(state.duration > 0 ? state.duration : live.now ? live.now.stop - live.now.start : 0)}
+                </span>
+              ) : live ? null : (
                 <button
                   type="button"
                   className="icon-hit ml-2 min-w-0 truncate rounded px-1.5 py-1 text-[13px] whitespace-nowrap text-white/90 tabular hover:bg-white/8"
@@ -318,11 +394,11 @@ export function PlayerControls({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && !live.catchup && "invisible")}
                 onClick={() => onSeek(-seekStep)}
                 aria-label={t("seekBack")}
                 title={`${t("seekBack")} (J)`}
-                tabIndex={live ? -1 : undefined}
+                tabIndex={live && !live.catchup ? -1 : undefined}
               >
                 <RotateCcw size={20} />
               </button>
@@ -348,11 +424,11 @@ export function PlayerControls({
               </button>
               <button
                 type="button"
-                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && !live.catchup && "invisible")}
                 onClick={() => onSeek(seekStep)}
                 aria-label={t("seekForward")}
                 title={`${t("seekForward")} (L)`}
-                tabIndex={live ? -1 : undefined}
+                tabIndex={live && !live.catchup ? -1 : undefined}
               >
                 <RotateCw size={20} />
               </button>
@@ -416,7 +492,16 @@ export function PlayerControls({
                 {menu === "sub" ? (
                   <TrackMenu
                     kind="sub"
-                    footer={<SubtitleTools delay={delays.sub} onDelay={(value) => onDelay("sub", value)} />}
+                    footer={
+                      <SubtitleTools
+                        delay={delays.sub}
+                        onDelay={(value) => onDelay("sub", value)}
+                        onSearchOnline={() => {
+                          onMenu(null);
+                          onSearchSubs();
+                        }}
+                      />
+                    }
                     tracks={state.tracks}
                     onSelect={(kind, id) => {
                       onTrack(kind, id);
@@ -450,6 +535,13 @@ export function PlayerControls({
                   />
                 ) : null}
               </div>
+              <ControlChip
+                icon={<Moon size={16} />}
+                label={t("nightMode")}
+                ariaLabel={`${t("nightMode")} (D)`}
+                active={state.night}
+                onClick={onNight}
+              />
               {showPanelChip ? (
                 <ControlChip
                   icon={live ? <Tv size={16} /> : <ListVideo size={16} />}

@@ -4,7 +4,8 @@ import { Pill } from "./Pill";
 
 /**
  * The card every screen shows when it has nothing to list (or could not load): an optional
- * icon tile, a title, a hint and one action. `large` is for whole-screen states.
+ * icon tile, a title, a hint and one action. `large` is for whole-screen states; `children`
+ * go under the action (suggestions).
  */
 export function EmptyState({
   icon,
@@ -13,6 +14,7 @@ export function EmptyState({
   action,
   large = false,
   className,
+  children,
 }: {
   icon?: ReactNode;
   title: string;
@@ -20,6 +22,7 @@ export function EmptyState({
   action?: { label: string; onClick: () => void; icon?: ReactNode };
   large?: boolean;
   className?: string;
+  children?: ReactNode;
 }) {
   return (
     <div className={cn("rounded-card bg-surface px-8 py-12 text-center", large && "mx-auto max-w-[560px]", className)}>
@@ -33,6 +36,7 @@ export function EmptyState({
           {action.label}
         </Pill>
       ) : null}
+      {children}
     </div>
   );
 }

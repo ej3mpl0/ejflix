@@ -97,7 +97,7 @@ export function TrackMenu({
       }
     }
     const codec = track.codec ? track.codec.toUpperCase() : null;
-    if (!language) return { primary: track.title, secondary: codec };
+    if (!language) return { primary: track.title || t("trackNumber", { n: track.id }), secondary: codec };
     const detail = track.title && track.title !== track.lang ? track.title : codec;
     return { primary: language, secondary: detail && detail !== language ? detail : null };
   };
@@ -105,6 +105,7 @@ export function TrackMenu({
   return (
     <div
       ref={root}
+      data-own-wheel
       onKeyDown={(e) => {
         if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
         // Arrows walk the list here instead of changing the volume.

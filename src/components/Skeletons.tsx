@@ -60,6 +60,37 @@ export function DetailsSkeleton() {
   );
 }
 
+/** Rows of a settings list (addons, IPTV lists) while they load: icon tile, two lines. */
+export function ListRowsSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div aria-hidden>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center gap-4 py-3">
+          <Shimmer className="h-11 w-11 shrink-0 rounded-xl" delay={i * 80} />
+          <div className="min-w-0 flex-1 space-y-2">
+            <Shimmer className="h-3.5 w-2/5 rounded" delay={i * 80} />
+            <Shimmer className="h-3 w-3/5 rounded" delay={i * 80} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Poster placeholders for a grid (a first load, or the next page appended to it). */
+export function PosterGridItemsSkeleton({ count = 12, titles = false }: { count?: number; titles?: boolean }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <div key={`skeleton-${i}`} aria-hidden>
+          <Shimmer className="aspect-[2/3] rounded-poster" delay={Math.min(i, 12) * 40} />
+          {titles ? <Shimmer className="mt-2 h-3.5 w-3/4 rounded" delay={Math.min(i, 12) * 40} /> : null}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function EpisodeListSkeleton() {
   return (
     <div className="space-y-2">

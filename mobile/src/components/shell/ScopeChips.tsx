@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ScrollView, Text, View, type LayoutChangeEvent } from "react-native";
-import * as Haptics from "expo-haptics";
+import { haptic } from "../../lib/haptics";
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -159,7 +159,7 @@ export function ScopeChips({
   );
 
   const hold = useCallback((library: Library) => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    haptic("medium");
     setMenu(library);
     setMenuOpen(true);
   }, []);

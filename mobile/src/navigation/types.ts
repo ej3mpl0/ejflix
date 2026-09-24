@@ -14,9 +14,10 @@ export type AuthStackParamList = {
   Welcome: undefined;
   Login: undefined;
   Profiles: undefined;
-  Pin: { profileId: string };
-  /** `from` = where "cancel" returns to. */
-  ProfileEditor: { profileId?: string; from: "welcome" | "profiles" };
+  /** `edit`: the PIN unlocks the profile editor instead of opening the profile. */
+  Pin: { profileId: string; edit?: boolean };
+  /** `from` = where "cancel" returns to; `unlockPin` = the PIN typed to edit a protected profile. */
+  ProfileEditor: { profileId?: string; from: "welcome" | "profiles"; unlockPin?: string };
 };
 
 export type TabsParamList = {

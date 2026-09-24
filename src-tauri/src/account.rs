@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 
-use crate::{addons, iptv, profiles, protect, settings, AppState};
+use crate::{addons, iptv, lists, profiles, protect, settings, AppState};
 
 /// Public project values (row level security protects every table). Override at build
 /// time with EJFLIX_SUPABASE_URL / EJFLIX_SUPABASE_ANON_KEY / EJFLIX_SITE_URL.
@@ -135,6 +135,9 @@ pub struct AccountState {
     /// Profile the current account belongs to.
     user: tokio::sync::RwLock<Option<String>>,
     sync_lock: tokio::sync::Mutex<()>,
+    /// One token refresh at a time: GoTrue rotates the refresh token, so a second
+    /// refresh with the same one is refused ("already used") and would sign out.
+    refresh_lock: tokio::sync::Mutex<()>,
     syncing: std::sync::atomic::AtomicBool,
     last_error: tokio::sync::RwLock<Option<String>>,
 }
@@ -150,6 +153,7 @@ impl AccountState {
             current: tokio::sync::RwLock::new(None),
             user: tokio::sync::RwLock::new(None),
             sync_lock: tokio::sync::Mutex::new(()),
+            refresh_lock: tokio::sync::Mutex::new(()),
             syncing: std::sync::atomic::AtomicBool::new(false),
             last_error: tokio::sync::RwLock::new(None),
         }
@@ -157,6 +161,7 @@ impl AccountState {
 
     /// Loads the account sealed for `user_id` (a profile just opened) and syncs soon.
     pub async fn activate(&self, app: &tauri::AppHandle, user_id: &str) {
+        crate::parental::activate(app, user_id);
         let account = load_account(app, user_id);
         {
             // Both fields under the `user` lock: a sync still running for the previous
@@ -178,6 +183,7 @@ impl AccountState {
 
     /// The profile closed: forget the decrypted account (the store keeps it).
     pub async fn deactivate(&self) {
+        crate::parental::deactivate();
         let mut user = self.user.write().await;
         *self.current.write().await = None;
         *user = None;
@@ -318,50 +324,80 @@ impl AccountState {
     }
 
     /// Access token of the active profile, refreshed when about to expire.
-    async fn access_token(&self, app: &tauri::AppHandle) -> Result<String, String> {
+    pub(crate) async fn access_token(&self, app: &tauri::AppHandle) -> Result<String, String> {
         let uid = self.user_id().await?;
         let mut account = self.account().await?;
         self.fresh_token(app, &uid, &mut account).await
     }
 
     /// Access token of `account` (the caller's copy, which gets the new tokens too),
-    /// refreshed and saved for `user_id` when about to expire. A refresh the server
-    /// turns down signs that profile out; a network hiccup does not.
+    /// refreshed and saved for `user_id` when about to expire. Refreshes run one at a
+    /// time and start from the tokens saved by then, so callers racing each other (a
+    /// command and the background sync) share one refresh instead of spending the same
+    /// refresh token twice. A refresh the server turns down signs that profile out; a
+    /// network hiccup does not.
     async fn fresh_token(&self, app: &tauri::AppHandle, user_id: &str, account: &mut Account) -> Result<String, String> {
-        if account.tokens.expires_at > now_secs() + 60 {
+        if token_fresh(&account.tokens, now_secs()) {
             return Ok(account.tokens.access.clone());
         }
+        let _guard = self.refresh_lock.lock().await;
+        let Some(mut latest) = self.account_of(app, user_id).await else {
+            return Err("auth:not_signed_in".into());
+        };
+        if token_fresh(&latest.tokens, now_secs()) {
+            // Someone refreshed while this waited for the lock.
+            adopt_session(account, &latest);
+            return Ok(account.tokens.access.clone());
+        }
+        let used = latest.tokens.refresh.clone();
         match self
-            .auth_post(
-                "/token?grant_type=refresh_token",
-                json!({ "refresh_token": account.tokens.refresh }),
-                None,
-            )
+            .auth_post("/token?grant_type=refresh_token", json!({ "refresh_token": used }), None)
             .await
         {
             Ok(session) => {
-                apply_session(account, &session)?;
+                apply_session(&mut latest, &session)?;
                 // Only the session goes back: another command may have changed the
                 // rest of the account while the request was out.
-                let Some(mut latest) = self.account_of(app, user_id).await else {
+                let Some(mut newest) = self.account_of(app, user_id).await else {
                     return Err("auth:not_signed_in".into());
                 };
-                latest.tokens = account.tokens.clone();
-                latest.aal = account.aal.clone();
-                latest.factor_id = account.factor_id.clone();
-                latest.user_id = account.user_id.clone();
-                latest.email = account.email.clone();
-                self.store_for(app, user_id, Some(latest)).await?;
+                adopt_session(&mut newest, &latest);
+                self.store_for(app, user_id, Some(newest)).await?;
+                adopt_session(account, &latest);
                 Ok(account.tokens.access.clone())
             }
             Err(err) if refresh_rejected(&err) => {
-                let _ = self.store_for(app, user_id, None).await;
-                emit_status(app).await;
+                // A sign-in that happened meanwhile brought a new session: keep it.
+                let current = self.account_of(app, user_id).await;
+                if still_same_session(current.as_ref().map(|a| &a.tokens), &used) {
+                    let _ = self.store_for(app, user_id, None).await;
+                    emit_status(app).await;
+                }
                 Err("auth:session_expired".into())
             }
             Err(err) => Err(err),
         }
     }
+}
+
+/// Whether `tokens` can still be used for a while without a refresh.
+fn token_fresh(tokens: &Tokens, now: u64) -> bool {
+    !tokens.access.is_empty() && tokens.expires_at > now + 60
+}
+
+/// A refused refresh signs out only while the stored session is still the one whose
+/// refresh token was refused.
+fn still_same_session(stored: Option<&Tokens>, used_refresh: &str) -> bool {
+    stored.is_some_and(|t| t.refresh == used_refresh)
+}
+
+/// Copies the session part of `from` (tokens, assurance level, identity) into `to`.
+fn adopt_session(to: &mut Account, from: &Account) {
+    to.tokens = from.tokens.clone();
+    to.aal = from.aal.clone();
+    to.factor_id = from.factor_id.clone();
+    to.user_id = from.user_id.clone();
+    to.email = from.email.clone();
 }
 
 /// Whether GoTrue turned the refresh token down for good, as opposed to a hiccup (no
@@ -504,7 +540,7 @@ fn save_account(app: &tauri::AppHandle, user_id: &str, account: &Account) -> Res
     let sealed = protect::protect(&raw)?;
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(account_key(user_id), json!({ "v": 1, "blob": protect::to_hex(&sealed) }));
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn clear_account(app: &tauri::AppHandle, user_id: &str) -> Result<(), String> {
@@ -512,7 +548,7 @@ fn clear_account(app: &tauri::AppHandle, user_id: &str) -> Result<(), String> {
     store.delete(account_key(user_id));
     // Account data with no life of its own on this PC goes with it.
     store.delete(addons_off_key(user_id));
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Drops the sealed account of a deleted (or forgotten) profile.
@@ -521,7 +557,7 @@ pub fn forget_profile(app: &tauri::AppHandle, user_id: &str) {
         store.delete(account_key(user_id));
         store.delete(prompt_key(user_id));
         store.delete(addons_off_key(user_id));
-        let _ = store.save();
+        let _ = crate::save_store(&store);
     }
 }
 
@@ -859,7 +895,7 @@ pub async fn account_dismiss_prompt(app: tauri::AppHandle, state: State<'_, AppS
     let uid = state.account.user_id().await?;
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(prompt_key(&uid), Value::Bool(true));
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 #[tauri::command]
@@ -974,6 +1010,13 @@ async fn sync_inner(app: &tauri::AppHandle, state: &AppState, uid: &str, mut acc
         let server_changed = row.is_some_and(|r| account.sync_stamp.get(kind) != Some(&r.updated_at));
         let base = account.sync_base.get(kind);
         let final_doc: Option<(Value, bool)> = match (row, server_changed, local_changed) {
+            // Taken as is, the account's copy would delete the custom lists another
+            // writer dropped without knowing them: merge, and put back what it lost.
+            (Some(r), true, false) if kind == "lists" => {
+                let merged = merge_docs(kind, &r.data, &local_doc, base);
+                let push = !same_lists(&merged, &r.data);
+                Some((merged, push))
+            }
             (Some(r), true, false) => Some((r.data.clone(), false)),
             // A push always merges with what the account holds: this PC cannot keep
             // every item (other servers, addons switched off on the website) itself.
@@ -1011,6 +1054,9 @@ async fn sync_inner(app: &tauri::AppHandle, state: &AppState, uid: &str, mut acc
     }
 
     if !to_push.is_empty() {
+        // Applying documents can take a while: ask again, which picks up a refresh
+        // another command made meanwhile (or makes one) instead of a stale token.
+        let token = acc.fresh_token(app, uid, &mut account).await?;
         let saved = acc.rest_upsert(Value::Array(to_push), &token).await?;
         for row in saved.as_array().cloned().unwrap_or_default() {
             if let (Some(kind), Some(stamp)) = (
@@ -1031,10 +1077,14 @@ async fn sync_inner(app: &tauri::AppHandle, state: &AppState, uid: &str, mut acc
     latest.sync_stamp = account.sync_stamp;
     latest.sync_base = account.sync_base;
     latest.last_sync_ms = addons::now_ms();
+    let mut session = latest.clone();
     acc.store_for(app, uid, Some(latest)).await?;
 
     // This PC shows up under "Devices" on the website. Not worth failing a sync over.
     let device_id = crate::device_id_or_create(app);
+    let Ok(token) = acc.fresh_token(app, uid, &mut session).await else {
+        return Ok(report);
+    };
     let _ = acc
         .rest_rpc_with(
             "touch_device",
@@ -1160,9 +1210,54 @@ fn base_entry(base: Option<&Value>, id: &str) -> Option<(u64, u64)> {
 /// side removed stays gone unless the other side touched it since. Without a base
 /// (the first sync on a PC) nothing is dropped.
 fn merge_docs(kind: &str, server: &Value, local: &Value, base: Option<&Value>) -> Value {
-    if kind == "settings" {
-        return merge_settings(server, local, base);
+    match kind {
+        "settings" => merge_settings(server, local, base),
+        "lists" => merge_lists(server, local, base, addons::now_ms()),
+        _ => merge_items(kind, server, local, base),
     }
+}
+
+/// The "lists" document: the saved titles merge like any other items; custom lists
+/// merge on explicit deletions instead of the base, because other writers (the
+/// website, older versions) may drop them from the document without meaning to delete
+/// anything. Fields this version does not know are carried over from the account.
+fn merge_lists(server: &Value, local: &Value, base: Option<&Value>, now: u64) -> Value {
+    let titles = |doc: &Value| -> Value {
+        let items: Vec<Value> = items_array(doc).into_iter().filter(|v| !lists::is_sync_item(v)).collect();
+        json!({ "kind": "lists", "items": items })
+    };
+    let mut items = items_array(&merge_items("lists", &titles(server), &titles(local), base));
+    let tombs = lists::merge_tombstones(&lists::tombstones_in(server), &lists::tombstones_in(local), now);
+    let (custom, tombs) = lists::merge_synced(
+        &lists::from_sync_items(&items_array(server)),
+        &lists::from_sync_items(&items_array(local)),
+        &tombs,
+        now,
+    );
+    items.extend(lists::to_sync_items(&custom));
+    let mut doc = server.as_object().cloned().unwrap_or_default();
+    doc.insert("kind".into(), json!("lists"));
+    doc.insert("items".into(), Value::Array(items));
+    doc.remove(lists::DELETED_FIELD);
+    if !tombs.is_empty() {
+        doc.insert(lists::DELETED_FIELD.into(), json!(tombs));
+    }
+    Value::Object(doc)
+}
+
+/// Whether two "lists" documents hold the same things, whatever their order.
+fn same_lists(a: &Value, b: &Value) -> bool {
+    let set = |doc: &Value| -> HashMap<String, u64> {
+        let mut map: HashMap<String, u64> = doc_items(doc).into_iter().map(|(id, v)| (id, doc_hash(&v))).collect();
+        let mut tombs = lists::tombstones_in(doc);
+        tombs.sort_by(|x, y| x.id.cmp(&y.id));
+        map.insert(format!("{}:", lists::DELETED_FIELD), doc_hash(&json!(tombs)));
+        map
+    };
+    set(a) == set(b)
+}
+
+fn merge_items(kind: &str, server: &Value, local: &Value, base: Option<&Value>) -> Value {
     let server_items = doc_items(server);
     let local_items = doc_items(local);
     let server_map: HashMap<&str, &Value> = server_items.iter().map(|(id, v)| (id.as_str(), v)).collect();
@@ -1365,7 +1460,16 @@ async fn build_doc(
         "lists" => {
             let mut list = addons::load_library(app, uid);
             list.sort_by(|a, b| a.key.cmp(&b.key));
-            json!({ "kind": "lists", "items": list })
+            // Custom lists ride in the same document, after the saved titles, so a
+            // profile without any keeps exactly the document it always had.
+            let mut items: Vec<Value> = list.iter().filter_map(|e| serde_json::to_value(e).ok()).collect();
+            items.extend(lists::to_sync_items(&lists::load(app, uid)));
+            let tombs = lists::tombstones(app, uid);
+            if tombs.is_empty() {
+                json!({ "kind": "lists", "items": items })
+            } else {
+                json!({ "kind": "lists", "items": items, (lists::DELETED_FIELD): tombs })
+            }
         }
         "progress" => {
             let mut items = serde_json::Map::new();
@@ -1473,11 +1577,20 @@ async fn apply_doc(
         }
         "lists" => {
             // Entry by entry: one the app cannot read must not empty the list.
-            let list: Vec<addons::LibraryEntry> = items_array(doc)
-                .into_iter()
-                .filter_map(|v| serde_json::from_value(v).ok())
+            let items = items_array(doc);
+            let list: Vec<addons::LibraryEntry> = items
+                .iter()
+                .filter(|v| !lists::is_sync_item(v))
+                .filter_map(|v| serde_json::from_value(v.clone()).ok())
                 .collect();
             addons::replace_library(app, uid, list)?;
+            let saved = lists::save(app, uid, lists::from_sync_items(&items))?;
+            // Deletions this PC knows stay known, whatever the document dropped (but
+            // not for a list that outlived its deletion).
+            let mut tombs = lists::tombstones(app, uid);
+            tombs.extend(lists::tombstones_in(doc));
+            tombs.retain(|t| !saved.iter().any(|l| l.id == t.id));
+            lists::save_tombstones(app, uid, tombs)?;
         }
         "progress" => {
             let list: Vec<addons::ResumeEntry> = items_object(doc)
@@ -1585,6 +1698,17 @@ mod tests {
     }
 
     #[test]
+    fn custom_lists_merge_next_to_the_saved_titles() {
+        let custom = json!({ "id": "customList:x", "customList": true, "name": "Finde", "items": [], "updatedMs": 7 });
+        // A PC on an older version keeps the list it cannot read.
+        let server = list(vec![entry("a", false, 10), custom.clone()]);
+        let old_local = list(vec![entry("a", true, 20)]);
+        let merged = merge_docs("lists", &server, &old_local, Some(&base_of("lists", &old_local)));
+        assert_eq!(keys(&merged), vec!["a", "customList:x"]);
+        assert_eq!(lists::from_sync_items(&items_array(&merged))[0].name, "Finde");
+    }
+
+    #[test]
     fn removal_on_one_side_wins_over_an_untouched_copy() {
         let before = list(vec![entry("a", false, 10), entry("b", false, 10)]);
         let base = base_of("lists", &before);
@@ -1674,5 +1798,72 @@ mod tests {
         assert_eq!(items[0]["password"], json!("pw"));
         assert_eq!(items[1]["password"], json!(""));
         assert_eq!(items[2]["password"], json!(""));
+    }
+
+    fn custom(id: &str, name: &str, updated: u64, items: &[(&str, u64)]) -> Value {
+        let items: Vec<Value> = items.iter().map(|(k, t)| json!({ "key": k, "name": k, "addedMs": t })).collect();
+        let raw = json!({ "id": format!("customList:{id}"), "customList": true, "name": name, "items": items, "createdMs": 1, "updatedMs": updated });
+        // As `build_doc` writes it.
+        lists::to_sync_items(&lists::from_sync_items(&[raw])).remove(0)
+    }
+
+    /// Late enough for the tombstones below, early enough that none has expired.
+    const NOW: u64 = 1_000_000;
+    const DAY: u64 = 24 * 60 * 60 * 1000;
+
+    #[test]
+    fn custom_lists_a_writer_dropped_are_kept_and_sent_back() {
+        let local = list(vec![entry("a", false, 10), custom("x", "Finde", 7, &[("tt1", 5)])]);
+        let base = base_of("lists", &local);
+        // The website rewrote the document with only the titles it knows.
+        let server = json!({ "kind": "lists", "items": [entry("a", false, 10)], "extra": 1 });
+        let merged = merge_lists(&server, &local, Some(&base), NOW);
+        assert_eq!(keys(&merged), vec!["a", "customList:x"]);
+        assert_eq!(merged["extra"], json!(1), "fields this version does not know survive");
+        assert!(!same_lists(&merged, &server), "the list goes back up");
+        assert!(same_lists(&merged, &local));
+    }
+
+    #[test]
+    fn a_tombstoned_custom_list_goes_away_on_every_pc() {
+        let local = list(vec![custom("x", "Finde", 7, &[]), custom("y", "Kids", 7, &[])]);
+        let base = base_of("lists", &local);
+        let server = json!({
+            "kind": "lists",
+            "items": [custom("y", "Kids", 7, &[])],
+            "deletedLists": [{ "id": "x", "deletedMs": NOW - 5 }],
+        });
+        let merged = merge_lists(&server, &local, Some(&base), NOW);
+        assert_eq!(keys(&merged), vec!["customList:y"]);
+        assert_eq!(lists::tombstones_in(&merged).len(), 1);
+        // Tombstones past their time are forgotten.
+        let old = json!({ "kind": "lists", "items": [], "deletedLists": [{ "id": "z", "deletedMs": NOW }] });
+        assert!(merge_lists(&old, &list(vec![]), None, NOW + 91 * DAY).get("deletedLists").is_none());
+    }
+
+    #[test]
+    fn concurrent_custom_list_edits_both_survive() {
+        let base_doc = list(vec![custom("x", "Finde", 10, &[("tt1", 5)])]);
+        let base = base_of("lists", &base_doc);
+        let local = list(vec![custom("x", "Finde", 20, &[("tt2", 20), ("tt1", 5)])]);
+        let mut server_list = custom("x", "Fin de semana", 30, &[("tt3", 30)]);
+        server_list["removed"] = json!([{ "key": "tt1", "removedMs": 30 }]);
+        let server = list(vec![server_list]);
+        let merged = merge_lists(&server, &local, Some(&base), NOW);
+        let got = lists::from_sync_items(&items_array(&merged));
+        assert_eq!(got[0].name, "Fin de semana");
+        let keys: Vec<&str> = got[0].items.iter().map(|i| i.key.as_str()).collect();
+        assert_eq!(keys, vec!["tt3", "tt2"]);
+    }
+
+    #[test]
+    fn token_refresh_decisions() {
+        let t = |access: &str, refresh: &str, exp: u64| Tokens { access: access.into(), refresh: refresh.into(), expires_at: exp };
+        assert!(token_fresh(&t("a", "r", 1_000), 900));
+        assert!(!token_fresh(&t("a", "r", 950), 900), "about to expire");
+        assert!(!token_fresh(&t("", "r", 5_000), 900));
+        assert!(still_same_session(Some(&t("a", "r1", 0)), "r1"));
+        assert!(!still_same_session(Some(&t("a", "r2", 0)), "r1"), "signed in again meanwhile");
+        assert!(!still_same_session(None, "r1"));
     }
 }

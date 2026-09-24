@@ -4,6 +4,7 @@ import type { ImportedAddon } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { fieldClass, labelClass } from "../lib/ui";
 import { Pill } from "./Pill";
@@ -55,7 +56,7 @@ export function AddonImport({ onImported }: { onImported?: (added: number) => vo
             ? t("stremioErrNetwork")
             : code === "stremio_unexpected"
               ? t("stremioErrUnexpected")
-              : code,
+              : errorText(t, code),
       );
     } finally {
       setBusy(false);
@@ -224,9 +225,9 @@ export function AddonImport({ onImported }: { onImported?: (added: number) => vo
       {result ? (
         <p role="status" className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
           {result.added ? <Check size={14} className="text-success" /> : null}
-          {t("importResult", { n: result.added })}
+          {result.added === 1 ? t("importResultOne") : t("importResult", { n: result.added })}
           {result.failed.length ? (
-            <span className="text-danger">· {t("importFailed", { n: result.failed.length })}</span>
+            <span className="text-danger">· {result.failed.length === 1 ? t("importFailedOne") : t("importFailed", { n: result.failed.length })}</span>
           ) : null}
         </p>
       ) : null}

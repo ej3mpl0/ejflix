@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-store = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
@@ -24,8 +25,14 @@ tokio = { version = "1", features = ["io-util", "macros", "net", "process", "rt-
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 base64 = "0.22"
+sha2 = "0.10"
 raw-window-handle = "0.6"
 librqbit = { version = "9.0.1", default-features = false, features = ["default-tls", "disable-upload"] }
+# Watch party: Supabase Realtime over a websocket (the webview CSP blocks external sockets).
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 
 [profile.release]
 panic = "abort"

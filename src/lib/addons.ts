@@ -121,6 +121,7 @@ export function metaToMovie(meta: AddonMeta): Movie {
     year: meta.year,
     runtimeTicks: runtimeTicks(meta.runtime),
     communityRating: meta.imdbRating,
+    officialRating: meta.certification ?? null,
     genres: meta.genres,
     posterUrl: meta.poster,
     backdropUrl: meta.background ?? meta.poster,

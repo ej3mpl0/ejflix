@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { langAliases, matchesLang } from "../jellyfin/languages";
-import { parseMediaStreams, parsePlaybackInfo, playbackErrorMessage } from "../jellyfin/playback.pure";
+import { PlaybackError } from "../events";
+import { parseMediaStreams, parsePlaybackInfo, playbackErrorKey, playbackErrorMessage } from "../jellyfin/playback.pure";
 import {
   ANDROID_DEVICE_PROFILE,
   DIRECT_AUDIO,
@@ -139,6 +140,31 @@ describe("parsePlaybackInfo", () => {
     expect(() => parsePlaybackInfo(null, options)).toThrow("Respuesta inválida del servidor");
     expect(playbackErrorMessage("NotAllowed")).toBe("El servidor no permite reproducir este archivo");
     expect(playbackErrorMessage("Weird")).toBe("No se puede reproducir (Weird)");
+  });
+
+  it("tags known failures with a translation key", () => {
+    const keyOf = (response: unknown) => {
+      try {
+        parsePlaybackInfo(response, options);
+      } catch (error) {
+        return error instanceof PlaybackError ? error.key : null;
+      }
+      return "no error";
+    };
+    expect(keyOf({ ErrorCode: "NoCompatibleStream" })).toBe("playErrServerCannotPlay");
+    expect(keyOf({ ErrorCode: "NotAllowed" })).toBe("playErrNotAllowed");
+    expect(keyOf({ ErrorCode: "Weird" })).toBe("playErrServerCode");
+    expect(keyOf({ MediaSources: [] })).toBe("playErrServerCannotPlay");
+    expect(keyOf({ MediaSources: [{ Id: "s" }] })).toBe("playErrServerCannotPlay");
+    expect(keyOf(null)).toBe("playErrBadResponse");
+    expect(playbackErrorKey("RateLimitExceeded")).toBe("playErrRateLimit");
+    expect(playbackErrorKey("Weird")).toBe("playErrServerCode");
+    // The unknown code travels as the detail shown under the sentence.
+    try {
+      parsePlaybackInfo({ ErrorCode: "Weird" }, options);
+    } catch (error) {
+      expect(error instanceof PlaybackError ? error.detail : null).toBe("Weird");
+    }
   });
 
   it("drops streams without an index", () => {

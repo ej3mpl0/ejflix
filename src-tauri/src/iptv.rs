@@ -17,6 +17,10 @@ use tauri_plugin_store::StoreExt;
 use tokio::sync::RwLock;
 
 pub const CHANGED_EVENT: &str = "iptv://changed";
+/// A programme with a reminder is about to start (payload: the `Reminder`).
+pub const REMINDER_EVENT: &str = "iptv://reminder";
+/// The reminder list of the profile changed.
+pub const REMINDERS_EVENT: &str = "iptv://reminders";
 pub const MAX_SOURCES: usize = 12;
 const MAX_PLAYLIST_BYTES: usize = 64 * 1024 * 1024;
 const MAX_EPG_BYTES: usize = 200 * 1024 * 1024;
@@ -27,7 +31,8 @@ const MAX_RECENT: usize = 20;
 /// Cached playlists older than this are refreshed on launch (when the preference is on).
 pub const STALE_AFTER_MS: u64 = 12 * 3600 * 1000;
 /// Programmes kept around "now": a few hours back, three days ahead.
-const EPG_PAST: u64 = 6 * 3600;
+/// A day back: channels with catch-up offer yesterday's programmes in the guide.
+const EPG_PAST: u64 = 24 * 3600;
 const EPG_FUTURE: u64 = 3 * 86_400;
 const MAX_DESC: usize = 400;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -187,6 +192,12 @@ pub struct Channel {
     pub container: String,
     pub user_agent: Option<String>,
     pub referrer: Option<String>,
+    /// Days of archive the server keeps (0 = no catch-up).
+    pub catchup_days: u32,
+    /// "xtream" (timeshift URLs), or the M3U `catchup` mode: "default" | "append" | "shift".
+    pub catchup: String,
+    /// M3U `catchup-source` template.
+    pub catchup_source: String,
 }
 
 impl Default for Channel {
@@ -205,6 +216,9 @@ impl Default for Channel {
             container: String::new(),
             user_agent: None,
             referrer: None,
+            catchup_days: 0,
+            catchup: String::new(),
+            catchup_source: String::new(),
         }
     }
 }
@@ -224,6 +238,8 @@ pub struct ChannelView {
     pub favorite: bool,
     /// A programme guide is attached to this channel.
     pub epg: bool,
+    /// Days of past programmes that can be played again (0 = none).
+    pub catchup_days: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -286,6 +302,8 @@ pub struct Catalog {
     pub account: Option<XtreamAccount>,
     pub epg_source: Option<String>,
     pub epg_error: Option<String>,
+    /// Xtream server clock minus UTC (seconds): timeshift URLs are in server time.
+    pub server_offset: i64,
     #[serde(skip)]
     index: HashMap<String, usize>,
 }
@@ -379,7 +397,7 @@ fn save_sources(app: &tauri::AppHandle, user_id: &str, list: &[IptvSource]) -> R
         sources_key(user_id),
         serde_json::to_value(list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
@@ -395,7 +413,7 @@ fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
 fn save_ids(app: &tauri::AppHandle, key: &str, ids: &[String]) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(key, serde_json::to_value(ids).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn favorites(app: &tauri::AppHandle, user_id: &str) -> Vec<String> {
@@ -423,6 +441,116 @@ pub fn push_recent(app: &tauri::AppHandle, user_id: &str, channel_id: &str) -> R
     list.insert(0, channel_id.to_string());
     list.truncate(MAX_RECENT);
     save_ids(app, &recent_key(user_id), &list)
+}
+
+// ---- programme reminders ----
+
+/// How long before the start a reminder goes off.
+pub const REMINDER_LEAD: u64 = 60;
+/// A reminder whose programme started longer ago than this is dropped.
+const REMINDER_GRACE: u64 = 300;
+const MAX_REMINDERS: usize = 100;
+
+/// "Remind me" on a future programme. Carries what the UI needs to tune the channel
+/// without looking it up again.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Reminder {
+    pub channel_id: String,
+    pub source_id: String,
+    pub channel_name: String,
+    pub logo: Option<String>,
+    pub group: String,
+    pub number: Option<u32>,
+    pub title: String,
+    /// Unix seconds.
+    pub start: u64,
+    pub stop: u64,
+    /// Already announced (kept until the grace period ends so it is not repeated).
+    pub notified: bool,
+}
+
+impl Reminder {
+    /// Same rule as `is_adult` for channels (group or name of the channel).
+    pub fn is_adult(&self) -> bool {
+        crate::parental::is_adult_label(&self.group) || crate::parental::is_adult_label(&self.channel_name)
+    }
+}
+
+fn reminders_key(user_id: &str) -> String {
+    format!("iptvReminders.{user_id}")
+}
+
+fn load_reminders(app: &tauri::AppHandle, user_id: &str) -> Vec<Reminder> {
+    let Ok(store) = app.store(crate::store_path()) else {
+        return vec![];
+    };
+    store
+        .get(reminders_key(user_id))
+        .and_then(|v| serde_json::from_value::<Vec<Reminder>>(v).ok())
+        .unwrap_or_default()
+}
+
+fn save_reminders(app: &tauri::AppHandle, user_id: &str, list: &[Reminder]) -> Result<(), String> {
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
+    store.set(reminders_key(user_id), serde_json::to_value(list).map_err(|e| e.to_string())?);
+    crate::save_store(&store)
+}
+
+/// Pending reminders of a profile, soonest first. Programmes that started a while ago
+/// are cleaned up here.
+pub fn reminders(app: &tauri::AppHandle, user_id: &str, now: u64) -> Vec<Reminder> {
+    let mut list = load_reminders(app, user_id);
+    let before = list.len();
+    list.retain(|r| r.start + REMINDER_GRACE > now);
+    if list.len() != before {
+        let _ = save_reminders(app, user_id, &list);
+    }
+    list
+}
+
+pub fn set_reminder(app: &tauri::AppHandle, user_id: &str, reminder: Reminder, now: u64) -> Result<Vec<Reminder>, String> {
+    if source_of(&reminder.channel_id).is_none() {
+        return Err(crate::errors::code("invalidChannel"));
+    }
+    if reminder.start <= now {
+        return Err(crate::errors::code("programmeStarted"));
+    }
+    let mut list = reminders(app, user_id, now);
+    list.retain(|r| !(r.channel_id == reminder.channel_id && r.start == reminder.start));
+    if list.len() >= MAX_REMINDERS {
+        return Err(crate::errors::code("tooManyReminders"));
+    }
+    let mut reminder = reminder;
+    reminder.notified = false;
+    reminder.title = reminder.title.chars().take(200).collect();
+    list.push(reminder);
+    list.sort_by_key(|r| r.start);
+    save_reminders(app, user_id, &list)?;
+    Ok(list)
+}
+
+pub fn remove_reminder(app: &tauri::AppHandle, user_id: &str, channel_id: &str, start: u64, now: u64) -> Result<Vec<Reminder>, String> {
+    let mut list = reminders(app, user_id, now);
+    list.retain(|r| !(r.channel_id == channel_id && r.start == start));
+    save_reminders(app, user_id, &list)?;
+    Ok(list)
+}
+
+/// Reminders that go off now: marked as announced and returned once.
+pub fn take_due_reminders(app: &tauri::AppHandle, user_id: &str, now: u64) -> Vec<Reminder> {
+    let mut list = reminders(app, user_id, now);
+    let mut due = Vec::new();
+    for reminder in list.iter_mut() {
+        if !reminder.notified && reminder.start <= now + REMINDER_LEAD {
+            reminder.notified = true;
+            due.push(reminder.clone());
+        }
+    }
+    if !due.is_empty() {
+        let _ = save_reminders(app, user_id, &list);
+    }
+    due
 }
 
 /// A source as the ejFlix account stores it (`m3uFile` sources never leave the PC).
@@ -555,7 +683,8 @@ pub fn delete_profile_data(app: &tauri::AppHandle, user_id: &str) {
         store.delete(sources_key(user_id));
         store.delete(favorites_key(user_id));
         store.delete(recent_key(user_id));
-        let _ = store.save();
+        store.delete(reminders_key(user_id));
+        let _ = crate::save_store(&store);
     }
 }
 
@@ -576,7 +705,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
         .as_deref()
         .and_then(|id| list.iter().find(|s| s.id == id).cloned());
     if existing.is_none() && list.len() >= MAX_SOURCES {
-        return Err(format!("Máximo {MAX_SOURCES} listas IPTV"));
+        return Err(crate::errors::detail("iptvMaxSources", MAX_SOURCES));
     }
     let mut source = existing.clone().unwrap_or_else(|| IptvSource {
         id: uuid::Uuid::new_v4().to_string(),
@@ -595,7 +724,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
     source.username = input.username.trim().chars().take(200).collect();
     if let Some(password) = input.password.filter(|p| !p.is_empty()) {
         if password.len() > 200 {
-            return Err("Contraseña demasiado larga".into());
+            return Err(crate::errors::code("passwordTooLong"));
         }
         let sealed = crate::protect::protect(password.as_bytes())?;
         source.password = crate::protect::to_hex(&sealed);
@@ -610,11 +739,11 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
             let path = input.path.trim();
             if path.is_empty() {
                 if !source.imported || !imported_file(app, &source.id).exists() {
-                    return Err("Elige un archivo M3U o escribe su ruta".into());
+                    return Err(crate::errors::code("m3uPick"));
                 }
             } else if !source.imported || source.path != path {
                 if !std::path::Path::new(path).is_file() {
-                    return Err("No se encuentra el archivo".into());
+                    return Err(crate::errors::code("fileNotFound"));
                 }
                 source.path = path.to_string();
                 source.imported = false;
@@ -634,7 +763,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
                 }
             }
             if source.username.is_empty() || source.password.is_empty() {
-                return Err("Xtream Codes necesita usuario y contraseña".into());
+                return Err(crate::errors::code("xtreamLogin"));
             }
         }
     }
@@ -659,15 +788,15 @@ pub fn import_playlist(
     text: &str,
 ) -> Result<IptvSource, String> {
     if text.len() > MAX_PLAYLIST_BYTES {
-        return Err("El archivo es demasiado grande".into());
+        return Err(crate::errors::code("fileTooLarge"));
     }
     if !text.trim_start().starts_with("#EXTM3U") && !text.contains("#EXTINF") {
-        return Err("El archivo no parece una lista M3U".into());
+        return Err(crate::errors::code("notM3u"));
     }
     let mut list = list_sources(app, user_id);
     let existing = id.and_then(|id| list.iter().find(|s| s.id == id).cloned());
     if existing.is_none() && list.len() >= MAX_SOURCES {
-        return Err(format!("Máximo {MAX_SOURCES} listas IPTV"));
+        return Err(crate::errors::detail("iptvMaxSources", MAX_SOURCES));
     }
     let mut source = existing.unwrap_or_else(|| IptvSource {
         id: uuid::Uuid::new_v4().to_string(),
@@ -695,6 +824,10 @@ pub fn import_playlist(
 }
 
 pub fn remove_source(app: &tauri::AppHandle, user_id: &str, id: &str) -> Result<(), String> {
+    // The id becomes a file name below: never let it walk out of the cache folder.
+    if !valid_source_id(id) {
+        return Err(crate::errors::code("invalidList"));
+    }
     let mut list = list_sources(app, user_id);
     list.retain(|s| s.id != id);
     save_sources(app, user_id, &list)?;
@@ -731,10 +864,10 @@ fn host_of(url: &str) -> Option<String> {
 pub fn normalize_http_url(raw: &str) -> Result<String, String> {
     let url = raw.trim();
     if url.is_empty() || url.len() > 4096 {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     let url = if url.contains("://") {
         url.to_string()
@@ -742,7 +875,7 @@ pub fn normalize_http_url(raw: &str) -> Result<String, String> {
         format!("http://{url}")
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Solo se permiten URLs http o https".into());
+        return Err(crate::errors::code("httpOnlyUrl"));
     }
     Ok(url)
 }
@@ -751,13 +884,13 @@ pub fn normalize_http_url(raw: &str) -> Result<String, String> {
 /// playlist link and returns the server base plus the credentials it carried.
 pub fn parse_xtream_url(raw: &str) -> Result<(String, Option<String>, Option<String>), String> {
     let url = normalize_http_url(raw)?;
-    let (scheme, rest) = url.split_once("://").ok_or("URL no válida")?;
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| crate::errors::code("invalidUrl"))?;
     let (authority, tail) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, ""),
     };
     if authority.is_empty() {
-        return Err("Falta el servidor".into());
+        return Err(crate::errors::code("missingServer"));
     }
     let base = format!("{scheme}://{authority}");
     let query = tail.split_once('?').map(|(_, q)| q).unwrap_or("");
@@ -817,7 +950,7 @@ pub fn stream_for(source: &IptvSource, channel: &Channel) -> Result<(String, Vec
         SourceKind::Xtream => {
             let password = source.password_plain();
             if channel.stream_id.is_empty() || password.is_empty() {
-                return Err("Canal no disponible".into());
+                return Err(crate::errors::code("channelUnavailable"));
             }
             let (folder, ext) = if channel.kind == "movie" {
                 ("movie", if channel.container.is_empty() { "mp4".to_string() } else { channel.container.clone() })
@@ -835,7 +968,7 @@ pub fn stream_for(source: &IptvSource, channel: &Channel) -> Result<(String, Vec
         _ => channel.url.clone(),
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Solo se pueden reproducir canales http o https".into());
+        return Err(crate::errors::code("channelHttpOnly"));
     }
     let mut headers = Vec::new();
     if let Some(ua) = channel.user_agent.as_deref().or(source.user_agent()) {
@@ -845,6 +978,180 @@ pub fn stream_for(source: &IptvSource, channel: &Channel) -> Result<(String, Vec
         headers.push(("Referer".to_string(), referrer.clone()));
     }
     Ok((url, headers))
+}
+
+// ---- catch-up ----
+
+impl Channel {
+    /// Days of archive this channel offers (0 when it has none or is not a live channel).
+    pub fn catchup_window(&self) -> u32 {
+        if self.kind == "live" && !self.catchup.is_empty() {
+            self.catchup_days
+        } else {
+            0
+        }
+    }
+}
+
+/// `catchup` / `catchup-source` / `catchup-days` of an `#EXTINF` line → (mode, source, days).
+/// Only the modes that need nothing but a URL template are understood.
+fn m3u_catchup(attrs: &HashMap<String, String>) -> (String, String, u32) {
+    let source = attrs.get("catchup-source").map(|s| s.trim().to_string()).unwrap_or_default();
+    let mode = attrs
+        .get("catchup")
+        .or_else(|| attrs.get("catchup-type"))
+        .map(|s| s.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let mode = match mode.as_str() {
+        "" if !source.is_empty() => "default",
+        "default" | "append" if !source.is_empty() => mode.as_str(),
+        "shift" => "shift",
+        _ => return (String::new(), String::new(), 0),
+    }
+    .to_string();
+    let days = ["catchup-days", "timeshift", "tvg-rec"]
+        .iter()
+        .find_map(|k| attrs.get(*k).and_then(|v| v.trim().parse::<u32>().ok()))
+        .filter(|&d| d > 0)
+        .unwrap_or(1)
+        .min(30);
+    (mode, source, days)
+}
+
+/// Server clock offset from `server_info` (`time_now` is local, `timestamp_now` is UTC),
+/// rounded to a quarter of an hour. 0 when the server does not say.
+fn server_offset(value: &Value) -> i64 {
+    let Some(info) = value.get("server_info") else { return 0 };
+    let (Some(local), Some(utc)) = (json_text(info, "time_now"), json_u64(info, "timestamp_now")) else {
+        return 0;
+    };
+    let digits: String = local.chars().filter(|c| c.is_ascii_digit()).collect();
+    let Some(local) = parse_xmltv_time(&digits) else { return 0 };
+    let diff = local as i64 - utc as i64;
+    let rounded = ((diff as f64) / 900.0).round() as i64 * 900;
+    if rounded.abs() > 14 * 3600 {
+        0
+    } else {
+        rounded
+    }
+}
+
+/// (year, month, day, hour, minute, second) of unix seconds (Howard Hinnant's algorithm).
+fn civil_from_unix(ts: i64) -> (i64, u32, u32, u32, u32, u32) {
+    let days = ts.div_euclid(86_400);
+    let secs = ts.rem_euclid(86_400);
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    (y, m, d, (secs / 3600) as u32, ((secs % 3600) / 60) as u32, (secs % 60) as u32)
+}
+
+/// Letters Y m d H M S of a format replaced with the parts of `ts` (UTC).
+fn format_stamp(format: &str, ts: i64) -> String {
+    let (y, mo, d, h, mi, s) = civil_from_unix(ts);
+    let mut out = String::new();
+    for c in format.chars() {
+        match c {
+            'Y' => out.push_str(&format!("{y:04}")),
+            'm' => out.push_str(&format!("{mo:02}")),
+            'd' => out.push_str(&format!("{d:02}")),
+            'H' => out.push_str(&format!("{h:02}")),
+            'M' => out.push_str(&format!("{mi:02}")),
+            'S' => out.push_str(&format!("{s:02}")),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Fills the placeholders of an M3U `catchup-source` (the Kodi IPTV Simple set:
+/// `{utc}`, `${start}`, `{utcend}`, `${end}`, `{lutc}`, `${now}`, `{duration}`,
+/// `{offset:N}`, `{Y}`…`{S}`, `{utc:Y-m-d}`…). Unknown ones are left alone.
+fn fill_catchup(template: &str, start: u64, stop: u64, now: u64) -> String {
+    let mut out = String::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let Some(close) = rest[open..].find('}').map(|i| open + i) else { break };
+        let dollar = open > 0 && rest.as_bytes()[open - 1] == b'$';
+        let token = &rest[open + 1..close];
+        let (name, arg) = match token.split_once(':') {
+            Some((n, a)) => (n, Some(a)),
+            None => (token, None),
+        };
+        let stamp = |ts: u64| match arg {
+            Some(format) => format_stamp(format, ts as i64),
+            None => ts.to_string(),
+        };
+        let divided = |secs: u64| {
+            let by = arg.and_then(|a| a.parse::<u64>().ok()).filter(|&n| n > 0).unwrap_or(1);
+            (secs / by).to_string()
+        };
+        let value = match name {
+            "utc" | "start" => Some(stamp(start)),
+            "utcend" | "end" => Some(stamp(stop)),
+            "lutc" | "now" | "timestamp" => Some(stamp(now)),
+            "duration" => Some(divided(stop.saturating_sub(start))),
+            "offset" => Some(divided(now.saturating_sub(start))),
+            "Y" | "m" | "d" | "H" | "M" | "S" => Some(format_stamp(name, start as i64)),
+            _ => None,
+        };
+        match value {
+            Some(value) => {
+                out.push_str(&rest[..if dollar { open - 1 } else { open }]);
+                out.push_str(&value);
+            }
+            None => out.push_str(&rest[..=close]),
+        }
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// URL of a past programme of a channel with catch-up. `offset` is the Xtream server
+/// clock offset (timeshift URLs are written in the server's local time).
+pub fn catchup_url(source: &IptvSource, channel: &Channel, start: u64, stop: u64, now: u64, offset: i64) -> Result<String, String> {
+    let days = channel.catchup_window();
+    if days == 0 {
+        return Err(crate::errors::code("catchupUnsupported"));
+    }
+    if stop <= start || start >= now || start + u64::from(days) * 86_400 < now {
+        return Err(crate::errors::code("catchupUnavailable"));
+    }
+    let url = match channel.catchup.as_str() {
+        "xtream" => {
+            let password = source.password_plain();
+            if channel.stream_id.is_empty() || password.is_empty() {
+                return Err(crate::errors::code("channelUnavailable"));
+            }
+            let minutes = (stop - start).div_ceil(60).max(1);
+            format!(
+                "{}/timeshift/{}/{}/{minutes}/{}/{}.ts",
+                source.url,
+                enc(&source.username),
+                enc(&password),
+                format_stamp("Y-m-d:H-M", start as i64 + offset),
+                channel.stream_id
+            )
+        }
+        "default" => fill_catchup(&channel.catchup_source, start, stop, now),
+        "append" => format!("{}{}", channel.url, fill_catchup(&channel.catchup_source, start, stop, now)),
+        "shift" => {
+            let sep = if channel.url.contains('?') { '&' } else { '?' };
+            format!("{}{sep}utc={start}&lutc={now}", channel.url)
+        }
+        _ => return Err(crate::errors::code("catchupUnsupported")),
+    };
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(crate::errors::code("channelHttpOnly"));
+    }
+    Ok(url)
 }
 
 // ---- state ----
@@ -871,18 +1178,18 @@ impl IptvState {
         let mut res = req
             .send()
             .await
-            .map_err(|e| format!("No se pudo conectar: {}", short_error(&e)))?;
+            .map_err(|e| crate::errors::detail("unreachable", short_error(&e)))?;
         if !res.status().is_success() {
-            return Err(format!("El servidor respondió {}", res.status().as_u16()));
+            return Err(crate::errors::detail("serverStatus", res.status().as_u16()));
         }
         if res.content_length().unwrap_or(0) as usize > max {
-            return Err("La respuesta es demasiado grande".into());
+            return Err(crate::errors::code("responseTooLarge"));
         }
         let mut out = Vec::new();
-        while let Some(chunk) = res.chunk().await.map_err(|e| format!("Descarga interrumpida: {}", short_error(&e)))? {
+        while let Some(chunk) = res.chunk().await.map_err(|e| crate::errors::detail("downloadInterrupted", short_error(&e)))? {
             out.extend_from_slice(&chunk);
             if out.len() > max {
-                return Err("La respuesta es demasiado grande".into());
+                return Err(crate::errors::code("responseTooLarge"));
             }
         }
         Ok(out)
@@ -910,7 +1217,7 @@ impl IptvState {
             url.push_str(action);
         }
         let bytes = self.fetch(&url, source.user_agent(), MAX_JSON_BYTES).await?;
-        serde_json::from_slice(&bytes).map_err(|_| "El servidor no respondió como Xtream Codes".to_string())
+        serde_json::from_slice(&bytes).map_err(|_| crate::errors::code("notXtream"))
     }
 
     /// Signs in to an Xtream account and describes it (used by "Check" in Settings).
@@ -999,9 +1306,9 @@ impl IptvState {
                 } else {
                     PathBuf::from(&source.path)
                 };
-                let bytes = std::fs::read(&path).map_err(|_| "No se pudo leer el archivo M3U".to_string())?;
+                let bytes = std::fs::read(&path).map_err(|_| crate::errors::code("m3uUnreadable"))?;
                 if bytes.len() > MAX_PLAYLIST_BYTES {
-                    return Err("El archivo es demasiado grande".into());
+                    return Err(crate::errors::code("fileTooLarge"));
                 }
                 let text = String::from_utf8_lossy(&bytes);
                 let parsed = parse_m3u(&text, &source.id);
@@ -1011,6 +1318,7 @@ impl IptvState {
             SourceKind::Xtream => {
                 let auth = self.xtream_json(source, None).await?;
                 catalog.account = Some(parse_account(&auth)?);
+                catalog.server_offset = server_offset(&auth);
                 let categories = self.xtream_json(source, Some("get_live_categories")).await.unwrap_or(Value::Null);
                 let streams = self.xtream_json(source, Some("get_live_streams")).await?;
                 catalog.channels = xtream_channels(&source.id, &categories, &streams, "live");
@@ -1024,7 +1332,7 @@ impl IptvState {
             }
         }
         if catalog.channels.is_empty() {
-            return Err("La lista no contiene canales".into());
+            return Err(crate::errors::code("noChannels"));
         }
         catalog.channels.truncate(MAX_CHANNELS);
         if epg {
@@ -1061,7 +1369,9 @@ impl IptvState {
 
     pub async fn forget(&self, app: &tauri::AppHandle, source_id: &str) {
         self.entries.write().await.remove(source_id);
-        let _ = std::fs::remove_file(cache_file(app, source_id));
+        if valid_source_id(source_id) {
+            let _ = std::fs::remove_file(cache_file(app, source_id));
+        }
     }
 
     pub async fn clear(&self) {
@@ -1114,11 +1424,15 @@ impl IptvState {
         let entries = self.entries.read().await;
         let mut out: Vec<GroupInfo> = Vec::new();
         let mut index: HashMap<(String, String), usize> = HashMap::new();
+        let hide_adult = crate::parental::hides_adult();
         for source in sources.iter().filter(|s| s.enabled && source_id.map(|id| id == s.id).unwrap_or(true)) {
             let Some(catalog) = entries.get(&source.id).and_then(|e| e.catalog.clone()) else {
                 continue;
             };
             for channel in &catalog.channels {
+                if hide_adult && is_adult(channel) {
+                    continue;
+                }
                 let key = (source.id.clone(), channel.group.clone());
                 match index.get(&key) {
                     Some(&i) => {
@@ -1158,7 +1472,11 @@ impl IptvState {
             .filter(|s| !s.is_empty());
         let number = query.search.as_deref().and_then(|s| s.trim().parse::<u32>().ok());
         let enabled: HashMap<&str, &IptvSource> = sources.iter().filter(|s| s.enabled).map(|s| (s.id.as_str(), s)).collect();
+        let hide_adult = crate::parental::hides_adult();
         let matches = |channel: &Channel| -> bool {
+            if hide_adult && is_adult(channel) {
+                return false;
+            }
             match &search {
                 Some(needle) => normalize(&channel.name).contains(needle.as_str()) || number.is_some_and(|n| channel.number == Some(n)),
                 None => true,
@@ -1175,6 +1493,7 @@ impl IptvState {
             tvg_id: channel.tvg_id.clone(),
             favorite: fav.contains(channel.id.as_str()),
             epg: catalog.channel_epg.contains_key(&channel.id),
+            catchup_days: channel.catchup_window(),
         };
         let mut items: Vec<ChannelView> = Vec::new();
         if query.favorites || query.recent {
@@ -1214,6 +1533,30 @@ impl IptvState {
         let limit = if query.limit == 0 { 200 } else { query.limit.min(2000) };
         let page: Vec<ChannelView> = items.into_iter().skip(query.offset).take(limit).collect();
         ChannelPage { items: page, total }
+    }
+
+    /// Whether a stream answers at all (multi-view drops dead channels before mpv sees
+    /// them: one missing input would fail the whole mosaic).
+    /// All streams are tried at the same time; the result keeps their order.
+    pub async fn probe(&self, targets: &[(String, Vec<(String, String)>)]) -> Vec<bool> {
+        let handles: Vec<_> = targets
+            .iter()
+            .map(|(url, headers)| {
+                let mut request = self.http.get(url).timeout(Duration::from_secs(8));
+                for (key, value) in headers {
+                    request = request.header(key.as_str(), value.as_str());
+                }
+                // Only the status matters: the body is dropped with the response.
+                tauri::async_runtime::spawn(async move {
+                    matches!(request.send().await, Ok(response) if response.status().is_success())
+                })
+            })
+            .collect();
+        let mut out = Vec::with_capacity(handles.len());
+        for handle in handles {
+            out.push(handle.await.unwrap_or(false));
+        }
+        out
     }
 
     pub async fn find(&self, channel_id: &str) -> Option<(Channel, Arc<Catalog>)> {
@@ -1315,7 +1658,7 @@ fn parse_account(value: &Value) -> Result<XtreamAccount, String> {
     let info = value
         .get("user_info")
         .filter(|v| v.is_object())
-        .ok_or_else(|| "El servidor no respondió como Xtream Codes".to_string())?;
+        .ok_or_else(|| crate::errors::code("notXtream"))?;
     let auth = match info.get("auth") {
         Some(Value::Number(n)) => n.as_i64() == Some(1),
         Some(Value::String(s)) => s == "1" || s.eq_ignore_ascii_case("true"),
@@ -1358,6 +1701,12 @@ fn xtream_channels(source_id: &str, categories: &Value, streams: &Value, kind: &
             let category = json_text(s, "category_id")
                 .and_then(|id| names.get(&id).cloned())
                 .unwrap_or_default();
+            // `tv_archive` = 1 plus the days kept in `tv_archive_duration`.
+            let archive_days = if kind == "live" && json_u64(s, "tv_archive") == Some(1) {
+                json_u64(s, "tv_archive_duration").unwrap_or(1).clamp(1, 30) as u32
+            } else {
+                0
+            };
             Some(Channel {
                 id: format!("{source_id}:{prefix}{stream_id}"),
                 source_id: source_id.to_string(),
@@ -1372,6 +1721,9 @@ fn xtream_channels(source_id: &str, categories: &Value, streams: &Value, kind: &
                 container: json_text(s, "container_extension").unwrap_or_default(),
                 user_agent: None,
                 referrer: None,
+                catchup_days: archive_days,
+                catchup: if archive_days > 0 { "xtream".into() } else { String::new() },
+                catchup_source: String::new(),
             })
         })
         .take(MAX_CHANNELS)
@@ -1466,6 +1818,7 @@ pub fn parse_m3u(text: &str, source_id: &str) -> ParsedPlaylist {
             .to_string();
         let lower = line.to_ascii_lowercase();
         let kind = if lower.contains("/movie/") || lower.contains("/series/") { "movie" } else { "live" };
+        let (catchup, catchup_source, catchup_days) = m3u_catchup(&attrs);
         let base_key = if !tvg_id.is_empty() {
             format!("i:{}", sanitize_key(&tvg_id))
         } else {
@@ -1491,6 +1844,9 @@ pub fn parse_m3u(text: &str, source_id: &str) -> ParsedPlaylist {
             container: String::new(),
             user_agent: user_agent.take(),
             referrer: referrer.take(),
+            catchup_days,
+            catchup,
+            catchup_source,
         });
         if channels.len() >= MAX_CHANNELS {
             break;
@@ -1562,6 +1918,11 @@ fn clean_name(name: &str) -> String {
 }
 
 /// Lowercase alphanumerics only: "La 1 HD" → "la1hd".
+/// A channel of an adult group (or named as one), hidden from restricted profiles.
+pub fn is_adult(channel: &Channel) -> bool {
+    crate::parental::is_adult_label(&channel.group) || crate::parental::is_adult_label(&channel.name)
+}
+
 pub fn normalize(text: &str) -> String {
     text.chars()
         .filter(|c| c.is_alphanumeric())
@@ -1834,7 +2195,8 @@ fn parse_xmltv_time(raw: &str) -> Option<u64> {
     let mut ts = days * 86_400 + hour * 3600 + minute * 60 + second;
     if let Some(zone) = zone.filter(|z| z.len() >= 5) {
         let sign = if zone.starts_with('-') { -1 } else { 1 };
-        let body = &zone[1..];
+        // A zone is ASCII (`+0100`); anything else must not be sliced by bytes.
+        let body = zone.get(1..).unwrap_or("");
         if body.len() >= 4 && body.bytes().all(|b| b.is_ascii_digit()) {
             let zh: i64 = body[0..2].parse().unwrap_or(0);
             let zm: i64 = body[2..4].parse().unwrap_or(0);
@@ -1973,5 +2335,39 @@ rtmp://host/x\r\n";
         assert_eq!(account.max_connections, Some(2));
         let bad = serde_json::json!({ "user_info": { "auth": 0, "status": "Expired" } });
         assert_eq!(parse_account(&bad).unwrap_err(), "La cuenta ha caducado");
+    }
+
+    #[test]
+    fn catchup_templates_and_modes() {
+        // 2024-03-10 20:30:00 UTC
+        let start = 1_710_102_600;
+        assert_eq!(civil_from_unix(start as i64), (2024, 3, 10, 20, 30, 0));
+        assert_eq!(format_stamp("Y-m-d:H-M", start as i64), "2024-03-10:20-30");
+        let url = fill_catchup("http://h/a.m3u8?s=${start}&e={utcend}&d={duration:60}&x={Y}{m}{d}&k={keep}", start, start + 3600, start + 7200);
+        assert_eq!(url, "http://h/a.m3u8?s=1710102600&e=1710106200&d=60&x=20240310&k={keep}");
+        assert_eq!(fill_catchup("{utc:Y/m/d H:M}", start, start, start), "2024/03/10 20:30");
+
+        let text = "#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" catchup=\"shift\" catchup-days=\"3\",A\nhttp://h/a.m3u8\n#EXTINF:-1 catchup-source=\"?utc={utc}\",B\nhttp://h/b.m3u8\n#EXTINF:-1 catchup=\"flussonic\",C\nhttp://h/c.m3u8\n";
+        let list = parse_m3u(text, "src").channels;
+        assert_eq!((list[0].catchup.as_str(), list[0].catchup_days), ("shift", 3));
+        assert_eq!((list[1].catchup.as_str(), list[1].catchup_days), ("default", 1));
+        assert_eq!(list[2].catchup_window(), 0);
+
+        let source = IptvSource::default();
+        let now = start + 7200;
+        let url = catchup_url(&source, &list[0], start, start + 3600, now, 0).unwrap();
+        assert_eq!(url, format!("http://h/a.m3u8?utc={start}&lutc={now}"));
+        // Outside the archive window, or not finished yet.
+        assert!(catchup_url(&source, &list[1], start, start + 3600, start + 2 * 86_400, 0).is_err());
+        assert!(catchup_url(&source, &list[2], start, start + 3600, now, 0).is_err());
+
+        let streams = serde_json::json!([{ "name": "X", "stream_id": 9, "tv_archive": 1, "tv_archive_duration": "5" }, { "name": "Y", "stream_id": 10, "tv_archive": 0 }]);
+        let channels = xtream_channels("src", &serde_json::Value::Null, &streams, "live");
+        assert_eq!(channels[0].catchup_window(), 5);
+        assert_eq!(channels[1].catchup_window(), 0);
+
+        let info = serde_json::json!({ "server_info": { "time_now": "2024-03-10 21:30:04", "timestamp_now": start } });
+        assert_eq!(server_offset(&info), 3600);
+        assert_eq!(server_offset(&serde_json::json!({})), 0);
     }
 }

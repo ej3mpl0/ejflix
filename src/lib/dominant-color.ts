@@ -42,12 +42,8 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   return [h * 60, s, l];
 }
 
-/**
- * Most present saturated colour of an image, darkened to a background tint
- * (`hsl(h s% l%)` with L in 12–22 %). `null` when it cannot be computed (CORS, decode
- * error, greyscale picture), so callers fall back to the theme background.
- */
-function sample(img: HTMLImageElement): string | null {
+/** Hue and saturation of the most present saturated colour, or null (CORS, greyscale...). */
+function dominantHs(img: HTMLImageElement): [number, number] | null {
   const canvas = document.createElement("canvas");
   canvas.width = SAMPLE_W;
   canvas.height = SAMPLE_H;
@@ -81,6 +77,18 @@ function sample(img: HTMLImageElement): string | null {
   }
   if (!best || best.count < 4) return null;
   const [h, s] = rgbToHsl(best.r / best.count, best.g / best.count, best.b / best.count);
+  return [h, s];
+}
+
+/**
+ * Most present saturated colour of an image, darkened to a background tint
+ * (`hsl(h s% l%)` with L in 12–22 %). `null` when it cannot be computed (CORS, decode
+ * error, greyscale picture), so callers fall back to the theme background.
+ */
+function sample(img: HTMLImageElement): string | null {
+  const hs = dominantHs(img);
+  if (!hs) return null;
+  const [h, s] = hs;
   const sat = Math.min(0.45, s);
   const light = 0.16;
   return `hsl(${Math.round(h)} ${Math.round(sat * 100)}% ${Math.round(light * 100)}%)`;
@@ -118,4 +126,27 @@ export function useDominantColor(url: string | null | undefined): string | null 
   }, [url]);
 
   return color;
+}
+
+const hsCache = new Map<string, Promise<[number, number] | null>>();
+
+/** Hue (degrees) and saturation (0–1) of the dominant colour of an image, for the auto accent. */
+export function dominantHue(url: string): Promise<[number, number] | null> {
+  let job = hsCache.get(url);
+  if (!job) {
+    job = new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.decoding = "async";
+      img.onload = () => resolve(dominantHs(img));
+      img.onerror = () => resolve(null);
+      img.src = thumbUrl(url);
+    });
+    if (hsCache.size >= CACHE_MAX) {
+      const first = hsCache.keys().next().value;
+      if (first !== undefined) hsCache.delete(first);
+    }
+    hsCache.set(url, job);
+  }
+  return job;
 }

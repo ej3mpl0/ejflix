@@ -11,6 +11,7 @@ import { Platform } from "react-native";
 import * as Device from "expo-device";
 import type { PublicInfo, PublicUser, SavedServer, Session } from "../lib/types";
 import { fetchWithTimeout, shortError } from "./http";
+import { LocalizedError } from "./errors";
 import { KEYS, SECRET, secrets, store } from "./store";
 import { uuid } from "./util";
 import { configureImages } from "./jellyfin/images";
@@ -278,7 +279,7 @@ export function accountView(): Session | null {
 
 function requireView(): Session {
   const view = accountView();
-  if (!view) throw new Error("No hay sesión activa");
+  if (!view) throw new LocalizedError("errNoSession", "No hay sesión activa");
   return view;
 }
 
@@ -300,14 +301,18 @@ async function probeRaw(serverUrl: string): Promise<PublicInfo> {
   try {
     response = await fetchWithTimeout(`${serverUrl}/System/Info/Public`, { headers: { Accept: "application/json" } });
   } catch (error) {
-    throw new Error(`No se puede conectar a Jellyfin: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errJellyfinUnreachable", `No se puede conectar a Jellyfin: ${detail}`, { detail });
   }
-  if (!response.ok) throw new Error(`El servidor respondió ${response.status}`);
+  if (!response.ok) {
+    throw new LocalizedError("errServerStatus", `El servidor respondió ${response.status}`, { status: response.status });
+  }
   let value: Json | null;
   try {
     value = asObject(await response.json());
   } catch (error) {
-    throw new Error(`Respuesta inválida: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errBadServerReply", `Respuesta inválida: ${detail}`, { detail });
   }
   return {
     serverName: textOf(value, "ServerName") ?? "Jellyfin",
@@ -336,14 +341,18 @@ async function publicUsersRaw(url: string): Promise<PublicUser[]> {
   try {
     response = await fetchWithTimeout(`${serverUrl}/Users/Public`, { headers: { Accept: "application/json" } });
   } catch (error) {
-    throw new Error(`No se pueden leer los perfiles: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errProfilesUnreadable", `No se pueden leer los perfiles: ${detail}`, { detail });
   }
-  if (!response.ok) throw new Error(`El servidor respondió ${response.status}`);
+  if (!response.ok) {
+    throw new LocalizedError("errServerStatus", `El servidor respondió ${response.status}`, { status: response.status });
+  }
   let value: unknown;
   try {
     value = await response.json();
   } catch (error) {
-    throw new Error(`Respuesta inválida: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errBadServerReply", `Respuesta inválida: ${detail}`, { detail });
   }
   const root = asObject(value);
   const users = Array.isArray(value)
@@ -374,21 +383,23 @@ async function loginRaw(url: string, username: string, password: string, deviceI
       body: JSON.stringify({ Username: username, Pw: password }),
     });
   } catch (error) {
-    throw new Error(`No se puede conectar: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errUnreachable", `No se puede conectar: ${detail}`, { detail });
   }
-  if (!response.ok) throw new Error("Usuario o contraseña incorrectos");
+  if (!response.ok) throw new LocalizedError("errWrongCredentials", "Usuario o contraseña incorrectos");
   let value: Json | null;
   try {
     value = asObject(await response.json());
   } catch (error) {
-    throw new Error(`Respuesta inválida: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("errBadServerReply", `Respuesta inválida: ${detail}`, { detail });
   }
   const token = textOf(value, "AccessToken");
-  if (!token) throw new Error("El servidor no devolvió token");
+  if (!token) throw new LocalizedError("errLoginIncomplete", "El servidor no devolvió token");
   const user = asObject(value?.User);
-  if (!user) throw new Error("El servidor no devolvió usuario");
+  if (!user) throw new LocalizedError("errLoginIncomplete", "El servidor no devolvió usuario");
   const userId = textOf(user, "Id");
-  if (!userId) throw new Error("Falta el id de usuario");
+  if (!userId) throw new LocalizedError("errLoginIncomplete", "Falta el id de usuario");
   const tag = textOf(user, "PrimaryImageTag");
   return {
     serverUrl,
@@ -544,7 +555,7 @@ export async function logoutServer(): Promise<void> {
 /** Links a Jellyfin account to the active local profile. */
 export async function linkServer(url: string, username: string, password: string): Promise<Session> {
   const profile = localProfile;
-  if (!profile) throw new Error("No hay un perfil local activo");
+  if (!profile) throw new LocalizedError("errNoLocalProfile", "No hay un perfil local activo");
   const deviceId = await existingDeviceId();
   const session = await loginRaw(url, username, password, deviceId);
   await saveSessionAt(KEYS.localSession(profile.id), session);
@@ -563,7 +574,7 @@ export async function linkServer(url: string, username: string, password: string
 
 export async function unlinkServer(): Promise<Session> {
   const profile = localProfile;
-  if (!profile) throw new Error("No hay un perfil local activo");
+  if (!profile) throw new LocalizedError("errNoLocalProfile", "No hay un perfil local activo");
   await clearSessionCaches();
   setJellyfinSession(null);
   await clearSessionAt(KEYS.localSession(profile.id));

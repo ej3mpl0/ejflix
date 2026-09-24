@@ -13,6 +13,8 @@ import { Avatar } from "../ui/Avatar";
 import { Pill } from "../ui/Pill";
 import { TextField } from "../ui/TextField";
 import { Toggle } from "../ui/Toggle";
+import { needsParentalPin } from "../../lib/parental";
+import { ParentalPinModal } from "./ParentalPinModal";
 
 /** Largest picture stored in a profile (data URL, ≈ 400 KiB of JPEG). */
 const MAX_AVATAR_BYTES = 400 * 1024;
@@ -27,6 +29,7 @@ export function ProfileForm({
   onCancel,
   onDeleted,
   submitLabel,
+  unlockPin,
 }: {
   initial?: LocalProfile | null;
   /** `pin` is the PIN typed in this form (null when none / unchanged). */
@@ -35,6 +38,8 @@ export function ProfileForm({
   /** Present when the profile can be deleted from here. */
   onDeleted?: (profile: LocalProfile) => void;
   submitLabel?: string;
+  /** The profile's PIN, typed to open this editor from the profile picker. */
+  unlockPin?: string | null;
 }) {
   const s = useStyles();
   const t = useTheme();
@@ -46,6 +51,8 @@ export function ProfileForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  /** Action waiting for the parental PIN (a profile is restricted). */
+  const [parental, setParental] = useState<"create" | "delete" | null>(null);
   const editing = initial != null;
   const keepsPin = editing && initial.hasPin && usePin && pin.length === 0;
   const pinValid = !usePin || keepsPin || /^\d{4}$/.test(pin);
@@ -82,7 +89,11 @@ export function ProfileForm({
     setError("");
     try {
       if (editing) {
-        const patch: { name: string; avatar: string; pin?: string; clearPin?: boolean } = { name: name.trim(), avatar };
+        const patch: { name: string; avatar: string; pin?: string; clearPin?: boolean; currentPin?: string } = {
+          name: name.trim(),
+          avatar,
+        };
+        if (unlockPin) patch.currentPin = unlockPin;
         if (!usePin) patch.clearPin = true;
         else if (pin) patch.pin = pin;
         onSaved(await api.localProfileUpdate(initial.id, patch), usePin && pin ? pin : null);
@@ -90,7 +101,8 @@ export function ProfileForm({
         onSaved(await api.localProfileCreate(name.trim(), avatar, usePin ? pin : null), usePin ? pin : null);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (!editing && needsParentalPin(err)) setParental("create");
+      else setError(err instanceof Error ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -100,16 +112,39 @@ export function ProfileForm({
     if (!initial) return;
     setBusy(true);
     try {
-      await api.localProfileDelete(initial.id);
+      await api.localProfileDelete(initial.id, unlockPin);
       onDeleted?.(initial);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (needsParentalPin(err)) setParental("delete");
+      else setError(err instanceof Error ? err.message : String(err));
       setBusy(false);
+    }
+  };
+
+  /** Retries the action with the parental PIN; a rejection is shown by the modal. */
+  const withParentalPin = async (parentalPin: string) => {
+    if (parental === "create") {
+      const created = await api.localProfileCreate(name.trim(), avatar, usePin ? pin : null, parentalPin);
+      setParental(null);
+      onSaved(created, usePin ? pin : null);
+    } else if (parental === "delete" && initial) {
+      await api.localProfileDelete(initial.id, unlockPin, parentalPin);
+      setParental(null);
+      onDeleted?.(initial);
     }
   };
 
   return (
     <View>
+      {parental ? (
+        <ParentalPinModal
+          steps={["current"]}
+          title={parental === "create" ? tr("parentalPinForCreate") : tr("parentalPinForDelete")}
+          hint={tr("parentalPinGateHint")}
+          onClose={() => setParental(null)}
+          onSubmit={({ current }) => withParentalPin(current)}
+        />
+      ) : null}
       <View style={{ alignItems: "center", gap: 12 }}>
         <Avatar src={avatar} name={name || "?"} size={112} />
         <Pill size="sm" pill icon={Camera} label={tr("choosePhoto")} onPress={() => void pickPhoto()} />

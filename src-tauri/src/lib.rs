@@ -2,9 +2,12 @@ mod account;
 mod addons;
 mod discord;
 mod downloads;
+mod errors;
 mod inflate;
 mod iptv;
 mod jellyfin;
+mod opensubs;
+mod lists;
 mod player;
 mod profiles;
 mod protect;
@@ -12,6 +15,9 @@ mod segments;
 mod settings;
 mod torrent;
 mod update;
+mod parental;
+mod trakt;
+mod party;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,6 +44,112 @@ pub fn store_path() -> std::path::PathBuf {
     match std::env::var("EJFLIX_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => std::path::PathBuf::from(dir).join("session.json"),
         _ => std::path::PathBuf::from("session.json"),
+    }
+}
+
+/// Guards `session.json` against a torn write (saves are atomic now, see `save_store`, so
+/// this is the second line of defence: when the plugin cannot parse the file it starts
+/// empty and the next save would put that over everything). Runs
+/// before anything opens the store: a file that reads is copied to `session.json.bak`;
+/// one that does not is set aside as `session.json.corrupt` and the backup put back.
+fn protect_store_file(app: &tauri::AppHandle) {
+    let Ok(path) = app.path().resolve(store_path(), tauri::path::BaseDirectory::AppData) else {
+        return;
+    };
+    let with_suffix = |suffix: &str| {
+        let mut name = path.clone().into_os_string();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    };
+    let (backup, corrupt) = (with_suffix(".bak"), with_suffix(".corrupt"));
+    let reads = |file: &std::path::Path| {
+        std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok())
+            .is_some()
+    };
+    if !path.exists() {
+        return;
+    }
+    if reads(&path) {
+        // Copy then rename, so the backup itself is never half written.
+        let tmp = with_suffix(".bak.tmp");
+        if std::fs::copy(&path, &tmp).is_ok() {
+            let _ = std::fs::rename(&tmp, &backup);
+        }
+        return;
+    }
+    let _ = std::fs::rename(&path, &corrupt);
+    if reads(&backup) {
+        let _ = std::fs::copy(&backup, &path);
+    }
+}
+
+/// Absolute path of `session.json`, resolved once in setup for `save_store`.
+static STORE_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+/// Serializes snapshot + write, so two saves never interleave on the temp file and a
+/// later snapshot can never be overwritten by an earlier one.
+static STORE_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializer given to the store plugin itself. The plugin writes with a plain in-place
+/// `fs::write` (a crash mid-write tears the file) and also saves every store on exit, so
+/// it is refused here: nothing reaches disk except through `save_store`.
+fn refuse_plugin_save(
+    _: &std::collections::HashMap<String, serde_json::Value>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    Err("session.json is saved through crate::save_store".into())
+}
+
+/// Opens the one store instance the whole app shares. The plugin caches stores by path,
+/// so building it here first (with auto-save off and plugin saves refused) makes every
+/// later `app.store(store_path())` return this same instance.
+fn open_store(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .path()
+        .resolve(store_path(), tauri::path::BaseDirectory::AppData)
+        .map_err(|e| e.to_string())?;
+    let _ = STORE_FILE.set(path);
+    tauri_plugin_store::StoreBuilder::new(app, store_path())
+        .disable_auto_save()
+        .serialize(refuse_plugin_save)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Writes the store to `session.json` atomically: the entries go to `session.json.tmp`,
+/// which is flushed to disk and then renamed over the real file (on Windows `rename`
+/// replaces the target in one step), so a crash leaves either the old or the new file,
+/// never a torn one. Every save in the app goes through here.
+pub fn save_store<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> Result<(), String> {
+    use std::io::Write;
+    let path = STORE_FILE.get().ok_or("store not opened")?;
+    let _guard = STORE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let entries: serde_json::Map<String, serde_json::Value> = store.entries().into_iter().collect();
+    let bytes = serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut tmp_name = path.clone().into_os_string();
+    tmp_name.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp_name);
+    {
+        let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
+    // An antivirus or indexer briefly holding the file makes the replace fail with
+    // "access denied"; a couple of short retries ride that out.
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(_) if attempt < 3 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
     }
 }
 
@@ -314,7 +426,7 @@ async fn settings_set(
 ) -> Result<Settings, String> {
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let saved = settings::merge_and_save(&app, &uid, patch)?;
     let _ = app.emit("settings://changed", &saved);
@@ -377,7 +489,7 @@ async fn login(
     )?;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 // ---- local profiles ----
@@ -393,7 +505,9 @@ fn local_profile_create(
     name: String,
     avatar: String,
     pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<LocalProfileView, String> {
+    parental::check_create(&app, parental_pin.as_deref())?;
     let profile = profiles::create(&app, &name, &avatar, pin.as_deref())?;
     Ok(profile.view(&app))
 }
@@ -405,6 +519,15 @@ async fn local_profile_update(
     id: String,
     patch: ProfilePatch,
 ) -> Result<LocalProfileView, String> {
+    // Changing or removing the PIN of a profile that is not open takes that PIN:
+    // otherwise anyone could clear it from the profile picker and walk in.
+    if patch.pin.is_some() || patch.clear_pin {
+        let open = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+        let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+        if !open && !profile.verify_pin(patch.current_pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
     let updated = profiles::update(&app, &id, patch)?;
     let mut active = state.local.write().await;
     if active.as_ref().is_some_and(|p| p.id == id) {
@@ -418,8 +541,16 @@ async fn local_profile_delete(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
+    pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<(), String> {
     let is_active = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+    if let Some(profile) = profiles::get(&app, &id)? {
+        if !is_active && !profile.verify_pin(pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
+    parental::check_delete(&app, &id, parental_pin.as_deref())?;
     if is_active {
         let _ = state.player.stop().await;
         *state.local.write().await = None;
@@ -428,6 +559,17 @@ async fn local_profile_delete(
     }
     account::forget_profile(&app, &id);
     profiles::delete(&app, &id)
+}
+
+/// Checks a profile's PIN without opening it (editing it from the profile picker).
+#[tauri::command]
+fn local_profile_check_pin(app: tauri::AppHandle, id: String, pin: String) -> Result<(), String> {
+    let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+    if profile.verify_pin(Some(&pin)) {
+        Ok(())
+    } else {
+        Err("PIN incorrecto".into())
+    }
 }
 
 /// Opens a local profile (after checking its PIN) and restores its linked Jellyfin
@@ -453,7 +595,7 @@ async fn local_profile_enter(
     state.account.activate(&app, &profile.id).await;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 /// Puts the Jellyfin account linked to a local profile back in memory, dropping the
@@ -512,7 +654,7 @@ async fn link_server(
     state.segments.clear().await;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 #[tauri::command]
@@ -529,7 +671,7 @@ async fn unlink_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     clear_session_at(&app, &profiles::session_key(&profile.id))?;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 #[tauri::command]
@@ -593,6 +735,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(),
     let was_local = state.local.write().await.take().is_some();
     state.jellyfin.set_session(None).await;
     state.account.deactivate().await;
+    opensubs::forget_token();
     state.segments.clear().await;
     state.iptv.clear().await;
     profiles::set_active(&app, None)?;
@@ -610,6 +753,7 @@ async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     state.jellyfin.set_session(None).await;
     state.account.deactivate().await;
     state.segments.clear().await;
+    opensubs::forget_token();
     profiles::set_active(&app, None)?;
     // The ejFlix accounts those users signed into go with them: nothing would be
     // left on screen to sign them out, and a later login must not pick them up.
@@ -782,8 +926,15 @@ async fn set_favorite(
 }
 
 #[tauri::command]
-async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<bool, String> {
-    state.jellyfin.set_played(&item_id, played).await
+async fn set_played(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+    played: bool,
+) -> Result<bool, String> {
+    let confirmed = state.jellyfin.set_played(&item_id, played).await?;
+    trakt::spawn_jellyfin_history(&app, &item_id, confirmed);
+    Ok(confirmed)
 }
 
 #[derive(Deserialize)]
@@ -802,22 +953,15 @@ async fn player_start(
     args: PlayArgs,
 ) -> Result<PlayerState, String> {
     if !jellyfin::valid_item_id(&args.item_id) {
-        return Err("Ítem no válido".into());
+        return Err(crate::errors::code("invalidItem"));
     }
     let movie = state.jellyfin.get_item(&args.item_id).await?;
     let session = state.jellyfin.require_session().await?;
     let playback = settings::load(&app, &session.user_id)
         .unwrap_or_default()
         .playback;
-    let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
-        remember_speed: playback.remember_speed,
-        last_speed: playback.last_speed,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
-    };
+    let mut prefs = PlaybackPrefs::from_settings(&playback);
+    apply_sync_offsets(&app, &state, &movie.id, &mut prefs).await;
     let start = args.start_seconds.unwrap_or(0.0);
     let play_session_id = Uuid::new_v4().to_string();
     // Version picker: play the requested media source when the item has it, else the first.
@@ -867,13 +1011,23 @@ async fn player_stop(
     state: State<'_, AppState>,
     switching: Option<bool>,
 ) -> Result<(), String> {
+    let credits = state.player.credits_start();
     if let Some((ctx, time, duration)) = state.player.stop().await? {
+        let uid = settings_user(&app, &state).await;
+        let threshold = match &uid {
+            Some(uid) => settings::load(&app, uid).unwrap_or_default().playback.watched_threshold,
+            None => settings::Settings::default().playback.watched_threshold,
+        };
+        let watched = player::counts_as_watched(time, duration, threshold, credits);
         match ctx.source {
             PlaybackSource::Jellyfin {
                 item_id,
                 media_source_id,
                 play_session_id,
             } => {
+                if watched {
+                    trakt::spawn_jellyfin_history(&app, &item_id, true);
+                }
                 let _ = state
                     .jellyfin
                     .report_stop(
@@ -883,9 +1037,37 @@ async fn player_stop(
                         seconds_to_ticks(time),
                     )
                     .await;
+                // The server only marks it played past its own resume limit; stopping in
+                // the credits or past the profile's threshold counts too.
+                if watched && state.jellyfin.set_played(&item_id, true).await.is_ok() {
+                    let _ = app.emit("player://watched", serde_json::json!({ "itemId": item_id }));
+                }
+            }
+            PlaybackSource::Addon { entry } if watched => {
+                trakt::spawn_resume_history(&app, &entry);
+                if let Some(uid) = uid {
+                    let _ = addons::remove_progress(&app, &uid, &entry.key);
+                    let library = addons::LibraryEntry {
+                        key: entry.key.clone(),
+                        kind: entry.kind.clone(),
+                        meta_id: entry.meta_id.clone(),
+                        name: entry.name.clone(),
+                        series_name: entry.series_name.clone(),
+                        poster: entry.poster.clone(),
+                        background: entry.background.clone(),
+                        logo: entry.logo.clone(),
+                        season: entry.season,
+                        episode: entry.episode,
+                        imdb: entry.imdb.clone(),
+                        ..addons::LibraryEntry::default()
+                    };
+                    if addons::set_library_flags(&app, &uid, library, None, Some(true)).is_ok() {
+                        let _ = app.emit("player://watched", serde_json::json!({ "key": entry.key }));
+                    }
+                }
             }
             PlaybackSource::Addon { entry } => {
-                if let Some(uid) = settings_user(&app, &state).await {
+                if let Some(uid) = uid {
                     let _ = addons::upsert_progress(
                         &app,
                         &uid,
@@ -907,6 +1089,7 @@ async fn player_stop(
     if switching.unwrap_or(false) {
         return Ok(());
     }
+    let _ = state.player.exit_mini(&app, false).await;
     hide_player_overlay(&app);
     if let Some(window) = app.get_webview_window("main") {
         set_main_fullscreen(&window, false)?;
@@ -1006,19 +1189,138 @@ async fn player_props(state: State<'_, AppState>) -> Result<serde_json::Map<Stri
 #[tauri::command]
 async fn player_sub_add_text(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
     if content.len() > 8 * 1024 * 1024 {
-        return Err("El archivo de subtítulos es demasiado grande".into());
+        return Err(crate::errors::code("subTooLarge"));
     }
     let ext = std::path::Path::new(&name)
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase())
         .filter(|e| ["srt", "vtt", "ass", "ssa", "sub"].contains(&e.as_str()))
-        .ok_or_else(|| "Formato de subtítulos no admitido".to_string())?;
+        .ok_or_else(|| crate::errors::code("subFormat"))?;
     let dir = std::env::temp_dir().join("ejflix-subs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.{ext}", Uuid::new_v4()));
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
     state.player.sub_add(&path.to_string_lossy()).await
+}
+
+// ---- player extras: sync offsets, night mode, watched rule, mini player, OpenSubtitles ----
+
+/// The subtitle / audio delays remembered for a title, into the prefs of its start.
+async fn apply_sync_offsets(app: &tauri::AppHandle, state: &AppState, key: &str, prefs: &mut PlaybackPrefs) {
+    if let Some(uid) = settings_user(app, state).await {
+        if let Some(offset) = player::load_offset(app, &uid, key) {
+            prefs.sub_delay = offset.sub;
+            prefs.audio_delay = offset.audio;
+        }
+    }
+}
+
+/// Sets the subtitle ("sub") or audio delay and remembers both for the title playing.
+#[tauri::command]
+async fn player_set_delay(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+    seconds: f64,
+) -> Result<f64, String> {
+    let value = state.player.set_delay(&kind, seconds).await?;
+    let key = state
+        .player
+        .context
+        .read()
+        .await
+        .as_ref()
+        .and_then(|ctx| ctx.source.title_key());
+    if let (Some(key), Some(uid)) = (key, settings_user(&app, &state).await) {
+        let snap = state.player.snapshot().await;
+        let _ = player::save_offset(&app, &uid, &key, snap.sub_delay, snap.audio_delay);
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+async fn player_set_night(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.player.set_night(on).await
+}
+
+/// Where the credits of the file playing start (seconds), for the "watched" rule.
+#[tauri::command]
+fn player_set_credits(state: State<'_, AppState>, start: Option<f64>) {
+    state.player.set_credits_start(start);
+}
+
+/// Mini player on or off. Returns whether the window is fullscreen afterwards.
+#[tauri::command]
+async fn player_set_mini(app: tauri::AppHandle, state: State<'_, AppState>, on: bool) -> Result<bool, String> {
+    if on {
+        state.player.enter_mini(&app).await?;
+        Ok(false)
+    } else {
+        state.player.exit_mini(&app, true).await
+    }
+}
+
+/// Moves the mini player: the press happens on the overlay, but the main window (the
+/// video) is what moves; the overlay follows it.
+#[tauri::command]
+fn player_mini_drag(app: tauri::AppHandle) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Ventana no disponible".to_string())?;
+    main.start_dragging().map_err(|e| e.to_string())
+}
+
+async fn opensubtitles_prefs(app: &tauri::AppHandle, state: &AppState) -> Result<(String, settings::Playback), String> {
+    let uid = settings_user(app, state)
+        .await
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
+    let playback = settings::load(app, &uid).unwrap_or_default().playback;
+    if playback.opensubtitles_api_key.is_empty() {
+        return Err(crate::errors::code("osNoApiKey"));
+    }
+    Ok((uid, playback))
+}
+
+#[tauri::command]
+async fn opensubtitles_search(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    query: opensubs::SearchQuery,
+) -> Result<Vec<opensubs::SubtitleResult>, String> {
+    let (_, playback) = opensubtitles_prefs(&app, &state).await?;
+    opensubs::search(&playback.opensubtitles_api_key, &query).await
+}
+
+/// Downloads a search result and loads it into the player (selected).
+#[tauri::command]
+async fn opensubtitles_download(app: tauri::AppHandle, state: State<'_, AppState>, file_id: u64) -> Result<(), String> {
+    let (uid, playback) = opensubtitles_prefs(&app, &state).await?;
+    let password = opensubs::load_password(&app, &uid);
+    let login = match (playback.opensubtitles_user.as_str(), password.as_deref()) {
+        ("", _) | (_, None) => None,
+        (user, Some(password)) => Some((user, password)),
+    };
+    let path = opensubs::download(&playback.opensubtitles_api_key, &uid, login, file_id).await?;
+    state.player.sub_add(&path.to_string_lossy()).await
+}
+
+/// Whether an OpenSubtitles password is saved for the profile.
+#[tauri::command]
+async fn opensubtitles_has_password(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => opensubs::load_password(&app, &uid).is_some(),
+        None => false,
+    })
+}
+
+/// Saves the OpenSubtitles password (empty forgets it), encrypted and outside the synced settings.
+#[tauri::command]
+async fn opensubtitles_set_password(app: tauri::AppHandle, state: State<'_, AppState>, password: String) -> Result<(), String> {
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
+    opensubs::save_password(&app, &uid, &password)
 }
 
 /// Peers, speed and progress of a torrent being opened or played.
@@ -1090,7 +1392,7 @@ fn update_prefs(app: tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
 fn update_set_auto(app: tauri::AppHandle, auto: bool) -> Result<update::UpdatePrefs, String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("updateAuto", serde_json::Value::Bool(auto));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     load_update_prefs(&app)
 }
 
@@ -1102,7 +1404,7 @@ fn update_skip(app: tauri::AppHandle, version: String) -> Result<update::UpdateP
         .map(|(a, b, c)| format!("{a}.{b}.{c}"))
         .unwrap_or_default();
     store.set("updateSkipped", serde_json::Value::String(clean));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     load_update_prefs(&app)
 }
 
@@ -1178,7 +1480,7 @@ fn save_session_at(app: &tauri::AppHandle, key: &str, session: &Session) -> Resu
             "blob": protect::to_hex(&sealed),
         }),
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1213,7 +1515,7 @@ fn clear_session(app: &tauri::AppHandle) -> Result<(), String> {
 fn clear_session_at(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete(key);
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1223,7 +1525,7 @@ fn save_server(app: &tauri::AppHandle, url: &str, name: &str) -> Result<(), Stri
     if !name.is_empty() {
         store.set("serverName", serde_json::Value::String(name.to_string()));
     }
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1250,7 +1552,7 @@ fn clear_server(app: &tauri::AppHandle) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("serverUrl");
     store.delete("serverName");
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1274,14 +1576,14 @@ fn upsert_profile(app: &tauri::AppHandle, profile: PublicUser) -> Result<(), Str
         "profiles",
         serde_json::to_value(&profiles).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
 fn clear_profiles(app: &tauri::AppHandle) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("profiles");
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1333,7 +1635,7 @@ fn load_device_id(app: &tauri::AppHandle) -> Option<String> {
 fn save_device_id(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("deviceId", serde_json::Value::String(id.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1356,14 +1658,14 @@ fn load_locale(app: &tauri::AppHandle) -> Result<String, String> {
 fn save_locale(app: &tauri::AppHandle, locale: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("locale", serde_json::Value::String(locale.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
 fn save_last_seen_version(app: &tauri::AppHandle, version: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("lastSeenVersion", serde_json::Value::String(version.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1588,7 +1890,7 @@ async fn addon_add(app: tauri::AppHandle, state: State<'_, AppState>, url: Strin
     let info = state.addons.manifest(&url, false).await?;
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let mut urls = settings::load(&app, &uid)?.addons.urls;
     if !urls.contains(&url) {
@@ -1617,7 +1919,7 @@ async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: St
     let url = addons::normalize_manifest_url(&url)?;
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let current = settings::load(&app, &uid)?.addons;
     let urls: Vec<String> = current.urls.into_iter().filter(|u| u != &url).collect();
@@ -1698,6 +2000,10 @@ async fn addon_streams(
 
 #[tauri::command]
 async fn addon_progress_list(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ResumeEntry>, String> {
+    // Local entries carry no rating: a profile that hides unrated titles hides them.
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_progress(&app, &uid),
         None => vec![],
@@ -1734,6 +2040,9 @@ async fn addon_library_list(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_library(&app, &uid),
         None => vec![],
@@ -1756,10 +2065,13 @@ async fn addon_library_set(
     state: State<'_, AppState>,
     args: LibraryFlagArgs,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
-    match settings_user(&app, &state).await {
-        Some(uid) => addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched),
-        None => Err("No hay ningún perfil activo".into()),
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
+    if let Some(watched) = args.watched {
+        trakt::spawn_entry_history(&app, &args.entry, watched);
     }
+    addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched)
 }
 
 #[derive(Deserialize)]
@@ -1792,15 +2104,8 @@ async fn player_start_url(
         Some(uid) => settings::load(&app, &uid).unwrap_or_default().playback,
         None => settings::Settings::default().playback,
     };
-    let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
-        remember_speed: playback.remember_speed,
-        last_speed: playback.last_speed,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
-    };
+    let mut prefs = PlaybackPrefs::from_settings(&playback);
+    apply_sync_offsets(&app, &state, &args.entry.key, &mut prefs).await;
     let headers: Vec<(String, String)> = args
         .headers
         .into_iter()
@@ -1848,7 +2153,7 @@ async fn get_media_segments_external(
 async fn iptv_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     settings_user(app, state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 async fn iptv_prefs(app: &tauri::AppHandle, uid: &str) -> settings::IptvPrefs {
@@ -2011,22 +2316,21 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         .iptv
         .find(&id)
         .await
-        .ok_or_else(|| "Canal no encontrado".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelNotFound"))?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
-        .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelListGone"))?;
     let (url, headers) = iptv::stream_for(&source, &channel)?;
     let playback = settings::load(&app, &uid).unwrap_or_default().playback;
     let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
         // Live TV always plays at normal speed.
         remember_speed: false,
         last_speed: 1.0,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
+        ..PlaybackPrefs::from_settings(&playback)
     };
     let now = addons::now_ms() / 1000;
     let epg = state.iptv.epg_now(std::slice::from_ref(&id), now).await;
@@ -2051,6 +2355,227 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
     show_player_overlay(&app);
     refresh_presence(&app).await;
     Ok(state.player.snapshot().await)
+}
+
+// ---- IPTV: reminders, catch-up and multi-view ----
+
+/// Profile with an open session (reminders never go off on the profile picker).
+async fn active_user(state: &AppState) -> Option<String> {
+    if let Some(profile) = state.local.read().await.as_ref() {
+        return Some(profile.id.clone());
+    }
+    state.jellyfin.session().await.map(|s| s.user_id)
+}
+
+/// Playback preferences for live streams (always normal speed).
+fn live_prefs(app: &tauri::AppHandle, uid: &str) -> PlaybackPrefs {
+    let playback = settings::load(app, uid).unwrap_or_default().playback;
+    PlaybackPrefs {
+        remember_speed: false,
+        last_speed: 1.0,
+        ..PlaybackPrefs::from_settings(&playback)
+    }
+}
+
+#[tauri::command]
+async fn iptv_reminders(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let hide_adult = parental::hides_adult();
+    Ok(iptv::reminders(&app, &uid, addons::now_ms() / 1000)
+        .into_iter()
+        .filter(|r| !(hide_adult && r.is_adult()))
+        .collect())
+}
+
+#[tauri::command]
+async fn iptv_reminder_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    reminder: iptv::Reminder,
+) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    if parental::hides_adult() && reminder.is_adult() {
+        return Err(parental::BLOCKED.into());
+    }
+    let list = iptv::set_reminder(&app, &uid, reminder, addons::now_ms() / 1000)?;
+    let _ = app.emit(iptv::REMINDERS_EVENT, ());
+    Ok(list)
+}
+
+#[tauri::command]
+async fn iptv_reminder_remove(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    channel_id: String,
+    start: u64,
+) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let list = iptv::remove_reminder(&app, &uid, &channel_id, start, addons::now_ms() / 1000)?;
+    let _ = app.emit(iptv::REMINDERS_EVENT, ());
+    Ok(list)
+}
+
+/// Checks the reminders of the active profile every few seconds: the ones due are
+/// announced to both windows (in-app card with "Watch now") and as a Windows notification.
+fn start_reminder_loop(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            let state = app.state::<AppState>();
+            let Some(uid) = active_user(&state).await else { continue };
+            let due = iptv::take_due_reminders(&app, &uid, addons::now_ms() / 1000);
+            if due.is_empty() {
+                continue;
+            }
+            let en = load_locale(&app).unwrap_or_default() == "en";
+            // A restricted profile is never offered an adult channel.
+            let hide_adult = parental::hides_adult();
+            for reminder in due.iter().filter(|r| !(hide_adult && r.is_adult())) {
+                let _ = app.emit(iptv::REMINDER_EVENT, reminder);
+                use tauri_plugin_notification::NotificationExt;
+                let title = if en { "Starting now" } else { "Empieza ahora" };
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(title)
+                    .body(format!("{} · {}", reminder.title, reminder.channel_name))
+                    .show();
+            }
+            let _ = app.emit(iptv::REMINDERS_EVENT, ());
+        }
+    });
+}
+
+/// Plays a past programme of a channel with catch-up (Xtream timeshift or the M3U
+/// `catchup-source`). The URL, with the credentials, is built here.
+#[tauri::command]
+async fn iptv_play_catchup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    start: u64,
+    stop: u64,
+    title: String,
+) -> Result<PlayerState, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let (channel, catalog) = state
+        .iptv
+        .find(&id)
+        .await
+        .ok_or_else(|| crate::errors::code("channelNotFound"))?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
+    let source = iptv::list_sources(&app, &uid)
+        .into_iter()
+        .find(|s| s.id == channel.source_id)
+        .ok_or_else(|| crate::errors::code("channelListGone"))?;
+    let now = addons::now_ms() / 1000;
+    let url = iptv::catchup_url(&source, &channel, start, stop, now, catalog.server_offset)?;
+    let (_, headers) = iptv::stream_for(&source, &channel)?;
+    let label = format!("{} · {}", channel.name, title);
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Live { channel_id: id.clone() },
+        presence: discord::PresenceInfo {
+            title: channel.name.clone(),
+            episode: Some(title.clone()),
+            year: None,
+            kind: "live".into(),
+            poster_url: channel.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            source: source.name.clone(),
+            live_window: None,
+        },
+    };
+    state
+        .player
+        .start(&app, &url, &headers, &label, 0.0, ctx, live_prefs(&app, &uid))
+        .await?;
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(state.player.snapshot().await)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiviewStart {
+    state: PlayerState,
+    /// Channels actually on screen, in cell order (dead streams are left out).
+    ids: Vec<String>,
+}
+
+/// Watches 2–4 channels at once in a mosaic. Every stream is tried first: mpv fails the
+/// whole mosaic when one input cannot be opened.
+#[tauri::command]
+async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: Vec<String>) -> Result<MultiviewStart, String> {
+    let uid = iptv_user(&app, &state).await?;
+    if !(2..=4).contains(&ids.len()) {
+        return Err(crate::errors::code("multiviewCount"));
+    }
+    let sources = iptv::list_sources(&app, &uid);
+    let mut resolved = Vec::new();
+    for id in &ids {
+        let (channel, catalog) = state
+            .iptv
+            .find(id)
+            .await
+            .ok_or_else(|| crate::errors::code("channelNotFound"))?;
+        if parental::hides_adult() && iptv::is_adult(&channel) {
+            return Err(parental::BLOCKED.into());
+        }
+        let source = sources
+            .iter()
+            .find(|s| s.id == channel.source_id)
+            .ok_or_else(|| crate::errors::code("channelListGone"))?;
+        let (url, headers) = iptv::stream_for(source, &channel)?;
+        resolved.push((id.clone(), channel, url, headers, catalog.account.clone()));
+    }
+    // An Xtream account only serves so many streams at once.
+    for (_, channel, _, _, account) in &resolved {
+        if let Some(max) = account.as_ref().and_then(|a| a.max_connections).filter(|&m| m > 0) {
+            let wanted = resolved.iter().filter(|(_, c, ..)| c.source_id == channel.source_id).count();
+            if wanted > max as usize {
+                return Err(crate::errors::detail("multiviewConnections", max));
+            }
+        }
+    }
+    let targets: Vec<(String, Vec<(String, String)>)> =
+        resolved.iter().map(|(_, _, url, headers, _)| (url.clone(), headers.clone())).collect();
+    let alive = state.iptv.probe(&targets).await;
+    let resolved: Vec<_> = resolved.into_iter().zip(alive).filter(|(_, ok)| *ok).map(|(r, _)| r).collect();
+    if resolved.len() < 2 {
+        return Err(crate::errors::code("multiviewTooFew"));
+    }
+    let urls: Vec<String> = resolved.iter().map(|(_, _, url, ..)| url.clone()).collect();
+    let names: Vec<String> = resolved.iter().map(|(_, c, ..)| c.name.clone()).collect();
+    let (first_id, first, _, headers, _) = &resolved[0];
+    let title = names.join(" · ");
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Live { channel_id: first_id.clone() },
+        presence: discord::PresenceInfo {
+            title: title.clone(),
+            episode: None,
+            year: None,
+            kind: "live".into(),
+            poster_url: first.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            source: String::new(),
+            live_window: None,
+        },
+    };
+    state
+        .player
+        .start_multiview(&app, &urls, headers, &title, ctx, live_prefs(&app, &uid))
+        .await?;
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(MultiviewStart {
+        state: state.player.snapshot().await,
+        ids: resolved.into_iter().map(|(id, ..)| id).collect(),
+    })
+}
+
+#[tauri::command]
+async fn player_multiview_audio(state: State<'_, AppState>, index: usize) -> Result<(), String> {
+    state.player.multiview_audio(index).await
 }
 
 // ---- downloads ----
@@ -2104,10 +2629,111 @@ async fn download_reveal(state: State<'_, AppState>, id: String) -> Result<(), S
     state.downloads.reveal(&id)
 }
 
+// ---- discovery: custom lists, calendar, shuffle, recommendations ----
+
+/// Profile whose lists are being edited; unlike reads, writes need an active one.
+async fn lists_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
+    if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
+        return Err(crate::errors::code("noProfile"));
+    }
+    settings_user(app, state).await.ok_or_else(|| crate::errors::code("noProfile"))
+}
+
+#[tauri::command]
+async fn custom_lists_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<lists::CustomList>, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::load(&app, &uid),
+        None => vec![],
+    })
+}
+
+#[tauri::command]
+async fn custom_list_create(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::create(&app, &uid, &name)
+}
+
+#[tauri::command]
+async fn custom_list_rename(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::rename(&app, &uid, &id, &name)
+}
+
+#[tauri::command]
+async fn custom_list_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::delete(&app, &uid, &id)
+}
+
+#[tauri::command]
+async fn custom_list_set_item(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    item: lists::ListItem,
+    on: bool,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_item(&app, &uid, &id, item, on)
+}
+
+#[tauri::command]
+async fn calendar_seen_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::calendar_seen(&app, &uid),
+        None => 0,
+    })
+}
+
+#[tauri::command]
+async fn calendar_seen_set(app: tauri::AppHandle, state: State<'_, AppState>, ms: u64) -> Result<(), String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_calendar_seen(&app, &uid, ms)
+}
+
+#[tauri::command]
+async fn get_items_by_ids(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<Movie>, String> {
+    state.jellyfin.items_by_ids(&ids).await
+}
+
+#[tauri::command]
+async fn get_random_episode(
+    state: State<'_, AppState>,
+    series_id: String,
+    exclude: Vec<String>,
+) -> Result<Option<Movie>, String> {
+    state.jellyfin.random_episode(&series_id, &exclude).await
+}
+
+#[tauri::command]
+async fn get_calendar(state: State<'_, AppState>, days_back: u32) -> Result<jellyfin::CalendarData, String> {
+    state.jellyfin.calendar(days_back).await
+}
+
+#[tauri::command]
+async fn get_recommendations(state: State<'_, AppState>) -> Result<Vec<jellyfin::RecommendationRow>, String> {
+    state.jellyfin.recommendations().await
+}
+
+#[tauri::command]
+async fn search_people(state: State<'_, AppState>, query: String) -> Result<Vec<jellyfin::Person>, String> {
+    state.jellyfin.search_people(&query).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::new())
         .register_asynchronous_uri_scheme_protocol(jellyfin::IMAGE_SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -2228,10 +2854,66 @@ pub fn run() {
             torrent_cache_clear,
             torrent_pause_all,
             addons_all,
+            // profiles & integrations
+            local_profile_check_pin,
+            parental::parental_status,
+            parental::parental_set,
+            trakt::trakt_status,
+            trakt::trakt_set_app,
+            trakt::trakt_device_start,
+            trakt::trakt_device_poll,
+            trakt::trakt_disconnect,
+            trakt::trakt_set_sync_back,
+            trakt::trakt_import,
+            trakt::trakt_open,
+            // player
+            player_set_delay,
+            player_set_night,
+            player_set_credits,
+            player_set_mini,
+            player_mini_drag,
+            opensubtitles_search,
+            opensubtitles_download,
+            opensubtitles_has_password,
+            opensubtitles_set_password,
+            // discovery
+            custom_lists_get,
+            custom_list_create,
+            custom_list_rename,
+            custom_list_delete,
+            custom_list_set_item,
+            calendar_seen_get,
+            calendar_seen_set,
+            get_items_by_ids,
+            get_random_episode,
+            get_calendar,
+            get_recommendations,
+            search_people,
+            // livetv
+            iptv_reminders,
+            iptv_reminder_set,
+            iptv_reminder_remove,
+            iptv_play_catchup,
+            iptv_multiview,
+            player_multiview_audio,
+            // watch party
+            party::party_start,
+            party::party_join,
+            party::party_leave,
+            party::party_status,
+            party::party_send,
+            party::party_set_title,
+            party::party_set_open,
+            party::party_player_pause,
+            party::party_find_library_item,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
             let handle = app.handle().clone();
+            protect_store_file(&handle);
+            if let Err(err) = open_store(&handle) {
+                eprintln!("store: {err}");
+            }
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = create_player_overlay(&handle, &window) {
                     eprintln!("player overlay: {err}");
@@ -2254,6 +2936,7 @@ pub fn run() {
             state.downloads.load(&handle);
             state.discord.spawn();
             account::start_sync_loop(handle.clone());
+            start_reminder_loop(handle.clone());
             start_progress_loop(handle, state.player.clone(), state.jellyfin.clone());
             Ok(())
         })

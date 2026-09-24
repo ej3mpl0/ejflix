@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useState } from "react";
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
+import { haptic } from "../../lib/haptics";
 import { Play } from "lucide-react-native";
 import type { Movie } from "../../lib/types";
 import { episodeCode, formatRuntime, remainingMinutes } from "../../lib/format";
@@ -50,7 +50,7 @@ function ContinueCardInner({ movie, width, onPlay, onOpen, variant = "resume", o
   const [menu, setMenu] = useState(false);
 
   const longPress = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    haptic("medium");
     if (onMenu) onMenu(movie);
     else {
       setMenuMounted(true);

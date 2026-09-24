@@ -5,25 +5,37 @@ import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
 import { SkipButton } from "../components/SkipButton";
 import { NextEpisodeCard } from "../components/NextEpisodeCard";
+import { isParentalBlocked } from "../lib/parental";
 import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
 import { ChannelsPanel } from "../components/ChannelsPanel";
+import { MultiviewBar } from "../components/MultiviewBar";
+import { ReminderAlerts } from "../components/ReminderAlerts";
 import { api } from "../lib/api";
 import type { Channel, EpgNow, Movie, PlayerState, TorrentStatus } from "../lib/types";
-import { channelToMovie } from "../lib/iptv";
+import { channelToMovie, reminderChannel } from "../lib/iptv";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { isSeriesEpisode, nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
+import { queueNext } from "../lib/play-queue";
 import { usePauseInfo } from "../hooks/usePauseInfo";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { StartCover } from "../components/StartCover";
 import { StatsPanel } from "../components/StatsPanel";
+import { MiniPlayerControls } from "../components/MiniPlayerControls";
+import { SubtitleSearch } from "../components/SubtitleSearch";
+import { PartyPanel } from "../components/PartyPanel";
+import { PartyReactions } from "../components/PartyReactions";
+import { useParty } from "../hooks/useParty";
+import { usePartySync } from "../hooks/usePartySync";
+import { partyErrorKey, type PartyStatus } from "../lib/party";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -40,9 +52,18 @@ const emptyState: PlayerState = {
   cacheTime: 0,
   speed: 1,
   aspect: "auto",
+  subDelay: 0,
+  audioDelay: 0,
+  night: false,
+  mini: false,
 };
 
+const OSD_MS = 1400;
+
 const LOCK_HINT_MS = 2000;
+
+/** Parties whose panel already opened by itself (once per party, not per episode). */
+const partyPanelShown = new Set<string>();
 
 type Flash = "play" | "pause" | "back" | "fwd";
 
@@ -51,11 +72,16 @@ export function Player({
   mode = "engine",
   onExit,
   onError,
+  fullscreen: fullscreenProp,
+  onFullscreenChange,
 }: {
   movie: Movie;
   mode?: "engine" | "overlay";
   onExit: () => void;
   onError: (message: string) => void;
+  /** Window fullscreen, kept by the overlay app so it survives the next episode's remount. */
+  fullscreen?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { t } = useI18n();
   const { settings, update: updateSettings } = useSettings();
@@ -74,21 +100,34 @@ export function Player({
   const [detail, setDetail] = useState<Movie | null>(null);
   // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
   const [visible, setVisible] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [ownFullscreen, setOwnFullscreen] = useState(false);
+  const fullscreen = fullscreenProp ?? ownFullscreen;
+  const setFullscreen = onFullscreenChange ?? setOwnFullscreen;
   const [menu, setMenu] = useState<PlayerMenu>(null);
   const [panel, setPanel] = useState(false);
+  /** Watch party side panel (code, people, chat). */
+  const [partyPanel, setPartyPanel] = useState(false);
+  const party = useParty();
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
   /** "?" overlay with the keyboard shortcuts. */
   const [help, setHelp] = useState(false);
-  /** Subtitle and audio delays of this file (mpv resets them on every load). */
-  const [delays, setDelays] = useState({ sub: 0, audio: 0 });
+  /** Subtitle and audio delays of this file (remembered per title, reapplied by Rust on start). */
+  const delays = { sub: state.subDelay, audio: state.audioDelay };
+  /** OpenSubtitles search dialog. */
+  const [subSearch, setSubSearch] = useState(false);
+  /** Short on-screen message (delay changed, night mode...). */
+  const [osd, setOsd] = useState<string | null>(null);
+  const osdTimer = useRef<number>(0);
+  const mini = state.mini;
   /** Technical numbers overlay (I). */
   const [stats, setStats] = useState(false);
   /** Subtitle track to bring back when V turns subtitles on again. */
   const lastSub = useRef<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
+  /** Last volume asked for while the HUD shows: quick wheel ticks add up before mpv reports. */
+  const volTarget = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [splash, setSplash] = useState(true);
   const remaining = settings.playback.showTimeRemaining;
@@ -172,10 +211,26 @@ export function Player({
 
   useEffect(() => {
     let cancelled = false;
+    /** Start command in flight: a stop must wait for it, or the file would load after it. */
+    let starting: Promise<unknown> | null = null;
     const unlistenState = api.onPlayerState(setState);
-    const unlistenHotkey = api.onPlayerHotkey((key) => hotkeyRef.current(key));
+    // Only the overlay handles the hotkeys; the main window hears the same global event.
+    const unlistenHotkey = overlay ? api.onPlayerHotkey((key) => hotkeyRef.current(key)) : null;
+    // The start's own state event went out before this overlay mounted (delays, mini...).
+    if (overlay) {
+      api
+        .playerState()
+        .then((current) => {
+          if (!cancelled) setState(current);
+        })
+        .catch(() => undefined);
+    }
 
     if (!overlay) {
+      // The engine player is not remounted per item: forget the previous start's leftovers.
+      setStartHint("");
+      setStartError(null);
+      setTorrentHash(null);
       const start = ticksToSeconds(movie.playbackPositionTicks);
       const title = isEpisode
         ? [movie.seriesName, episodeCode(movie, "S{s}:E{e}"), movie.name].filter(Boolean).join(" · ")
@@ -190,9 +245,34 @@ export function Player({
         }
         if (cancelled) return;
         try {
+          if (movie.live?.multiview?.length) {
+            // Multi-view: the overlay only lists the channels that could be opened.
+            const cells = movie.live.multiview;
+            const request = api.iptvMultiview(cells.map((c) => c.channelId));
+            starting = request;
+            const started = await request;
+            if (cancelled) return;
+            const shown = started.ids.flatMap((id) => cells.filter((c) => c.channelId === id));
+            void api.openPlayer({ ...movie, live: { ...movie.live, multiview: shown } });
+            setState(started.state);
+            return;
+          }
+          if (movie.live?.catchup) {
+            // A past programme from the channel's archive.
+            const { start: from, stop, title: programme } = movie.live.catchup;
+            const request = api.iptvPlayCatchup(movie.live.channelId, from, stop, programme);
+            starting = request;
+            const next = await request;
+            if (cancelled) return;
+            void api.openPlayer(movie);
+            setState(next);
+            return;
+          }
           if (movie.live) {
             // IPTV channel: Rust resolves the stream URL (Xtream credentials stay there).
-            const next = await api.iptvPlay(movie.live.channelId);
+            const request = api.iptvPlay(movie.live.channelId);
+            starting = request;
+            const next = await request;
             if (cancelled) return;
             void api.openPlayer(movie);
             setState(next);
@@ -241,31 +321,45 @@ export function Player({
             const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
             const entry = resumeEntryOf(full);
             if (!entry) throw new Error(tRef.current("playerStartError"));
-            const next = await api.playerStartUrl({
+            const request = api.playerStartUrl({
               url,
               title,
               headers: stream.headers,
               startSeconds: start > 5 ? start : 0,
               entry,
             });
+            starting = request;
+            const next = await request;
             if (cancelled) return;
+            // Playing: the cover no longer needs the torrent's peers.
+            setTorrentHash(null);
             void api.openPlayer(full);
             setState(next);
             return;
           }
-          const next = await api.playerStart({
+          const request = api.playerStart({
             itemId: movie.id,
             title,
             startSeconds: start > 5 ? start : 0,
             mediaSourceId: movie.mediaSourceId,
           });
+          starting = request;
+          const next = await request;
           if (cancelled) return;
           void api.openPlayer(movie);
           setState(next);
         } catch (err) {
           if (cancelled) return;
           setStartHint("");
-          setStartError(err instanceof Error ? err.message : tRef.current("playerStartError"));
+          // Tauri commands reject with the Rust message as a plain string.
+          const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+          setStartError(
+            isParentalBlocked(err)
+              ? tRef.current("parentalBlockedTitle")
+              : message
+                ? errorText(tRef.current, message)
+                : tRef.current("playerStartError"),
+          );
         }
       };
       void begin();
@@ -274,9 +368,13 @@ export function Player({
     return () => {
       cancelled = true;
       void unlistenState.then((fn) => fn());
-      void unlistenHotkey.then((fn) => fn());
+      void unlistenHotkey?.then((fn) => fn());
       // Still mounted here means the movie prop changed (next episode): keep the window.
-      if (!overlay) stopping.current = api.playerStop(mounted.current);
+      if (!overlay) {
+        const switching = mounted.current;
+        const pending = starting ? starting.catch(() => undefined) : Promise.resolve();
+        stopping.current = pending.then(() => api.playerStop(switching));
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie, overlay, attempt]);
@@ -309,19 +407,91 @@ export function Player({
   useEffect(() => {
     nextSent.current = false;
     setPanel(false);
-    setDelays({ sub: 0, audio: 0 });
+    setSubSearch(false);
   }, [movie]);
+
+  const showOsd = (text: string) => {
+    setOsd(text);
+    window.clearTimeout(osdTimer.current);
+    osdTimer.current = window.setTimeout(() => setOsd(null), OSD_MS);
+  };
 
   const changeDelay = (kind: "sub" | "audio", seconds: number) => {
     const value = Math.max(-30, Math.min(30, Math.round(seconds * 10) / 10));
-    setDelays((current) => ({ ...current, [kind]: value }));
-    void api.playerSetProp(kind === "sub" ? "sub-delay" : "audio-delay", value);
+    // Shown right away; mpv confirms it through the state events. Rust remembers it for the title.
+    setState((current) => ({ ...current, [kind === "sub" ? "subDelay" : "audioDelay"]: value }));
+    showOsd(`${t(kind === "sub" ? "subDelay" : "audioDelay")}: ${value > 0 ? "+" : ""}${value.toFixed(1)} s`);
+    void api.playerSetDelay(kind, value).catch(() => undefined);
+  };
+
+  // Watch party: the host's player reports, a guest's follows (overlay only; not live TV).
+  const partySync = usePartySync({
+    enabled: overlay && !live,
+    movie,
+    state,
+    party,
+    onNotice: (event, name) =>
+      showOsd(t(event === "paused" ? "partyPaused" : event === "resumed" ? "partyResumed" : "partySeeked", { name: name || "?" })),
+  });
+  /** A guest without the host's permission: say so instead of acting. */
+  const partyLocked = () => {
+    if (!partySync.locked) return false;
+    showOsd(t("partyHostControls"));
+    return true;
+  };
+
+  // A party that ends while watching says why (the main window's toast is behind us).
+  const partyBefore = useRef<PartyStatus | null>(null);
+  useEffect(() => {
+    const before = partyBefore.current;
+    partyBefore.current = party;
+    if (!overlay || !party) return;
+    if (before?.active && !party.active && party.error) showOsd(t(partyErrorKey(party.error)));
+    // A party just started from here or a details page: show its code to share, once.
+    if (party.active && party.host && party.members.length <= 1 && !live && !partyPanelShown.has(party.code)) {
+      partyPanelShown.add(party.code);
+      setPartyPanel(true);
+      setPanel(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [party, overlay]);
+
+  const toggleNight = () => {
+    const on = !stateRef.current.night;
+    setState((current) => ({ ...current, night: on }));
+    showOsd(on ? t("nightModeOn") : t("nightModeOff"));
+    void api.playerSetNight(on).catch(() => undefined);
+  };
+
+  const toggleMini = async () => {
+    setMenu(null);
+    setPanel(false);
+    setHelp(false);
+    if (!stateRef.current.mini) {
+      setFullscreen(false);
+      await api.playerSetMini(true).catch(() => undefined);
+    } else {
+      const fs = await api.playerSetMini(false).catch(() => false);
+      setFullscreen(fs);
+    }
   };
 
   // Episodes: look up what comes next so the end of the file can chain into it.
   // Online episodes carry their successor already (resolved by the engine side).
   useEffect(() => {
     if (!overlay) return;
+    // Play all / Shuffle: the queue decides what follows, not the series order.
+    if (movie.queue) {
+      let alive = true;
+      queueNext(movie)
+        .then((next) => {
+          if (alive) setNextEpisode(next);
+        })
+        .catch(() => undefined);
+      return () => {
+        alive = false;
+      };
+    }
     if (movie.external) {
       setNextEpisode(movie.external.next ?? null);
       return;
@@ -337,15 +507,7 @@ export function Player({
     return () => {
       alive = false;
     };
-  }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external]);
-
-  // End of file without anything to chain into: leave the player. With a next episode
-  // the card (below) decides whether and when to continue.
-  useEffect(() => {
-    if (!overlay || !state.eof || nextEpisode) return;
-    onExit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlay, state.eof, nextEpisode]);
+  }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external, movie.queue]);
 
   // First frame: the file is loaded once mpv reports a duration or advances time.
   useEffect(() => {
@@ -379,14 +541,25 @@ export function Player({
     const onKey = (e: KeyboardEvent) => keydownRef.current(e);
     const onMove = () => bump();
     const onWheel = (e: WheelEvent) => {
+      // Side panels and track menus scroll their own lists.
+      if (e.target instanceof Element && e.target.closest("[data-own-wheel]")) return;
       e.preventDefault();
       if (lockedRef.current) return;
       wheelRef.current(e.deltaY);
     };
+    // A mouse click leaves the focus on the button, and Space/Enter would press it again
+    // later (fullscreen, lock, back) instead of pausing. Keyboard clicks keep it (detail 0).
+    const onClick = (e: MouseEvent) => {
+      if (e.detail === 0 || !(e.target instanceof Element)) return;
+      const button = e.target.closest("button");
+      if (button && button === document.activeElement) button.blur();
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("click", onClick);
     return () => {
+      window.removeEventListener("click", onClick);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("wheel", onWheel);
@@ -401,33 +574,63 @@ export function Player({
   };
 
   const togglePause = async () => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: stateRef.current.paused ? "play" : "pause" });
     showFlash(stateRef.current.paused ? "play" : "pause");
     await api.playerTogglePause();
   };
 
   const seekBy = (delta: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, stateRef.current.time + delta) });
     showFlash(delta < 0 ? "back" : "fwd");
     void api.playerSeek(delta, true);
   };
 
   const seekTo = (seconds: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, seconds) });
     void api.playerSeek(seconds, false);
   };
 
+  /** Dragging the timeline: quiet while locked (the release lands in seekTo, which says why). */
+  const scrub = (seconds: number) => {
+    if (partySync.locked) return;
+    void api.playerSeek(seconds, false, true);
+  };
+
+  const currentVolume = () => volTarget.current ?? stateRef.current.volume;
+
   const changeVolume = async (value: number) => {
-    const next = await api.playerSetVolume(value);
+    volTarget.current = Math.max(0, Math.min(100, value));
+    const next = await api.playerSetVolume(volTarget.current);
     setVolHud(next);
     window.clearTimeout(volTimer.current);
-    volTimer.current = window.setTimeout(() => setVolHud(null), 1200);
+    volTimer.current = window.setTimeout(() => {
+      volTarget.current = null;
+      setVolHud(null);
+    }, 1200);
   };
 
   const toggleFullscreen = async () => {
+    if (stateRef.current.mini) {
+      // From the mini player straight to fullscreen.
+      await api.playerSetMini(false).catch(() => false);
+      setFullscreen(true);
+      await api.playerSetFullscreen(true);
+      return;
+    }
     const next = !fullscreen;
     setFullscreen(next);
     await api.playerSetFullscreen(next);
   };
 
   const setSpeed = (speed: number) => {
+    // The host's speed is the party's speed.
+    if (partySync.guest) {
+      showOsd(t("partyHostControls"));
+      return;
+    }
     void api.playerSetSpeed(speed);
     if (settings.playback.rememberSpeed) void updateSettings({ playback: { lastSpeed: speed } });
   };
@@ -445,6 +648,10 @@ export function Player({
   };
 
   const playNext = () => {
+    if (partySync.guest) {
+      showOsd(t("partyHostPicks"));
+      return;
+    }
     if (!nextEpisode || nextSent.current) return;
     nextSent.current = true;
     void api.playNext(nextEpisode);
@@ -488,7 +695,7 @@ export function Player({
   }, [overlay, live?.channelId]);
 
   const playChannel = (channel: Channel) => {
-    if (!live || nextSent.current || channel.id === live.channelId) return;
+    if (!live || nextSent.current || (channel.id === live.channelId && !live.catchup && !live.multiview?.length)) return;
     nextSent.current = true;
     setPanel(false);
     void api.playNext(channelToMovie(channel, live.sourceName));
@@ -496,20 +703,33 @@ export function Player({
 
   /** Previous / next channel of the group (wraps around). */
   const zap = (dir: 1 | -1) => {
-    if (!live || !zapList.length) return;
+    // The mosaic has no "current channel" to step from.
+    if (!live || !zapList.length || live.multiview?.length) return;
     const index = zapList.findIndex((c) => c.id === live.channelId);
     const target = zapList[((index < 0 ? 0 : index + dir) + zapList.length) % zapList.length];
     if (target) playChannel(target);
   };
 
+  /** A past programme from the archive plays like a file: arrows and wheel seek in it. */
+  const zapping = live != null && !live.catchup;
+
   wheelRef.current = (deltaY) => {
-    if (live && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
-    else void changeVolume(stateRef.current.volume + (deltaY < 0 ? 5 : -5));
+    if (live?.catchup && settings.iptv.wheelZap) seekBy(deltaY > 0 ? settings.playback.seekStep : -settings.playback.seekStep);
+    else if (zapping && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
+    else void changeVolume(currentVolume() + (deltaY < 0 ? 5 : -5));
   };
 
-  // Skip intro / recap / credits and the next-episode card (overlay only).
+  // Skip intro / recap / credits and the next-episode card (overlay only). A party guest
+  // does not chain on its own: the host's next title arrives through the party.
+  const chainNext = partySync.guest ? null : nextEpisode;
   const segments = useSegments(movie, state.duration, overlay && !live);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
+  // Stopping inside the credits marks the title watched (decided in Rust on stop).
+  const creditsStart = outro?.startSeconds ?? null;
+  useEffect(() => {
+    if (!overlay || live) return;
+    void api.playerSetCredits(creditsStart).catch(() => undefined);
+  }, [overlay, live, creditsStart]);
   const skipPrompt = useSkipPrompt({
     segments,
     time: state.time,
@@ -517,41 +737,77 @@ export function Player({
     ready: overlay && ready,
     settings,
     controlsVisible: visible,
-    nextEpisode,
+    nextEpisode: chainNext,
     onSeekTo: seekTo,
     onPlayNext: playNext,
   });
   revealRef.current = skipPrompt.reveal;
   const nextCard = useNextEpisodeCard({
-    nextEpisode,
+    nextEpisode: chainNext,
     outro,
     time: state.time,
     duration: state.duration,
     eof: state.eof,
     ready: overlay && ready,
+    paused: state.paused,
     countdownSeconds: settings.playback.nextEpisodeCountdown,
     onPlayNext: playNext,
   });
 
+  // End of file without anything to chain into (or the card dismissed there): leave the
+  // player. With a next episode the card decides whether and when to continue.
+  useEffect(() => {
+    if (!overlay || !state.eof || (chainNext && !nextCard.closed)) return;
+    onExit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, state.eof, chainNext, nextCard.closed]);
+
   const pauseInfo = usePauseInfo(state.paused, visible);
+
+  const stream = movie.external?.stream ?? null;
+  const sourceLabel = live
+    ? t("statsSourceLive", { name: live.sourceName })
+    : movie.external
+      ? stream?.infoHash && !stream.url
+        ? t("statsSourceTorrent")
+        : t("statsSourceAddon", { name: stream?.addonName ?? "" })
+      : t("statsSourceDirect");
 
   const escape = () => {
     if (help) setHelp(false);
+    else if (subSearch) setSubSearch(false);
+    else if (partyPanel) setPartyPanel(false);
     else if (panel) setPanel(false);
     else if (menu) setMenu(null);
+    else if (stateRef.current.mini) void toggleMini();
     else if (fullscreen) void toggleFullscreen();
     else onExit();
   };
 
+  // A panel closed under the pointer never sends its mouseleave: stop holding the controls.
+  useEffect(() => {
+    if (!panel && !partyPanel) overUi.current = false;
+  }, [panel, partyPanel]);
+
   const togglePanel = () => {
     setPanel((open) => !open);
+    setPartyPanel(false);
+    setMenu(null);
+  };
+
+  const togglePartyPanel = () => {
+    setPartyPanel((open) => !open);
+    setPanel(false);
     setMenu(null);
   };
 
   const lock = () => {
+    // The controls unmount under the pointer without a mouseleave: stop holding them.
+    overUi.current = false;
     setLocked(true);
     setMenu(null);
     setPanel(false);
+    setPartyPanel(false);
     setVisible(false);
     window.clearTimeout(hideTimer.current);
     showLockHint();
@@ -566,10 +822,16 @@ export function Player({
   };
 
   const cycleAspect = () => {
-    void api.playerSetAspect(nextAspect(stateRef.current.aspect));
+    const mode = nextAspect(stateRef.current.aspect);
+    // mpv does not report the override: show it now (no state event arrives while paused).
+    void api.playerSetAspect(mode).then(() => setState((current) => ({ ...current, aspect: mode })));
   };
 
   const playFromPanel = (target: Movie) => {
+    if (partySync.guest) {
+      showOsd(t("partyHostPicks"));
+      return;
+    }
     if (nextSent.current) return;
     nextSent.current = true;
     setPanel(false);
@@ -578,8 +840,9 @@ export function Player({
 
   const onVideoClick = () => {
     window.clearTimeout(clickTimer.current);
-    if (panel) {
+    if (panel || partyPanel) {
       setPanel(false);
+      setPartyPanel(false);
       return;
     }
     if (menu) {
@@ -591,7 +854,8 @@ export function Player({
 
   const onVideoDoubleClick = () => {
     window.clearTimeout(clickTimer.current);
-    void toggleFullscreen();
+    if (stateRef.current.mini) void toggleMini();
+    else void toggleFullscreen();
   };
 
   hotkeyRef.current = (key) => {
@@ -606,6 +870,8 @@ export function Player({
   keydownRef.current = (e) => {
     bump();
     if (lockedRef.current) return;
+    // The subtitle search dialog owns the keyboard (its field, its list, Escape).
+    if (subSearch) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     // A focused control owns its own keys: the volume slider its arrows, a button Enter/Space.
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -627,13 +893,13 @@ export function Player({
       case "ArrowLeft":
       case "j":
       case "J":
-        if (live) zap(-1);
+        if (zapping) zap(-1);
         else seekBy(-settings.playback.seekStep);
         break;
       case "ArrowRight":
       case "l":
       case "L":
-        if (live) zap(1);
+        if (zapping) zap(1);
         else seekBy(settings.playback.seekStep);
         break;
       case "PageUp":
@@ -650,11 +916,11 @@ export function Player({
         break;
       case "ArrowUp":
         e.preventDefault();
-        void changeVolume(current.volume + 5);
+        void changeVolume(currentVolume() + 5);
         break;
       case "ArrowDown":
         e.preventDefault();
-        void changeVolume(current.volume - 5);
+        void changeVolume(currentVolume() - 5);
         break;
       case "m":
       case "M":
@@ -721,16 +987,36 @@ export function Player({
       case "X":
         if (!live) changeDelay("sub", delays.sub + 0.1);
         break;
+      case "g":
+      case "G":
+        changeDelay("audio", delays.audio - 0.1);
+        break;
+      case "h":
+      case "H":
+        changeDelay("audio", delays.audio + 0.1);
+        break;
+      case "d":
+      case "D":
+        toggleNight();
+        break;
+      case "p":
+      case "P":
+        void toggleMini();
+        break;
       case "i":
       case "I":
         setStats((open) => !open);
+        break;
+      case "w":
+      case "W":
+        if (!live) togglePartyPanel();
         break;
       case "?":
         setHelp((open) => !open);
         setMenu(null);
         break;
       default:
-        if (!live && /^[0-9]$/.test(e.key) && current.duration > 0) {
+        if ((!live || live.catchup) && /^[0-9]$/.test(e.key) && current.duration > 0) {
           seekTo((current.duration * Number(e.key)) / 10);
         }
     }
@@ -813,17 +1099,27 @@ export function Player({
           </div>
         </div>
       ) : null}
+      {osd && !locked ? (
+        <div
+          className={`pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full bg-black/60 px-3.5 py-1 text-sm whitespace-nowrap tabular backdrop-blur-sm ${
+            mini ? "top-10" : "top-[72px]"
+          }`}
+          role="status"
+        >
+          {osd}
+        </div>
+      ) : null}
       {volHud != null ? (
         <div className="pointer-events-none absolute top-[72px] right-6 z-30 rounded-full bg-black/60 px-3 py-1 text-sm tabular backdrop-blur-sm">
           {Math.round(volHud)}%
         </div>
       ) : null}
-      {!locked && !live && pauseInfo && !splash && !menu && !panel ? (
+      {!locked && !mini && !live && pauseInfo && !splash && !menu && !panel ? (
         <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
-      {locked ? null : nextEpisode && nextCard.visible ? (
+      {locked || mini ? null : chainNext && nextCard.visible ? (
         <NextEpisodeCard
-          episode={nextEpisode}
+          episode={chainNext}
           countdown={nextCard.countdown}
           onPlay={playNext}
           onDismiss={nextCard.dismiss}
@@ -838,12 +1134,34 @@ export function Player({
           shifted={panel}
         />
       ) : null}
-      {stats && !locked ? (
-        <StatsPanel torrent={torrent} delays={delays} onClose={() => setStats(false)} />
+      {stats && !locked && !mini ? (
+        <StatsPanel
+          torrent={torrent}
+          delays={delays}
+          source={sourceLabel}
+          speed={state.speed}
+          night={state.night}
+          onClose={() => setStats(false)}
+        />
       ) : null}
-      {help && !locked ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {help && !locked && !mini ? <ShortcutsHelp live={Boolean(live)} catchup={Boolean(live?.catchup)} onClose={() => setHelp(false)} /> : null}
+      {subSearch && !locked && !mini ? (
+        <SubtitleSearch movie={detail ?? movie} onClose={() => setSubSearch(false)} onLoaded={() => showOsd(t("subSearchLoaded"))} />
+      ) : null}
       {locked ? (
         <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
+      ) : mini ? (
+        <MiniPlayerControls
+          heading={heading}
+          state={state}
+          visible={visible}
+          live={Boolean(live)}
+          onTogglePause={() => void togglePause()}
+          onRestore={() => void toggleMini()}
+          onClose={onExit}
+          onVideoClick={onVideoClick}
+          onVideoDoubleClick={onVideoDoubleClick}
+        />
       ) : (
         <PlayerControls
           movie={movie}
@@ -855,7 +1173,20 @@ export function Player({
           menu={menu}
           remaining={remaining}
           panelOpen={panel}
-          live={live ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null } : null}
+          live={
+            live?.catchup
+              ? {
+                  number: live.number,
+                  now: { start: live.catchup.start, stop: live.catchup.stop, title: live.catchup.title, desc: null, category: null },
+                  next: null,
+                  catchup: true,
+                }
+              : live?.multiview?.length
+                ? { number: null, now: null, next: null }
+                : live
+                  ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null }
+                  : null
+          }
           onMenu={setMenu}
           onToggleRemaining={toggleRemaining}
           onBack={onExit}
@@ -864,7 +1195,7 @@ export function Player({
           onVideoDoubleClick={onVideoDoubleClick}
           onSeek={seekBy}
           onSeekTo={seekTo}
-          onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
+          onScrub={scrub}
           onVolume={(value) => void changeVolume(value)}
           onMute={() => void api.playerSetMute(!state.mute)}
           onTrack={(kind, id) => void api.playerSetTrack(kind, id)}
@@ -877,11 +1208,34 @@ export function Player({
           onPanel={togglePanel}
           onReveal={bump}
           onHoldUi={holdUi}
+          onNight={toggleNight}
+          onMini={() => void toggleMini()}
+          onSearchSubs={() => setSubSearch(true)}
+          party={party?.active ? { count: party.members.length } : null}
+          partyOpen={partyPanel}
+          onParty={live ? undefined : togglePartyPanel}
         />
       )}
-      {panel && !locked && live ? (
+      {overlay && !live && !mini ? <PartyReactions showChat={!partyPanel && !locked} /> : null}
+      {overlay && live?.multiview?.length && !locked && !mini ? (
+        <MultiviewBar cells={live.multiview} visible={visible} onHoldUi={holdUi} />
+      ) : null}
+      {overlay ? (
+        <ReminderAlerts
+          enabled={!locked && !mini}
+          onWatch={(reminder) =>
+            void api.playNext(
+              channelToMovie(reminderChannel(reminder), live?.sourceId === reminder.sourceId ? live.sourceName : ""),
+            )
+          }
+        />
+      ) : null}
+      {partyPanel && !locked && !mini && !live ? (
+        <PartyPanel status={party} onClose={() => setPartyPanel(false)} onHoldUi={holdUi} onNotice={showOsd} />
+      ) : null}
+      {panel && !locked && !mini && live ? (
         <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />
-      ) : panel && !locked ? (
+      ) : panel && !locked && !mini ? (
         <EpisodesPanel
           key={movie.id}
           movie={movie}

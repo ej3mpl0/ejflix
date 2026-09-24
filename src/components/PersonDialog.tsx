@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import type { Movie, Person } from "../lib/types";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { Dialog } from "./Dialog";
 import { PosterCard } from "./PosterCard";
 import { Shimmer } from "./Shimmer";
@@ -32,7 +33,7 @@ export function PersonDialog({
         if (alive) setItems(list);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;

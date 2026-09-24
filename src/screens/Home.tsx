@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Puzzle, RotateCcw, WifiOff } from "lucide-react";
+import { Download, Puzzle, RotateCcw, WifiOff } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
-import { PosterCard } from "../components/PosterCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { Settings, type SettingsSectionId } from "./Settings";
 import { SearchPage } from "./SearchPage";
@@ -24,6 +23,7 @@ import {
 } from "../lib/types";
 import { sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
 import { useBackNavigation } from "../lib/use-back";
@@ -34,17 +34,31 @@ import { SeeAllContext, type SeeAllRequest } from "../lib/see-all-context";
 import { SeeAllPage } from "./SeeAllPage";
 import { handlePosterArrows } from "../lib/poster-nav";
 import { Shimmer } from "../components/Shimmer";
+import { CommandPalette } from "../components/CommandPalette";
+import { ShortcutsHelp } from "../components/ShortcutsHelp";
+import { TrailerGate } from "../lib/trailer-autoplay";
+import { useAutoAccent } from "../lib/auto-accent";
+import { useSpatialNavigation } from "../lib/spatial-nav";
+import { clearSettingsIntent, requestSettingsIntent } from "../lib/settings-intent";
+import { CalendarPage } from "./CalendarPage";
+import { MyListPage } from "./MyListPage";
+import { useCalendar } from "../lib/calendar";
+import { usePartyGuest } from "../hooks/usePartyGuest";
+import { PartyDialog } from "../components/PartyDialog";
+import { PartyButton } from "../components/PartyButton";
 
 const PAGE_EXIT_MS = 250;
 
 /** Home without a server: every row comes from the addons. */
 const EMPTY_HOME: HomeData = { featured: [], resume: [], nextUp: [], latest: [], genres: [], all: [] };
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 const HISTORY_MAX = 10;
+
+/** The page that answers back navigation: the last one not already leaving. */
+function topIndexOf(stack: DetailsRoute[]): number {
+  for (let i = stack.length - 1; i >= 0; i--) if (!stack[i].leaving) return i;
+  return -1;
+}
 
 export function Home({
   session,
@@ -86,6 +100,8 @@ export function Home({
   /** The header owns the search box; the search view only renders what it types. */
   const [search, setSearch] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>(undefined);
+  /** Counts deep links into Settings (palette, empty screens), even to the section already asked for. */
+  const [settingsRequest, setSettingsRequest] = useState(0);
   /** IPTV lists of the profile (the TV tab shows up when there is at least one). */
   const [tvSources, setTvSources] = useState<IptvSource[]>([]);
   const history = useRef<NavView[]>([]);
@@ -104,6 +120,23 @@ export function Home({
   const [seeAll, setSeeAll] = useState<SeeAllRequest | null>(null);
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
+  /** Ctrl+K command palette and the "?" shortcuts sheet. */
+  const [palette, setPalette] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
+  /** Episodes aired since the calendar was last opened: a counter on its tab. */
+  const { fresh: newEpisodes } = useCalendar(hasServer, session.userId);
+  /** Watch party: its dialog, and (as a guest) opening what the host plays. */
+  const [partyOpen, setPartyOpen] = useState(false);
+  const party = usePartyGuest({
+    hasServer,
+    onPlay,
+    onPick: (movie) => {
+      lastPicker.current = null;
+      setPicker(movie);
+    },
+    onToast,
+    onOpened: () => setPartyOpen(false),
+  });
 
   // The player could not start: put the user back in front of the other sources.
   useEffect(() => {
@@ -138,7 +171,7 @@ export function Home({
       setData(await api.getHome());
       if (silent) setError("");
     } catch (err) {
-      if (!silent) setError(errorText(err));
+      if (!silent) setError(errorText(t, err));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -170,7 +203,7 @@ export function Home({
       const next = await api.getHome(library);
       setLibData((map) => ({ ...map, [library.id]: next }));
     } catch (err) {
-      if (!silent) setLibError(errorText(err));
+      if (!silent) setLibError(errorText(t, err));
     } finally {
       if (!silent) setLibLoading((current) => (current === library.id ? null : current));
     }
@@ -292,7 +325,10 @@ export function Home({
   const openView = (next: NavView) => {
     setStack([]);
     setSeeAll(null);
-    if (next !== "settings") setSettingsSection(undefined);
+    if (next !== "settings") {
+      setSettingsSection(undefined);
+      clearSettingsIntent();
+    }
     // Leaving the search view empties the box, so the header stops showing a stale query.
     if (next !== "search") setSearch("");
     if (next === view) return;
@@ -305,6 +341,9 @@ export function Home({
   const back = () => {
     const previous = history.current.pop() ?? "home";
     if (previous !== "search") setSearch("");
+    // A deep link into Settings (e.g. TV › configure) only holds for that visit.
+    setSettingsSection(undefined);
+    clearSettingsIntent();
     setView(previous);
     const top = scrollOf.current.get(previous) ?? 0;
     // Wait for the previous view to render before putting it back where it was.
@@ -316,6 +355,7 @@ export function Home({
     if (view === "search") return;
     setStack([]);
     setSettingsSection(undefined);
+    clearSettingsIntent();
     remember();
     setSeeAll(null);
     setView("search");
@@ -325,6 +365,7 @@ export function Home({
   /** Settings opened on a given section (e.g. the TV tab's "configure IPTV"). */
   const openSettings = (section: SettingsSectionId) => {
     setSettingsSection(section);
+    setSettingsRequest((n) => n + 1);
     if (view === "settings") return;
     remember();
     setSeeAll(null);
@@ -344,21 +385,72 @@ export function Home({
   };
 
   const popDetails = () => {
+    // A second back while the top page is still leaving pops the one under it too.
+    let popped: number | null = null;
     setStack((current) => {
-      if (!current.length) return current;
-      const top = current[current.length - 1];
-      if (top.leaving) return current;
-      return [...current.slice(0, -1), { ...top, leaving: true }];
+      const index = topIndexOf(current);
+      if (index < 0) return current;
+      popped = current[index].key;
+      return current.map((route, i) => (i === index ? { ...route, leaving: true } : route));
     });
     window.setTimeout(() => {
-      setStack((current) => current.filter((route) => !route.leaving));
+      setStack((current) => current.filter((route) => !(route.leaving && route.key === popped)));
     }, PAGE_EXIT_MS);
   };
 
   const hasStack = stack.length > 0;
+  const topIndex = topIndexOf(stack);
   useBackNavigation(hasStack || picker || seeAll || view === "home" ? null : back);
 
+  // Arrow keys / gamepad across the whole window, and the accent that follows the artwork,
+  // while Home is on screen (the player has its own keys).
+  useSpatialNavigation(!hidden);
+  useAutoAccent(settings.appearance.autoAccent && !hidden);
+
+  // Ctrl+K: command palette (even from a text field); "?": the shortcuts sheet.
+  useEffect(() => {
+    if (hidden) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShortcuts(false);
+        setPalette((open) => !open);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      // Not over a dialog: its Escape would close both.
+      const modal = document.querySelector('[role="dialog"][aria-modal="true"]');
+      if (e.key === "?" && !typing && !modal && !e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
+        e.preventDefault();
+        setShortcuts(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hidden]);
+
+  useEffect(() => {
+    if (hidden) {
+      setPalette(false);
+      setShortcuts(false);
+    }
+  }, [hidden]);
+
+  /** Settings › Addons with the import panel up (empty screens, palette). */
+  const importAddons = () => {
+    requestSettingsIntent("addons-import");
+    openSettings("addons");
+  };
+  /** Settings › IPTV with the "add a list" form open. */
+  const addIptvList = () => {
+    requestSettingsIntent("iptv-add");
+    openSettings("iptv");
+  };
+
   const play = (movie: Movie) => {
+    // Only a start from the sources sheet may bring it back on failure.
+    lastPicker.current = null;
     if (movie.live) {
       onPlay(movie);
       return;
@@ -381,7 +473,7 @@ export function Home({
           if (episode) onPlay(episode);
           else onToast(t("noEpisodes"));
         })
-        .catch((err) => onToast(errorText(err)));
+        .catch((err) => onToast(errorText(t, err)));
       return;
     }
     onPlay(movie);
@@ -412,28 +504,6 @@ export function Home({
     </div>
   );
 
-  const grid = (title: string, items: Movie[], empty?: { text: string; hint: string }) => (
-    <div className="page-enter px-page pt-24 pb-16">
-      <h2 className="mb-6 text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
-      {items.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
-          {items.map((movie, i) => (
-            <PosterCard
-              key={movie.id}
-              movie={movie}
-              onOpen={openDetails}
-              onPlay={play}
-              layout="grid"
-              delay={i * 20}
-            />
-          ))}
-        </div>
-      ) : empty ? (
-        <EmptyState title={empty.text} hint={empty.hint} />
-      ) : null}
-    </div>
-  );
-
   // Nothing at all to show (online profile without addons): point at Settings › Addons.
   const noAddons = (
     <div className="px-page pt-16">
@@ -442,7 +512,7 @@ export function Home({
         icon={<Puzzle size={26} />}
         title={t("noAddonsYet")}
         hint={t("noAddonsYetHint")}
-        action={{ label: t("goToAddons"), onClick: () => openView("settings") }}
+        action={{ label: t("importAddons"), icon: <Download size={16} />, onClick: importAddons }}
       />
     </div>
   );
@@ -453,6 +523,13 @@ export function Home({
       <RowSkeleton />
       <RowSkeleton />
     </>
+  );
+
+  // Muted trailers: none while the player runs, the sources sheet or the palette is up;
+  // the hero's also stops under a page or a grid.
+  const trailerGate = useMemo(
+    () => ({ hero: !hidden && !hasStack && !seeAll && !picker && !palette, pages: !hidden && !picker && !palette }),
+    [hidden, hasStack, seeAll, picker, palette],
   );
 
   // Online-only profiles: wait for the addon list so the hero does not flash empty.
@@ -466,6 +543,7 @@ export function Home({
         mode={session.mode}
         hasServer={hasServer}
         hasTv={tvSources.length > 0}
+        badges={{ calendar: newEpisodes.length }}
         view={view}
         onView={openView}
         libraries={pinned}
@@ -480,7 +558,9 @@ export function Home({
         hidden={hasStack || seeAll != null}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
+        actions={<PartyButton status={party.status} onClick={() => setPartyOpen(true)} />}
       />
+      <TrailerGate.Provider value={trailerGate}>
       <SeeAllContext.Provider value={setSeeAll}>
       <div
         ref={scroller}
@@ -503,6 +583,7 @@ export function Home({
             server={server}
             version={version}
             initialSection={settingsSection}
+            sectionRequest={settingsRequest}
             onSessionChange={onSessionChange}
             onSwitchProfile={onSwitchProfile}
             onLogout={onLogout}
@@ -510,7 +591,15 @@ export function Home({
             onToast={onToast}
           />
         ) : view === "tv" ? (
-          <LiveTv sources={tvSources} refreshToken={refreshToken} onPlay={play} onError={onToast} onSettings={() => openSettings("iptv")} />
+          <LiveTv
+            sources={tvSources}
+            refreshToken={refreshToken}
+            onPlay={play}
+            onError={onToast}
+            onToast={onToast}
+            onSettings={() => openSettings("iptv")}
+            onAddSource={addIptvList}
+          />
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}
@@ -521,9 +610,12 @@ export function Home({
             onOpen={openDetails}
             onPlay={play}
             onError={onToast}
+            onDiscover={() => openView("discover")}
           />
         ) : view === "discover" ? (
-          <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} />
+          <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} onImportAddons={importAddons} />
+        ) : view === "calendar" ? (
+          <CalendarPage userId={session.userId} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (
@@ -539,7 +631,7 @@ export function Home({
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
-          grid(t("myList"), myList, { text: t("emptyList"), hint: t("emptyListHint") })
+          <MyListPage items={myList} hasServer={hasServer} onOpen={openDetails} onPlay={play} onExplore={() => openView("discover")} />
         ) : view === "myserver" && data ? (
           <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
@@ -565,6 +657,7 @@ export function Home({
             myList={favorites ?? []}
             onlineResume={onlineResume}
             showAddons
+            personal={{ userId: session.userId, hasServer }}
             empty={noAddons}
             onOpen={openDetails}
             onPlay={play}
@@ -577,6 +670,7 @@ export function Home({
           key={seeAll.title}
           request={seeAll}
           top={!hasStack && !picker}
+          hasServer={hasServer}
           onBack={() => setSeeAll(null)}
           onOpen={openDetails}
           onPlay={play}
@@ -587,7 +681,8 @@ export function Home({
           <ExternalDetailsPage
             key={route.key}
             route={route}
-            top={i === stack.length - 1 && !picker}
+            top={i === topIndex && !picker}
+            refreshToken={refreshToken}
             onBack={popDetails}
             onOpen={openDetails}
             onPlay={play}
@@ -596,7 +691,8 @@ export function Home({
           <DetailsPage
             key={route.key}
             route={route}
-            top={i === stack.length - 1 && !picker}
+            top={i === topIndex && !picker}
+            refreshToken={refreshToken}
             onBack={popDetails}
             onPush={openDetails}
             onPlay={play}
@@ -616,6 +712,29 @@ export function Home({
             onPlay({ ...movie, external: { ...movie.external, stream } });
           }}
         />
+      ) : null}
+      </TrailerGate.Provider>
+      {palette ? (
+        <CommandPalette
+          userId={session.userId}
+          hasServer={hasServer}
+          hasTv={tvSources.length > 0}
+          onClose={() => setPalette(false)}
+          onView={openView}
+          onSettings={openSettings}
+          onOpen={openDetails}
+          onSearch={(query) => {
+            setSearch(query);
+            openSearch();
+          }}
+          onSwitchProfile={onSwitchProfile}
+          onShortcuts={() => setShortcuts(true)}
+          onParty={() => setPartyOpen(true)}
+        />
+      ) : null}
+      {shortcuts ? <ShortcutsHelp app onClose={() => setShortcuts(false)} /> : null}
+      {partyOpen && !hidden ? (
+        <PartyDialog status={party.status} onClose={() => setPartyOpen(false)} onOpenTitle={party.openTitle} />
       ) : null}
     </div>
   );

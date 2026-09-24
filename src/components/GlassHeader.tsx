@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, LogOut, Search, Settings as SettingsIcon, Users, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Logo";
@@ -16,6 +16,7 @@ export type NavView =
   | "discover"
   | "tv"
   | "mylist"
+  | "calendar"
   | "search"
   | "settings"
   | `lib:${string}`;
@@ -31,12 +32,15 @@ function Tab({
   view,
   onView,
   className,
+  badge = 0,
 }: {
   id: NavView;
   label: string;
   view: NavView;
   onView: (view: NavView) => void;
   className?: string;
+  /** Something new behind the tab (new episodes on the calendar). */
+  badge?: number;
 }) {
   const active = view === id;
   return (
@@ -52,6 +56,14 @@ function Tab({
       onClick={() => onView(id)}
     >
       {label}
+      {badge > 0 ? (
+        <span
+          className="ml-1.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10.5px] font-bold text-on-accent tabular"
+          aria-label={String(badge)}
+        >
+          {badge > 9 ? "9+" : badge}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -66,6 +78,7 @@ export function GlassHeader({
   mode,
   hasServer,
   hasTv = false,
+  badges = {},
   view,
   onView,
   libraries,
@@ -77,6 +90,7 @@ export function GlassHeader({
   hidden = false,
   onSwitchProfile,
   onLogout,
+  actions,
 }: {
   userName: string;
   avatarUrl?: string | null;
@@ -86,6 +100,8 @@ export function GlassHeader({
   hasServer: boolean;
   /** The profile has IPTV lists: show the TV tab. */
   hasTv?: boolean;
+  /** Counters on the tabs (new episodes on the calendar). */
+  badges?: Partial<Record<NavView, number>>;
   view: NavView;
   onView: (view: NavView) => void;
   /** Libraries pinned as tabs. */
@@ -100,6 +116,8 @@ export function GlassHeader({
   hidden?: boolean;
   onSwitchProfile: () => void;
   onLogout: () => void;
+  /** Extra buttons before the downloads (the watch party). */
+  actions?: ReactNode;
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
@@ -120,23 +138,26 @@ export function GlassHeader({
     { id: "home", label: t("home") },
     { id: "discover", label: t("discover") },
     { id: "mylist", label: t("myList") },
+    { id: "calendar", label: t("calendar") },
     ...(hasServer ? [{ id: "myserver" as NavView, label: t("myServer") }] : []),
     ...(hasServer ? libraries.map((lib) => ({ id: libraryView(lib.id), label: lib.name, library: lib })) : []),
     ...(hasTv ? [{ id: "tv" as NavView, label: t("tvTab") }] : []),
   ];
-  const entriesKey = entries.map((entry) => `${entry.id}:${entry.label}`).join("|");
+  const entriesKey = entries.map((entry) => `${entry.id}:${entry.label}:${badges[entry.id] ? 1 : 0}`).join("|");
   const shown = Number.isFinite(fit) ? entries.slice(0, fit) : entries;
   const folded = Number.isFinite(fit) ? entries.slice(fit) : [];
   const foldedActive = folded.some((entry) => entry.id === view);
 
-  // "/" or Ctrl+K jumps to the search box from anywhere in the app (not while typing).
+  // "/" jumps to the search box from anywhere in the app (not while typing); Ctrl+K opens
+  // the command palette instead (Home).
   useEffect(() => {
     if (hidden) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      const combo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k";
-      if (!combo && (e.key !== "/" || typing || e.ctrlKey || e.altKey || e.metaKey)) return;
+      if (e.key !== "/" || typing || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+      // A dialog keeps the keyboard: the search box sits behind it.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       e.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();
@@ -281,6 +302,7 @@ export function GlassHeader({
               )}
             >
               {entry.label}
+              {badges[entry.id] ? <span className="ml-1.5 inline-block w-[18px]" /> : null}
             </span>
           ))}
         </div>
@@ -300,7 +322,7 @@ export function GlassHeader({
                 </button>
               </div>
             ) : (
-              <Tab key={entry.id} {...tab} id={entry.id} label={entry.label} />
+              <Tab key={entry.id} {...tab} id={entry.id} label={entry.label} badge={badges[entry.id]} />
             ),
           )}
           {folded.length ? (
@@ -357,6 +379,7 @@ export function GlassHeader({
         </nav>
       </div>
       <div className="flex h-full items-center gap-1 pr-1">
+        {actions}
         <DownloadsButton />
         <form
           role="search"

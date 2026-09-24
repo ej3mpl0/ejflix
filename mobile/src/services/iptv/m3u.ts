@@ -2,6 +2,7 @@
  * Extended M3U parser (port of `parse_m3u` / `parse_extinf` in `src-tauri/src/iptv.rs`).
  * Pure: no platform imports.
  */
+import { m3uCatchup, type CatchupInfo } from "./catchup";
 
 export const MAX_CHANNELS = 60_000;
 
@@ -24,7 +25,7 @@ export type IptvChannel = {
   container: string;
   userAgent: string | null;
   referrer: string | null;
-};
+} & Partial<CatchupInfo>;
 
 export type ParsedPlaylist = {
   channels: IptvChannel[];
@@ -305,6 +306,7 @@ export function parseM3u(text: string, sourceId: string): ParsedPlaylist {
       container: "",
       userAgent,
       referrer,
+      ...m3uCatchup(attrs),
     });
     userAgent = null;
     referrer = null;

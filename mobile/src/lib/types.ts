@@ -1,3 +1,5 @@
+import type { MessageKey } from "./i18n";
+
 /**
  * Who is using the app: a Jellyfin user, or a local ("online") profile that may have a
  * Jellyfin account linked. `serverUrl` is null when there is no server at all.
@@ -33,6 +35,8 @@ export type ProfilePatch = {
   avatar?: string;
   pin?: string;
   clearPin?: boolean;
+  /** The PIN the profile has now (changing it from the profile picker). */
+  currentPin?: string;
 };
 
 export type BrowseSort = "popular" | "newest" | "year" | "name";
@@ -157,6 +161,8 @@ export type LiveRef = {
   logo: string | null;
   /** "live" | "movie" (VOD entry of the playlist). */
   kind: string;
+  /** A past programme played from the archive (catch-up) instead of the live stream. */
+  catchup?: { start: number; stop: number; title: string } | null;
 };
 
 export type Movie = {
@@ -213,8 +219,12 @@ export type Movie = {
   mediaSources: MediaSourceInfo[];
   /** ISO-8601 date the item was added to the library. */
   dateCreated: string | null;
+  /** ISO-8601 air / release date (episodes: when it aired). */
+  premiereDate?: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
+  /** Watch party: opened to follow the host's title with this key (the player syncs it). */
+  partyKey?: string | null;
 };
 
 export type GenreRow = {
@@ -308,6 +318,8 @@ export type AddonMeta = {
   runtime: string | null;
   year: number | null;
   imdb: string | null;
+  /** Age rating, when the addon publishes one. */
+  certification?: string | null;
 };
 
 export type AddonVideo = {
@@ -415,6 +427,14 @@ export type Settings = {
     subBackground: SubBackground;
     /** Seconds a double tap or a seek button jumps: 5, 10, 15 or 30. */
     seekStep: number;
+    /** Height of the app-drawn subtitles. */
+    subPosition: SubPosition;
+    /** Picture-in-picture when the app goes to the background while playing. */
+    autoPip: boolean;
+    /** Sound keeps playing with the app in the background (and in PiP). */
+    backgroundAudio: boolean;
+    /** Vibration on player gestures, the lock and switches. */
+    haptics: boolean;
   };
   library: { pinned: string[] };
   addons: { urls: string[]; cinemeta: boolean };
@@ -445,6 +465,7 @@ export type Settings = {
 };
 
 export type SubBackground = "outline" | "shadow" | "box";
+export type SubPosition = "bottom" | "raised" | "top";
 
 /** An addon found in another app's account, offered for import. */
 export type ImportedAddon = { url: string; name: string; official: boolean };
@@ -509,6 +530,8 @@ export type IptvSource = {
   updatedMs: number;
   loading: boolean;
   error: string | null;
+  /** Translatable form of `error`, when the failure has one. */
+  errorKey?: { key: MessageKey; vars: Record<string, string | number> } | null;
   epgError: string | null;
   epgSource: string | null;
   account: XtreamAccount | null;
@@ -545,6 +568,8 @@ export type Channel = {
   favorite: boolean;
   /** A programme guide is attached to this channel. */
   epg: boolean;
+  /** Days of past programmes that can be played again (absent = none). */
+  catchupDays?: number;
 };
 
 export type Programme = {
@@ -590,6 +615,10 @@ export const DEFAULT_SETTINGS: Settings = {
     subColor: "#FFFFFF",
     subBackground: "outline",
     seekStep: 10,
+    subPosition: "bottom",
+    autoPip: true,
+    backgroundAudio: true,
+    haptics: true,
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true },
@@ -605,4 +634,33 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
   onboarding: { setupDone: false },
+};
+
+/** "Remind me" on a future programme (per profile, in the store). */
+export type Reminder = {
+  channelId: string;
+  sourceId: string;
+  channelName: string;
+  logo: string | null;
+  group: string;
+  number: number | null;
+  title: string;
+  /** Unix seconds. */
+  start: number;
+  stop: number;
+  notified?: boolean;
+};
+
+// --- profiles & integrations ---
+
+/** Age limits a profile can have; 18 is "no limit". */
+export type ParentalLevel = 0 | 7 | 12 | 16 | 18;
+
+/** Parental restriction of the open profile. */
+export type ParentalStatus = {
+  maxAge: ParentalLevel;
+  hideUnrated: boolean;
+  /** The parental PIN exists (changing a restriction asks for it). */
+  pinSet: boolean;
+  active: boolean;
 };

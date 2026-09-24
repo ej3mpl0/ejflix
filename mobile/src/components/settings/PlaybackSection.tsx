@@ -1,6 +1,7 @@
 import React from "react";
 import { Text, View } from "react-native";
-import type { Countdown, SkipMode, SubBackground } from "../../lib/types";
+import type { Countdown, SkipMode, SubBackground, SubPosition } from "../../lib/types";
+import { subtitlePlacement, subtitleTextStyle } from "../../lib/subtitle-style";
 import { useI18n } from "../../lib/locale-context";
 import { useSettings } from "../../lib/settings-context";
 import { useLayout } from "../../theme/responsive";
@@ -9,6 +10,8 @@ import { Toggle } from "../ui/Toggle";
 import { LanguagePicker } from "./LanguagePicker";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { makeStyles } from "../../theme/ThemeProvider";
+
+const PREVIEW_H = 110;
 
 /** Settings › Playback: skip prompts, next-episode countdown, preferred tracks, speed. */
 export function PlaybackSection() {
@@ -77,20 +80,12 @@ export function PlaybackSection() {
       </SettingsSection>
       <SettingsSection title={t("subStyleTitle")} description={t("subStyleHintMobile")}>
         <View style={s.preview}>
-          <Text
-            style={[
-              s.previewText,
-              {
-                color: playback.subColor,
-                fontSize: Math.round(18 * playback.subScale),
-                backgroundColor: playback.subBackground === "box" ? "rgba(0,0,0,0.7)" : "transparent",
-                textShadowRadius: playback.subBackground === "box" ? 0 : playback.subBackground === "shadow" ? 6 : 3,
-                textShadowOffset: playback.subBackground === "shadow" ? { width: 2, height: 2 } : { width: 0, height: 0 },
-              },
-            ]}
-          >
-            {t("subPreview")}
-          </Text>
+          {/* Live preview: same style helpers as the player overlay, scaled to the card. */}
+          <View style={[s.previewLine, subtitlePlacement(playback.subPosition, PREVIEW_H, 14, 12)]}>
+            <Text style={[s.previewText, subtitleTextStyle({ scale: playback.subScale, color: playback.subColor, background: playback.subBackground }, 18)]}>
+              {t("subPreview")}
+            </Text>
+          </View>
         </View>
         <SettingsRow label={t("subSize")} stacked={stacked}>
           <SegmentedControl<number>
@@ -113,6 +108,18 @@ export function PlaybackSection() {
             ]}
           />
         </SettingsRow>
+        <SettingsRow label={t("subPosition")} stacked={stacked}>
+          <SegmentedControl<SubPosition>
+            label={t("subPosition")}
+            value={playback.subPosition}
+            onChange={(subPosition) => void update({ playback: { subPosition } })}
+            options={[
+              { value: "bottom", label: t("subPosBottom") },
+              { value: "raised", label: t("subPosRaised") },
+              { value: "top", label: t("subPosTop") },
+            ]}
+          />
+        </SettingsRow>
         <SettingsRow label={t("subBackground")} stacked={stacked}>
           <SegmentedControl<SubBackground>
             label={t("subBackground")}
@@ -124,6 +131,21 @@ export function PlaybackSection() {
               { value: "box", label: t("subBgBox") },
             ]}
           />
+        </SettingsRow>
+      </SettingsSection>
+      <SettingsSection title={t("pipTitle")} description={t("pipHint")}>
+        <SettingsRow label={t("autoPip")} hint={t("autoPipHint")}>
+          <Toggle checked={playback.autoPip} onChange={(autoPip) => void update({ playback: { autoPip } })} label={t("autoPip")} />
+        </SettingsRow>
+        <SettingsRow label={t("backgroundAudio")} hint={t("backgroundAudioHint")}>
+          <Toggle
+            checked={playback.backgroundAudio}
+            onChange={(backgroundAudio) => void update({ playback: { backgroundAudio } })}
+            label={t("backgroundAudio")}
+          />
+        </SettingsRow>
+        <SettingsRow label={t("hapticsSetting")} hint={t("hapticsHint")}>
+          <Toggle checked={playback.haptics} onChange={(haptics) => void update({ playback: { haptics } })} label={t("hapticsSetting")} />
         </SettingsRow>
       </SettingsSection>
       <SettingsSection title={t("playbackSpeed")}>
@@ -144,13 +166,12 @@ export function PlaybackSection() {
 
 const useStyles = makeStyles((t) => ({
   preview: {
-    height: 110,
+    height: PREVIEW_H,
     borderRadius: 16,
     marginVertical: 12,
-    alignItems: "center",
-    justifyContent: "flex-end",
-    paddingBottom: 14,
+    overflow: "hidden",
     backgroundColor: "#26323d",
   },
+  previewLine: { position: "absolute", left: 12, right: 12, alignItems: "center" },
   previewText: { fontWeight: "600", paddingHorizontal: 8, borderRadius: 4, overflow: "hidden", textShadowColor: "#000", textAlign: "center" },
 }));

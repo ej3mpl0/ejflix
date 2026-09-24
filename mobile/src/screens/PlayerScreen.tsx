@@ -1,25 +1,29 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
-import { VideoView } from "expo-video";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { VideoView, isPictureInPictureSupported } from "expo-video";
 import { StatusBar } from "expo-status-bar";
 import * as Brightness from "expo-brightness";
 import * as NavigationBar from "expo-navigation-bar";
 import * as ScreenOrientation from "expo-screen-orientation";
 import { useKeepAwake } from "expo-keep-awake";
 import { useFocusEffect } from "@react-navigation/native";
-import { ExternalLink, ListVideo, RotateCcw } from "lucide-react-native";
+import { ChevronDown, ChevronUp, Cpu, ExternalLink, FastForward, Globe, ListVideo, RotateCcw } from "lucide-react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { File } from "expo-file-system";
 import { api } from "../lib/api";
 import { engine } from "../services/player/engine";
+import { errorActions, errorMessageKey, type ErrorAction, type ErrorSourceKind } from "../services/player/error-actions";
+import { offlineStartSeconds } from "../services/downloads/downloads.pure";
+import { haptic } from "../lib/haptics";
 import type { Channel, EpgNow, MediaSegment, Movie, PlayerState } from "../lib/types";
-import type { PlayerError } from "../services/events";
+import { PlaybackError, type PlayerError } from "../services/events";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { channelToMovie } from "../lib/iptv";
 import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { openInExternalPlayer } from "../lib/external-player";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
 import { useSettings } from "../lib/settings-context";
 import { useToast } from "../lib/toast-context";
 import { decodeSubtitleBytes, parseSubtitles, type Cue } from "../lib/subtitles";
@@ -28,6 +32,7 @@ import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
 import { usePauseInfo } from "../hooks/usePauseInfo";
+import { usePartyGuestSync } from "../hooks/usePartyGuestSync";
 import { useBackHandler } from "../navigation/useBackHandler";
 import type { MainScreenProps } from "../navigation/types";
 import { makeStyles } from "../theme/ThemeProvider";
@@ -54,6 +59,7 @@ import {
   SubtitleTools,
   TimelinePreview,
   TrackSheet,
+  formatSpeed,
   type Flash,
   type FlashKind,
   type Hud,
@@ -131,6 +137,24 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   const [subDelay, setSubDelay] = useState(0);
   /** Bumped by "Retry" to run the start again. */
   const [attempt, setAttempt] = useState(0);
+  /** The item plays from a downloaded file (the error card offers the online version). */
+  const [offline, setOffline] = useState(false);
+  const [pip, setPip] = useState(false);
+  /** Speed while a long press holds it (null when not holding). */
+  const [holdSpeed, setHoldSpeed] = useState<number | null>(null);
+  const [errorOpen, setErrorOpen] = useState(false);
+  const videoRef = useRef<VideoView>(null);
+  /** How the next start of `movie` should go ("Try transcoding", "Watch online"). */
+  const startMode = useRef<{ movie: typeof movie; forceTranscode?: boolean; skipLocal?: boolean } | null>(null);
+  const speedBeforeHold = useRef(1);
+  const holdingRef = useRef(false);
+  const pipSupported = useMemo(() => {
+    try {
+      return isPictureInPictureSupported();
+    } catch {
+      return false;
+    }
+  }, []);
 
   const remaining = settings.playback.showTimeRemaining;
   const live = movie.live ?? null;
@@ -174,6 +198,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   stateRef.current = state;
   toastRef.current = toast;
   tRef.current = t;
+
+  // Watch party guest: follow the host; without its permission, local controls only say so.
+  const partySync = usePartyGuestSync({
+    movie,
+    state,
+    onNotice: (paused, name) => toast(t(paused ? "partyHostPaused" : "partyHostResumed", { name: name || "?" })),
+  });
+  /** A guest does not chain on its own: the host's next title arrives through the party. */
+  const chainNext = partySync.guest ? null : nextEpisode;
+  const partyLocked = () => {
+    if (!partySync.locked) return false;
+    toast(t("partyHostControls"));
+    return true;
+  };
 
   const showLockHint = () => {
     setLockHint(true);
@@ -246,7 +284,31 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         movie.kind === "Episode"
           ? [movie.seriesName, episodeCode(movie, "S{s}:E{e}"), movie.name].filter(Boolean).join(" · ")
           : movie.name;
+      // A choice from the error card only applies to the item it was made for.
+      const mode = startMode.current?.movie === movie ? startMode.current : null;
       try {
+        if (movie.live?.catchup) {
+          // A past programme from the channel's archive.
+          const { start: from, stop, title: programme } = movie.live.catchup;
+          const next = await api.iptvPlayCatchup(movie.live.channelId, from, stop, programme);
+          if (cancelled) return;
+          setState(next);
+          return;
+        }
+        // A finished download plays from the device (also without network).
+        const local = movie.live || mode?.skipLocal ? null : api.playableDownload(movie);
+        setOffline(Boolean(local));
+        if (local) {
+          const next = await api.playerStartFile({
+            downloadId: local.id,
+            title,
+            startSeconds: offlineStartSeconds(local, start),
+            entry: movie.external ? resumeEntryOf(movie) : null,
+          });
+          if (cancelled) return;
+          setState(next);
+          return;
+        }
         if (movie.live) {
           // IPTV channel: the engine resolves the stream URL (Xtream credentials stay there).
           const next = await api.iptvPlay(movie.live.channelId);
@@ -261,7 +323,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           let stream = ext.stream ?? null;
           if (!stream) stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null);
           if (cancelled) return;
-          if (!stream?.url) throw new Error(tRef.current("noStreams"));
+          if (!stream?.url) throw new PlaybackError("noStreams", "No streams");
           const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
           let nextMovie: Movie | null = null;
           if (ext.type === "series") {
@@ -280,7 +342,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           if (cancelled) return;
           const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
           const entry = resumeEntryOf(full);
-          if (!entry) throw new Error(tRef.current("playerStartError"));
+          if (!entry) throw new PlaybackError("playerStartError", "No resume entry");
           const next = await api.playerStartUrl({
             url: stream.url,
             title,
@@ -298,18 +360,34 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           title,
           startSeconds: start > 5 ? start : 0,
           mediaSourceId: movie.mediaSourceId,
+          forceTranscode: mode?.forceTranscode,
         });
         if (cancelled) return;
         setState(next);
       } catch (err) {
         if (cancelled) return;
-        // Stay on the player with the error, a retry and (online) another source.
-        setPlayError({
-          message: err instanceof Error ? err.message : tRef.current("playerStartError"),
-          detail: "",
-          code: "unknown",
-          url: null,
-        });
+        // Stay on the player with the error, a retry and (online) another source. The
+        // engine already reported its own failures (with their code and URL): keep those.
+        const transcoding = mode?.forceTranscode === true;
+        const failure: PlayerError = isParentalBlocked(err)
+          ? {
+              message: tRef.current("parentalBlockedTitle"),
+              detail: "",
+              code: "unknown",
+              url: null,
+              key: "parentalBlockedTitle",
+              transcoding,
+            }
+          : err instanceof PlaybackError
+            ? { message: err.message, detail: err.detail, code: "unknown", url: null, key: err.key, transcoding }
+            : {
+                message: tRef.current("playerStartError"),
+                detail: err instanceof Error ? err.message : "",
+                code: "unknown",
+                url: null,
+                transcoding,
+              };
+        setPlayError((current) => current ?? failure);
       }
     };
 
@@ -338,7 +416,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     setState(emptyState);
     setExtSub(null);
     setSubDelay(0);
+    setHoldSpeed(null);
+    holdingRef.current = false;
   }, [movie]);
+
+  // A new failure starts with its technical details folded.
+  useEffect(() => {
+    setErrorOpen(false);
+  }, [playError]);
+
+  // Settings › Playback › background audio applies to what is already playing.
+  const backgroundAudio = settings.playback.backgroundAudio;
+  useEffect(() => {
+    engine.setBackgroundPlayback(backgroundAudio);
+  }, [backgroundAudio]);
 
   /** Picks a subtitle file on the device; the app draws it and the embedded track goes off. */
   const pickSubtitleFile = async () => {
@@ -377,6 +468,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       return;
     }
     let alive = true;
+    // Never chain into the previous item's successor while this one is looked up.
+    setNextEpisode(null);
     api
       .getNextEpisode(movie.seriesId, movie.id)
       .then((next) => {
@@ -391,9 +484,9 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   // End of file without anything to chain into: leave. With a next episode the card
   // below decides whether and when to continue.
   useEffect(() => {
-    if (!state.eof || nextEpisode) return;
+    if (!state.eof || chainNext) return;
     exitRef.current();
-  }, [state.eof, nextEpisode]);
+  }, [state.eof, chainNext]);
 
   // First frame: the file is loaded once the engine reports a duration or advances time.
   useEffect(() => {
@@ -484,7 +577,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         try {
           const current = await Brightness.getBrightnessAsync();
           if (!alive) return;
-          brightness.current = current;
+          // A swipe that came first already owns the current value.
+          if (!brightnessTaken.current) brightness.current = current;
           brightnessOnEntry.current = current;
           brightnessTaken.current = true;
         } catch {
@@ -538,20 +632,32 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const togglePause = async () => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: stateRef.current.paused ? "play" : "pause" });
     showFlash(stateRef.current.paused ? "play" : "pause");
     await api.playerTogglePause();
   };
 
   const seekBy = (delta: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, stateRef.current.time + delta) });
+    haptic("light");
     showFlash(delta < 0 ? "back" : "fwd", Math.abs(delta));
     void api.playerSeek(delta, true);
   };
 
   const seekTo = (seconds: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, seconds) });
     void api.playerSeek(seconds, false);
   };
 
   const setSpeed = (speed: number) => {
+    // The host's speed is the party's speed.
+    if (partySync.guest) {
+      toast(t("partyHostControls"));
+      return;
+    }
     void api.playerSetSpeed(speed);
     if (settings.playback.rememberSpeed) void updateSettings({ playback: { lastSpeed: speed } });
   };
@@ -565,12 +671,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const playNext = () => {
+    if (partySync.guest) {
+      toast(t("partyHostPicks"));
+      return;
+    }
     if (!nextEpisode || nextSent.current) return;
     nextSent.current = true;
     navigation.setParams({ movie: nextEpisode });
   };
 
   const playFromPanel = (target: Movie) => {
+    if (partySync.guest) {
+      toast(t("partyHostPicks"));
+      return;
+    }
     if (nextSent.current) return;
     nextSent.current = true;
     setPanel(false);
@@ -578,9 +692,11 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const playChannel = (channel: Channel) => {
-    if (!live || nextSent.current || channel.id === live.channelId) return;
+    if (!live || nextSent.current || (channel.id === live.channelId && !live.catchup)) return;
     nextSent.current = true;
     setPanel(false);
+    // A light tick confirms the zap before the new stream shows up.
+    haptic("selection");
     navigation.setParams({ movie: channelToMovie(channel, live.sourceName) });
   };
 
@@ -593,6 +709,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const lock = () => {
+    haptic("medium");
     setLocked(true);
     setSheet(null);
     setPanel(false);
@@ -601,6 +718,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const unlock = () => {
+    haptic("medium");
     setLocked(false);
     setLockHint(false);
     if (lockHintTimer.current) clearTimeout(lockHintTimer.current);
@@ -659,6 +777,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     showHud(side === "left" ? "brightness" : "volume", pct);
     if (side === "left") {
       brightness.current = value;
+      // Changed before the entry value was read: still hand it back on the way out.
+      brightnessTaken.current = true;
       void Brightness.setBrightnessAsync(value).catch(() => undefined);
     } else {
       void api.playerSetVolume(pct);
@@ -666,6 +786,10 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const onScrubGesture = (phase: PanPhase, dx: number) => {
+    if (partySync.locked) {
+      if (phase === "start") partyLocked();
+      return;
+    }
     const { duration, time } = stateRef.current;
     if (duration <= 0) return;
     if (phase === "start") {
@@ -695,6 +819,60 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     holdUi(false);
   };
 
+  /** Long press: double speed while the finger stays down, the previous speed after. */
+  const onHold = (holding: boolean) => {
+    if (holding) {
+      if (live || stateRef.current.duration <= 0 || stateRef.current.paused) return;
+      speedBeforeHold.current = stateRef.current.speed;
+      const boosted = Math.min(4, Math.max(2, speedBeforeHold.current * 2));
+      haptic("medium");
+      holdingRef.current = true;
+      setHoldSpeed(boosted);
+      void api.playerSetSpeed(boosted);
+      return;
+    }
+    if (!holdingRef.current) return;
+    holdingRef.current = false;
+    haptic("light");
+    setHoldSpeed(null);
+    void api.playerSetSpeed(speedBeforeHold.current);
+  };
+
+  const enterPip = () => {
+    setSheet(null);
+    setPanel(false);
+    void videoRef.current?.startPictureInPicture().catch((err: unknown) => {
+      toast(err instanceof Error ? err.message : String(err));
+    });
+  };
+
+  /** Runs the start again, optionally another way (transcoded, or online instead of the file). */
+  const restart = (mode: { forceTranscode?: boolean; skipLocal?: boolean } | null) => {
+    if (mode) startMode.current = { movie, ...mode };
+    setPlayError(null);
+    setAttempt((n) => n + 1);
+  };
+
+  const runErrorAction = (action: ErrorAction) => {
+    switch (action) {
+      case "transcode":
+        restart({ forceTranscode: true });
+        break;
+      case "stream":
+        restart({ skipLocal: true });
+        break;
+      case "source":
+        picker.open(movie);
+        break;
+      case "retry":
+        restart(null);
+        break;
+      case "external":
+        if (playError?.url) void openInExternalPlayer(playError.url).catch(() => undefined);
+        break;
+    }
+  };
+
   const onPinch = (scale: number) => {
     if (scale > 1.1) void api.playerSetAspect("fill");
     else if (scale < 0.9) void api.playerSetAspect("auto");
@@ -711,13 +889,13 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     ready,
     settings,
     controlsVisible: visible,
-    nextEpisode,
+    nextEpisode: chainNext,
     onSeekTo: seekTo,
     onPlayNext: playNext,
   });
   revealRef.current = skipPrompt.reveal;
   const nextCard = useNextEpisodeCard({
-    nextEpisode,
+    nextEpisode: chainNext,
     outro,
     time: state.time,
     duration: state.duration,
@@ -741,7 +919,27 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   const panelWidth = Math.min(420, width * 0.5);
   const cardRight = 24 + insets.right;
   const cardBottom = insets.bottom + (visible ? CHROME_BOTTOM_HEIGHT : 24);
-  const gesturesEnabled = !locked && !panel && sheet === null;
+  const gesturesEnabled = !locked && !panel && sheet === null && !pip;
+  // A long press cut short (PiP, a sheet, the lock) never reports its release.
+  useEffect(() => {
+    if (!gesturesEnabled) onHold(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gesturesEnabled]);
+  const errorSource: ErrorSourceKind = live ? "live" : offline ? "offline" : movie.external ? "addon" : "jellyfin";
+  // Nothing gets past a parental limit: only "Back".
+  const actions =
+    playError && playError.key !== "parentalBlockedTitle"
+      ? errorActions({ source: errorSource, code: playError.code, transcoding: Boolean(playError.transcoding), hasUrl: Boolean(playError.url) })
+      : [];
+  // A translated failure (`key`) has no technical text worth showing.
+  const errorDetail = playError ? playError.detail || (playError.key ? "" : playError.message) : "";
+  const actionMeta: Record<ErrorAction, { label: string; icon: typeof RotateCcw }> = {
+    transcode: { label: t("tryTranscoding"), icon: Cpu },
+    stream: { label: t("streamOnline"), icon: Globe },
+    source: { label: t("chooseAnotherSource"), icon: ListVideo },
+    retry: { label: t("retry"), icon: RotateCcw },
+    external: { label: t("openExternalPlayer"), icon: ExternalLink },
+  };
 
   return (
     <View style={s.root}>
@@ -749,225 +947,250 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
 
       <View pointerEvents="none" style={s.videoWrap}>
         <VideoView
+          ref={videoRef}
           player={engine.player}
           nativeControls={false}
-          allowsPictureInPicture
-          startsPictureInPictureAutomatically
+          allowsPictureInPicture={pipSupported}
+          // Leaving the app while playing floats the video (Settings › Playback).
+          startsPictureInPictureAutomatically={pipSupported && settings.playback.autoPip && !state.paused && !playError}
+          onPictureInPictureStart={() => {
+            setPip(true);
+            setSheet(null);
+            setPanel(false);
+            hideChrome();
+          }}
+          onPictureInPictureStop={() => setPip(false)}
           contentFit={box.contentFit}
           style={{ width: box.width, height: box.height }}
         />
       </View>
 
-      <PlayerGestures
-        enabled={gesturesEnabled}
-        scrubEnabled={!live && state.duration > 0}
-        width={width}
-        height={height}
-        onSingleTap={onSingleTap}
-        onDoubleTap={onDoubleTap}
-        onVerticalPan={onVerticalPan}
-        onScrub={onScrubGesture}
-        onPinch={onPinch}
-      />
-
-      {splash ? <Splash movie={movie} heading={heading} subheading={subheading} showYear={!isEpisode} /> : null}
-
-      {state.buffering && !splash ? (
-        <View pointerEvents="none" style={s.centre}>
-          <Spinner size={56} thickness={2} />
-        </View>
-      ) : null}
-
-      {extSub ? (
-        <SubtitleOverlay
-          cues={extSub.cues}
-          time={state.time}
-          delay={subDelay}
-          scale={settings.playback.subScale}
-          color={settings.playback.subColor}
-          background={settings.playback.subBackground}
-          bottom={insets.bottom + (visible ? CHROME_BOTTOM_HEIGHT + 8 : 28)}
-        />
-      ) : null}
-
-      {flash ? <FlashIcon key={flash.id} flash={flash} width={width} /> : null}
-
-      {hud ? <GestureHud hud={hud} top={insets.top + 20} /> : null}
-
-      {preview ? (
-        <View pointerEvents="none" style={s.preview}>
-          <TimelinePreview
-            key={timelineMovie.id}
-            movie={timelineMovie}
-            seconds={preview.seconds}
-            delta={preview.delta}
-            label={segmentLabelAt(preview.seconds)}
+      {/* In picture-in-picture (Android shows the whole screen shrunk) only the video stays. */}
+      {pip ? null : (
+        <>
+          <PlayerGestures
+            enabled={gesturesEnabled}
+            scrubEnabled={!live && state.duration > 0}
+            width={width}
+            height={height}
+            onSingleTap={onSingleTap}
+            onDoubleTap={onDoubleTap}
+            onVerticalPan={onVerticalPan}
+            onScrub={onScrubGesture}
+            onPinch={onPinch}
+            onHold={onHold}
           />
-        </View>
-      ) : null}
 
-      {!locked && !live && pauseInfo && !splash && !panel && sheet === null && layout.wide ? (
-        <PauseInfo movie={detail ?? movie} heading={heading} top={insets.top + 72} left={24 + insets.left} />
-      ) : null}
+          {splash ? <Splash movie={movie} heading={heading} subheading={subheading} showYear={!isEpisode} /> : null}
 
-      {locked ? null : nextEpisode && nextCard.visible ? (
-        <NextEpisodeCard
-          episode={nextEpisode}
-          countdown={nextCard.countdown}
-          onPlay={playNext}
-          onDismiss={nextCard.dismiss}
-          right={cardRight}
-          bottom={cardBottom}
-        />
-      ) : skipPrompt.prompt ? (
-        <SkipButton
-          key={`${skipPrompt.prompt.key}:${skipPrompt.prompt.showId}`}
-          label={t(skipPrompt.prompt.labelKey)}
-          onSkip={skipPrompt.skip}
-          onDismiss={skipPrompt.dismiss}
-          right={cardRight}
-          bottom={cardBottom}
-        />
-      ) : null}
-
-      {playError && !locked ? (
-        <View style={s.errorOverlay}>
-          <View style={s.errorCard}>
-            <Text style={s.errorTitle}>{t("playbackFailed")}</Text>
-            <Text style={s.errorBody}>
-              {playError.code === "decoder"
-                ? t("playbackFailedDecoder")
-                : playError.code === "network"
-                  ? t("playbackFailedNetwork")
-                  : playError.message}
-            </Text>
-            {playError.detail ? (
-              <Text style={s.errorDetail} numberOfLines={3}>
-                {playError.detail}
-              </Text>
-            ) : null}
-            <View style={s.errorActions}>
-              <Pill
-                variant="primary"
-                size="sm"
-                pill
-                icon={RotateCcw}
-                label={t("retry")}
-                onPress={() => {
-                  setPlayError(null);
-                  setAttempt((n) => n + 1);
-                }}
-              />
-              {movie.external ? (
-                <Pill
-                  variant="tonal"
-                  size="sm"
-                  pill
-                  icon={ListVideo}
-                  label={t("chooseAnotherSource")}
-                  onPress={() => picker.open(movie)}
-                />
-              ) : null}
-              {playError.url ? (
-                <Pill
-                  variant="tonal"
-                  size="sm"
-                  pill
-                  icon={ExternalLink}
-                  label={t("openExternalPlayer")}
-                  onPress={() => {
-                    void openInExternalPlayer(playError.url as string).catch(() => undefined);
-                  }}
-                />
-              ) : null}
-              <Pill variant="ghost" size="sm" pill label={t("back")} onPress={exit} />
+          {state.buffering && !splash ? (
+            <View pointerEvents="none" style={s.centre}>
+              <Spinner size={56} thickness={2} />
             </View>
-          </View>
-        </View>
-      ) : null}
+          ) : null}
 
-      {locked ? (
-        <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
-      ) : (
-        <PlayerChrome
-          movie={movie}
-          timelineMovie={timelineMovie}
-          segments={segments}
-          state={state}
-          visible={visible}
-          sheet={sheet}
-          remaining={remaining}
-          panelOpen={panel}
-          live={live ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null } : null}
-          onSheet={setSheet}
-          onToggleRemaining={toggleRemaining}
-          onBack={exit}
-          onTogglePause={() => void togglePause()}
-          onSeek={seekBy}
-          onSeekTo={seekTo}
-          onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
-          onMute={() => void api.playerSetMute(!stateRef.current.mute)}
-          onAspect={cycleAspect}
-          onLock={lock}
-          onPanel={() => {
-            setSheet(null);
-            setPanel((open) => !open);
-          }}
-          onZap={zap}
-          externalSub={extSub?.name ?? null}
-          onReveal={bump}
-          onHoldUi={holdUi}
-        />
-      )}
-
-      {live ? (
-        <ChannelsPanel
-          visible={panel && !locked}
-          live={live}
-          channels={zapList}
-          width={panelWidth}
-          onPlay={playChannel}
-          onClose={() => setPanel(false)}
-        />
-      ) : (
-        <EpisodesPanel
-          key={movie.id}
-          visible={panel && !locked}
-          movie={movie}
-          time={state.time}
-          duration={state.duration}
-          width={panelWidth}
-          onPlay={playFromPanel}
-          onClose={() => setPanel(false)}
-        />
-      )}
-
-      <TrackSheet
-        kind={sheet === "audio" ? "audio" : "sub"}
-        visible={sheet === "audio" || sheet === "sub"}
-        tracks={state.tracks}
-        onSelect={(kind, id) => {
-          // Picking any embedded subtitle (or "off") drops the file the app was drawing.
-          if (kind === "sub") setExtSub(null);
-          void api.playerSetTrack(kind, id);
-        }}
-        onClose={() => setSheet(null)}
-        footer={
-          sheet === "sub" ? (
-            <SubtitleTools
-              fileName={extSub?.name ?? null}
+          {extSub ? (
+            <SubtitleOverlay
+              cues={extSub.cues}
+              time={state.time}
               delay={subDelay}
-              onDelay={(value) => setSubDelay(Math.max(-30, Math.min(30, value)))}
-              onPickFile={() => void pickSubtitleFile()}
-              onClearFile={() => setExtSub(null)}
+              scale={settings.playback.subScale}
+              color={settings.playback.subColor}
+              background={settings.playback.subBackground}
+              position={settings.playback.subPosition}
+              frameHeight={height}
+              topInset={insets.top + (visible ? 72 : 20)}
+              bottom={insets.bottom + (visible ? CHROME_BOTTOM_HEIGHT + 8 : 28)}
             />
-          ) : null
-        }
-      />
+          ) : null}
 
-      <StatsSheet visible={sheet === "stats"} state={state} subDelay={subDelay} onClose={() => setSheet(null)} />
+          {holdSpeed != null ? (
+            <View pointerEvents="none" style={[s.holdPill, { top: insets.top + 20 }]}>
+              <FastForward size={14} color="#ffffff" fill="#ffffff" />
+              <Text style={s.holdText}>{t("holdSpeed", { speed: formatSpeed(holdSpeed) })}</Text>
+            </View>
+          ) : null}
 
-      <SpeedSheet visible={sheet === "speed"} speed={state.speed} onSelect={setSpeed} onClose={() => setSheet(null)} />
+          {flash ? <FlashIcon key={flash.id} flash={flash} width={width} /> : null}
+
+          {hud ? <GestureHud hud={hud} top={insets.top + 20} /> : null}
+
+          {preview ? (
+            <View pointerEvents="none" style={s.preview}>
+              <TimelinePreview
+                key={timelineMovie.id}
+                movie={timelineMovie}
+                seconds={preview.seconds}
+                delta={preview.delta}
+                label={segmentLabelAt(preview.seconds)}
+              />
+            </View>
+          ) : null}
+
+          {!locked && !live && pauseInfo && !splash && !panel && sheet === null && layout.wide ? (
+            <PauseInfo movie={detail ?? movie} heading={heading} top={insets.top + 72} left={24 + insets.left} />
+          ) : null}
+
+          {locked ? null : chainNext && nextCard.visible ? (
+            <NextEpisodeCard
+              episode={chainNext}
+              countdown={nextCard.countdown}
+              onPlay={playNext}
+              onDismiss={nextCard.dismiss}
+              right={cardRight}
+              bottom={cardBottom}
+            />
+          ) : skipPrompt.prompt ? (
+            <SkipButton
+              key={`${skipPrompt.prompt.key}:${skipPrompt.prompt.showId}`}
+              label={t(skipPrompt.prompt.labelKey)}
+              onSkip={skipPrompt.skip}
+              onDismiss={skipPrompt.dismiss}
+              right={cardRight}
+              bottom={cardBottom}
+            />
+          ) : null}
+
+          {playError && !locked ? (
+            <View style={s.errorOverlay}>
+              <View style={s.errorCard}>
+                <Text style={s.errorTitle}>{t("playbackFailed")}</Text>
+                <Text style={s.errorBody}>{t(playError.key ?? errorMessageKey(playError.code))}</Text>
+                <View style={s.errorActions}>
+                  {actions.map((action, i) => (
+                    <Pill
+                      key={action}
+                      variant={i === 0 ? "primary" : "tonal"}
+                      size="sm"
+                      pill
+                      icon={actionMeta[action].icon}
+                      label={actionMeta[action].label}
+                      onPress={() => runErrorAction(action)}
+                    />
+                  ))}
+                  <Pill variant="ghost" size="sm" pill label={t("back")} onPress={exit} />
+                </View>
+                {errorDetail ? (
+                  <View>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: errorOpen }}
+                      hitSlop={8}
+                      onPress={() => setErrorOpen((open) => !open)}
+                      style={s.detailsToggle}
+                    >
+                      <Text style={s.detailsLabel}>{t("errorDetails")}</Text>
+                      {errorOpen ? <ChevronUp size={14} color="#9a9a9a" /> : <ChevronDown size={14} color="#9a9a9a" />}
+                    </Pressable>
+                    {errorOpen ? (
+                      <Text selectable style={s.errorDetail}>
+                        {errorDetail}
+                      </Text>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            </View>
+          ) : null}
+
+          {locked ? (
+            <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
+          ) : (
+            <PlayerChrome
+              movie={movie}
+              timelineMovie={timelineMovie}
+              segments={segments}
+              state={state}
+              visible={visible}
+              sheet={sheet}
+              remaining={remaining}
+              panelOpen={panel}
+              live={
+                live?.catchup
+                  ? {
+                      number: live.number,
+                      now: { start: live.catchup.start, stop: live.catchup.stop, title: live.catchup.title, desc: null, category: null },
+                      next: null,
+                      catchup: true,
+                    }
+                  : live
+                    ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null }
+                    : null
+              }
+              onSheet={setSheet}
+              onToggleRemaining={toggleRemaining}
+              onBack={exit}
+              onTogglePause={() => void togglePause()}
+              onSeek={seekBy}
+              onSeekTo={seekTo}
+              onScrub={(seconds) => {
+                if (!partySync.locked) void api.playerSeek(seconds, false, true);
+              }}
+              onMute={() => void api.playerSetMute(!stateRef.current.mute)}
+              onAspect={cycleAspect}
+              onLock={lock}
+              onPanel={() => {
+                setSheet(null);
+                setPanel((open) => !open);
+              }}
+              onZap={zap}
+              externalSub={extSub?.name ?? null}
+              onPip={pipSupported ? enterPip : null}
+              onReveal={bump}
+              onHoldUi={holdUi}
+            />
+          )}
+
+          {live ? (
+            <ChannelsPanel
+              visible={panel && !locked}
+              live={live}
+              channels={zapList}
+              width={panelWidth}
+              onPlay={playChannel}
+              onClose={() => setPanel(false)}
+            />
+          ) : (
+            <EpisodesPanel
+              key={movie.id}
+              visible={panel && !locked}
+              movie={movie}
+              time={state.time}
+              duration={state.duration}
+              width={panelWidth}
+              onPlay={playFromPanel}
+              onClose={() => setPanel(false)}
+            />
+          )}
+
+          <TrackSheet
+            kind={sheet === "audio" ? "audio" : "sub"}
+            visible={sheet === "audio" || sheet === "sub"}
+            tracks={state.tracks}
+            onSelect={(kind, id) => {
+              // Picking any embedded subtitle (or "off") drops the file the app was drawing.
+              if (kind === "sub") setExtSub(null);
+              void api.playerSetTrack(kind, id);
+            }}
+            onClose={() => setSheet(null)}
+            footer={
+              sheet === "sub" ? (
+                <SubtitleTools
+                  fileName={extSub?.name ?? null}
+                  delay={subDelay}
+                  onDelay={(value) => setSubDelay(Math.max(-30, Math.min(30, value)))}
+                  onPickFile={() => void pickSubtitleFile()}
+                  onClearFile={() => setExtSub(null)}
+                />
+              ) : null
+            }
+          />
+
+          <StatsSheet visible={sheet === "stats"} state={state} subDelay={subDelay} onClose={() => setSheet(null)} />
+
+          <SpeedSheet visible={sheet === "speed"} speed={state.speed} onSelect={setSpeed} onClose={() => setSheet(null)} />
+        </>
+      )}
     </View>
   );
 }
@@ -996,6 +1219,21 @@ const useStyles = makeStyles((t) => ({
   },
   errorTitle: { ...text(16, "semibold"), color: t.colors.text },
   errorBody: { ...text(13, "regular", { lineHeight: 19 }), color: t.colors.muted },
-  errorDetail: { ...text(11, "regular", { lineHeight: 15 }), color: t.colors.dim },
+  errorDetail: { ...text(11, "regular", { lineHeight: 15 }), color: t.colors.dim, marginTop: 4 },
   errorActions: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginTop: 8 },
+  detailsToggle: { flexDirection: "row", alignItems: "center", gap: 4, alignSelf: "flex-start", marginTop: 6, paddingVertical: 4 },
+  detailsLabel: { ...text(12, "medium"), color: t.colors.dim },
+  holdPill: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: t.radii.pill,
+    backgroundColor: t.black(0.6),
+    zIndex: 27,
+  },
+  holdText: { ...text(13, "semibold", { tabular: true }), color: "#ffffff" },
 }));

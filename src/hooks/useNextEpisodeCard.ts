@@ -14,6 +14,7 @@ type Dismissed = "none" | "untilEof" | "forever";
  *   data it starts at end of file, as before.
  * - `countdownSeconds === 0` never autoplays: the card is just a button.
  * - Dismissing hides it until end of file, where it comes back without a countdown.
+ * - The countdown waits while playback is paused (before end of file).
  */
 export function useNextEpisodeCard({
   nextEpisode,
@@ -22,6 +23,7 @@ export function useNextEpisodeCard({
   duration,
   eof,
   ready,
+  paused,
   countdownSeconds,
   onPlayNext,
 }: {
@@ -31,9 +33,10 @@ export function useNextEpisodeCard({
   duration: number;
   eof: boolean;
   ready: boolean;
+  paused: boolean;
   countdownSeconds: number;
   onPlayNext: () => void;
-}): { visible: boolean; countdown: number | null; dismiss: () => void } {
+}): { visible: boolean; countdown: number | null; dismiss: () => void; closed: boolean } {
   const [dismissed, setDismissed] = useState<Dismissed>("none");
   const [countdown, setCountdown] = useState<number | null>(null);
   const onPlayNextRef = useRef(onPlayNext);
@@ -46,7 +49,9 @@ export function useNextEpisodeCard({
     inWindow &&
     dismissed !== "forever" &&
     !(dismissed === "untilEof" && !eof);
-  const shouldCount = visible && countdownSeconds > 0 && dismissed === "none" && (outro != null || eof);
+  const shouldCount =
+    // mpv's keep-open pauses at end of file: only a pause before it holds the countdown.
+    visible && !(paused && !eof) && countdownSeconds > 0 && dismissed === "none" && (outro != null || eof);
 
   useEffect(() => {
     if (!shouldCount) {
@@ -71,5 +76,6 @@ export function useNextEpisodeCard({
     setDismissed(eof ? "forever" : "untilEof");
   }, [eof]);
 
-  return { visible, countdown: shouldCount ? countdown : null, dismiss };
+  // `closed`: dismissed at end of file, nothing left to wait for.
+  return { visible, countdown: shouldCount ? countdown : null, dismiss, closed: dismissed === "forever" };
 }

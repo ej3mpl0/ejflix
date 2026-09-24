@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { MoreVertical } from "lucide-react";
 import { cn } from "../lib/format";
@@ -35,6 +35,38 @@ export function KebabMenu({
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  /** Opened from the keyboard (Enter, Space, the context-menu key): focus goes into the menu. */
+  const byKeyboard = useRef(false);
+
+  // The menu sits in a portal at the end of the page, out of Tab's reach: take focus to it.
+  useEffect(() => {
+    if (!open || !pos || !byKeyboard.current) return;
+    menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]:not([disabled])')?.focus();
+  }, [open, pos]);
+
+  const onMenuKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Tab") {
+      // Leaving the menu closes it and goes back to its button.
+      e.preventDefault();
+      setOpen(false);
+      buttonRef.current?.focus();
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    e.preventDefault();
+    const items = [...(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([disabled])') ?? [])];
+    if (!items.length) return;
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? items.length - 1
+          : index < 0
+            ? 0
+            : (index + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -86,6 +118,8 @@ export function KebabMenu({
         aria-expanded={open}
         onClick={(e) => {
           e.stopPropagation();
+          // No pointer behind the click (detail 0): a key press or a programmatic click.
+          byKeyboard.current = e.detail === 0;
           setOpen((v) => !v);
         }}
         className={cn(
@@ -105,6 +139,7 @@ export function KebabMenu({
               className="modal-enter fixed z-[90] rounded-2xl bg-panel/95 p-1.5 shadow-[0_16px_40px_rgb(0_0_0_/_0.55),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
               style={{ left: pos.left, top: pos.top, width: WIDTH }}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={onMenuKey}
             >
               {actions.map((action) => (
                 <button
@@ -114,6 +149,7 @@ export function KebabMenu({
                   disabled={action.disabled}
                   onClick={() => {
                     setOpen(false);
+                    if (byKeyboard.current) buttonRef.current?.focus();
                     action.onSelect();
                   }}
                   className={cn(

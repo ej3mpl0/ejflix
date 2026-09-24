@@ -19,7 +19,8 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import * as NavigationBar from "expo-navigation-bar";
 import { Platform } from "react-native";
 import type { Movie, PlayerState, PlayerTrack } from "../../lib/types";
-import { emit, type PlayerErrorCode } from "../events";
+import { emit, PlaybackError, type PlayerErrorCode } from "../events";
+import { LocalizedError } from "../errors";
 import { clamp, ticksFromSeconds } from "../util";
 import { getItem } from "../jellyfin/library";
 import {
@@ -33,7 +34,9 @@ import {
 import { matchesLang } from "../jellyfin/languages";
 import { settingsGet } from "../settings";
 import { upsertProgress } from "../addons";
-import { resolveChannelPlayback } from "../iptv";
+import { resolveCatchupPlayback, resolveChannelPlayback } from "../iptv";
+import { downloadFileUri, downloadGet, downloadPlayable, downloadRecordPosition, downloadsSyncPending } from "../downloads/downloads";
+import { BLOCKED } from "../parental";
 import { registerSessionCleanup } from "../session";
 import { aspectBox, isAspectMode } from "./aspect";
 import { ProgressLoop, reportTick } from "./progress";
@@ -86,7 +89,7 @@ function defaultState(): PlayerState {
 }
 
 function defaultPrefs(): PlaybackPrefs {
-  return { audioLanguage: "", subtitleLanguage: "", rememberSpeed: false, lastSpeed: 1 };
+  return { audioLanguage: "", subtitleLanguage: "", rememberSpeed: false, lastSpeed: 1, backgroundAudio: true };
 }
 
 /** Everything that belongs to the source being played and is thrown away on the next one. */
@@ -192,14 +195,44 @@ function classifyError(detail: string): PlayerErrorCode {
   return "unknown";
 }
 
-function emitError(error: unknown, url: string | null): void {
+function emitError(error: unknown, url: string | null, transcoding: boolean = isTranscoding()): void {
+  // The library refuses a title above the profile's age limit with a bare marker.
+  if (!(error instanceof PlaybackError) && errorDetail(error) === BLOCKED) {
+    error = new PlaybackError("parentalBlockedTitle", BLOCKED);
+  } else if (error instanceof LocalizedError && Object.keys(error.vars).length === 0) {
+    error = new PlaybackError(error.key, error.message);
+  }
+  if (error instanceof PlaybackError) {
+    emit("player://error", { message: error.message, detail: error.detail, code: "unknown", url, key: error.key, transcoding });
+    return;
+  }
   const detail = errorDetail(error);
   emit("player://error", {
     message: detail ? `${START_ERROR}: ${detail}` : START_ERROR,
     detail,
     code: classifyError(detail),
     url,
+    transcoding,
   });
+}
+
+/**
+ * Background audio and picture-in-picture need the player to stay active when the app
+ * leaves the foreground; the now-playing notification is what keeps Android's media
+ * service (and the lock-screen controls) alive meanwhile.
+ */
+function applyBackground(on: boolean): void {
+  try {
+    player.staysActiveInBackground = on;
+    player.showNowPlayingNotification = on;
+  } catch (error) {
+    console.warn("[player] could not change background playback", error);
+  }
+}
+
+/** Jellyfin stream URLs carry the access token (`api_key`): never hand them to another app. */
+function shareableUrl(current: EngineContext | null, url: string | null): string | null {
+  return current?.source.kind === "jellyfin" ? null : url;
 }
 
 let chain: Promise<unknown> = Promise.resolve();
@@ -231,6 +264,7 @@ async function loadPrefs(): Promise<PlaybackPrefs> {
       subtitleLanguage: playback.subtitleLanguage ?? "",
       rememberSpeed: Boolean(playback.rememberSpeed),
       lastSpeed: Number.isFinite(playback.lastSpeed) ? playback.lastSpeed : 1,
+      backgroundAudio: playback.backgroundAudio !== false,
     };
   } catch {
     return defaultPrefs();
@@ -521,6 +555,7 @@ async function load(args: LoadArgs): Promise<void> {
   }
   if (g !== gen) return; // superseded meanwhile
   armed = true;
+  applyBackground(args.prefs.backgroundAudio);
   try {
     player.volume = clamp(state.volume, 0, 100) / 100;
     player.muted = state.mute;
@@ -567,6 +602,7 @@ async function stopInner(emitClose: boolean): Promise<void> {
     console.warn("[player] could not release the source", error);
   }
   deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
+  applyBackground(false);
   state.buffering = false;
   if (current) {
     switch (current.source.kind) {
@@ -587,17 +623,34 @@ async function stopInner(emitClose: boolean): Promise<void> {
         break;
       }
       case "addon":
+        // Nothing was loaded (start failed): keep the stored entry and its duration.
+        if (duration <= 0) break;
         try {
           upsertProgress(current.source.entry, time, duration);
         } catch (error) {
           console.warn("[player] addon progress failed", error);
         }
         break;
+      case "offline": {
+        const { downloadId, entry } = current.source;
+        // Nothing was loaded (start failed): keep the stored positions.
+        if (duration <= 0) break;
+        try {
+          downloadRecordPosition(downloadId, time, duration);
+          if (entry) upsertProgress(entry, time, duration);
+        } catch (error) {
+          console.warn("[player] offline progress failed", error);
+        }
+        // Online again? The server hears about it right away.
+        void downloadsSyncPending();
+        break;
+      }
       case "live":
         break;
     }
   }
-  if (emitClose) emit("player://close");
+  // A second stop (screen exit + unmount) has nothing to close.
+  if (emitClose && current) emit("player://close");
 }
 
 /** Direct play failed: try once more through the transcoder, else surface the error. */
@@ -635,11 +688,11 @@ async function recoverFromError(g: number, detail: string): Promise<void> {
       reportStart(playback, ticksFromSeconds(time)).catch(() => undefined);
       return;
     } catch (error) {
-      emitError(error, current.url);
+      emitError(error, shareableUrl(current, current.url), true);
       return;
     }
   }
-  emitError(detail, current.url);
+  emitError(detail, shareableUrl(current, current.url));
 }
 
 function metadataForItem(title: string, item: Movie): VideoMetadata {
@@ -749,9 +802,11 @@ async function playerStart(args: {
   title: string;
   startSeconds?: number;
   mediaSourceId?: string | null;
+  /** Skip direct play (the "Try transcoding" way out of a failure). */
+  forceTranscode?: boolean;
 }): Promise<PlayerState> {
   return serialized(async () => {
-    let url: string | null = null;
+    const force = args.forceTranscode === true;
     try {
       if (ctx) await stopInner(false);
       const start = Math.max(0, args.startSeconds ?? 0);
@@ -764,8 +819,8 @@ async function playerStart(args: {
         startSeconds: start,
         audioLanguage: prefs.audioLanguage,
         subtitleLanguage: prefs.subtitleLanguage,
+        forceTranscode: force,
       });
-      url = resolved.url;
       const playback = playbackFromResolved(item.id, resolved);
       await load({
         url: resolved.url,
@@ -781,17 +836,71 @@ async function playerStart(args: {
           title: args.title,
           url: resolved.url,
         },
-        fallbackTried: false,
+        fallbackTried: force,
       });
       reportStart(playback, ticksFromSeconds(start)).catch((error) =>
         console.warn("[player] report start failed", error),
       );
       return snapshot();
     } catch (error) {
-      emitError(error, url);
+      // The Jellyfin URL carries the token: no "open in another app".
+      emitError(error, null, force);
       throw error;
     }
   });
+}
+
+/** Plays a finished download from the device (works without network). */
+async function playerStartFile(args: {
+  downloadId: string;
+  title: string;
+  startSeconds?: number;
+  /** Online titles: their progress is also kept in the local "continue watching". */
+  entry?: ResumeEntryBase | null;
+}): Promise<PlayerState> {
+  return serialized(async () => {
+    try {
+      const download = downloadGet(args.downloadId);
+      const uri = downloadFileUri(args.downloadId);
+      if (!download || !uri) throw new PlaybackError("playErrDownloadGone", "La descarga ya no está en el dispositivo");
+      // A parental limit set after downloading still applies offline.
+      if (!downloadPlayable(download)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
+      if (ctx) await stopInner(false);
+      const prefs = await loadPrefs();
+      const start = Math.max(0, args.startSeconds ?? 0);
+      const item = download.movie;
+      await load({
+        url: uri,
+        headers: {},
+        contentType: "progressive",
+        metadata: metadataForItem(args.title, item),
+        title: args.title,
+        startSeconds: start,
+        prefs,
+        speed: speedFromPrefs(prefs),
+        ctx: {
+          source: {
+            kind: "offline",
+            downloadId: download.id,
+            itemId: download.source === "jellyfin" ? download.id : null,
+            entry: args.entry ?? null,
+          },
+          title: args.title,
+          url: uri,
+        },
+        fallbackTried: true,
+      });
+      return snapshot();
+    } catch (error) {
+      emitError(error, null, false);
+      throw error;
+    }
+  });
+}
+
+/** Settings › Playback › background audio changed while something plays. */
+function setBackgroundPlayback(on: boolean): void {
+  if (ctx) applyBackground(on);
 }
 
 async function playerStartUrl(args: {
@@ -803,8 +912,10 @@ async function playerStartUrl(args: {
 }): Promise<PlayerState> {
   return serialized(async () => {
     try {
-      if (!/^https?:\/\//i.test(args.url)) throw new Error("Solo se pueden reproducir enlaces http o https");
-      if (!args.entry?.key) throw new Error("Falta el identificador del título");
+      if (!/^https?:\/\//i.test(args.url)) {
+        throw new PlaybackError("playErrHttpOnly", "Solo se pueden reproducir enlaces http o https");
+      }
+      if (!args.entry?.key) throw new PlaybackError("playErrMissingTitle", "Falta el identificador del título");
       if (ctx) await stopInner(false);
       const prefs = await loadPrefs();
       const start = Math.max(0, args.startSeconds ?? 0);
@@ -865,6 +976,41 @@ async function iptvPlay(channelId: string): Promise<PlayerState> {
   });
 }
 
+/** A past programme from the archive of a channel with catch-up. */
+async function iptvPlayCatchup(channelId: string, start: number, stop: number, title: string): Promise<PlayerState> {
+  return serialized(async () => {
+    let url: string | null = null;
+    try {
+      if (ctx) await stopInner(false);
+      const { channel, url: streamUrl, headers } = await resolveCatchupPlayback(channelId, start, stop);
+      url = streamUrl;
+      const base = await loadPrefs();
+      const prefs: PlaybackPrefs = { ...base, rememberSpeed: false, lastSpeed: 1 };
+      const label = `${channel.name} · ${title}`;
+      await load({
+        url: streamUrl,
+        headers: headers ?? {},
+        contentType: contentTypeFor(streamUrl),
+        metadata: {
+          title,
+          artist: channel.name,
+          artwork: channel.logo && /^https?:\/\//i.test(channel.logo) ? channel.logo : undefined,
+        },
+        title: label,
+        startSeconds: 0,
+        prefs,
+        speed: 1,
+        ctx: { source: { kind: "live", channelId }, title: label, url: streamUrl },
+        fallbackTried: true,
+      });
+      return snapshot();
+    } catch (error) {
+      emitError(error, url);
+      throw error;
+    }
+  });
+}
+
 /** `switching`: another item starts right away, so the player screen stays (no `player://close`). */
 function playerStop(switching = false): Promise<void> {
   return serialized(() => stopInner(!switching));
@@ -882,6 +1028,19 @@ async function playerTogglePause(): Promise<void> {
     }
   } catch (error) {
     console.warn("[player] toggle pause failed", error);
+  }
+  push();
+}
+
+/** Pause or play outright: a watch party guest follows the host, a toggle could invert it. */
+async function playerSetPause(paused: boolean): Promise<void> {
+  if (!ctx) return;
+  try {
+    if (paused) player.pause();
+    else player.play();
+    state.paused = paused;
+  } catch (error) {
+    console.warn("[player] set pause failed", error);
   }
   push();
 }
@@ -996,7 +1155,7 @@ async function switchTranscodeTrack(kind: TrackKind, id: number): Promise<void> 
     });
     reportStart(playback, ticksFromSeconds(time)).catch(() => undefined);
   } catch (error) {
-    emitError(error, current.url);
+    emitError(error, null);
   }
 }
 
@@ -1004,7 +1163,11 @@ async function switchTranscodeTrack(kind: TrackKind, id: number): Promise<void> 
 async function playerSetTrack(kind: string, id: number): Promise<void> {
   const k = normalizeKind(kind);
   if (!k || !ctx) return;
-  if (isTranscoding()) return serialized(() => switchTranscodeTrack(k, id));
+  if (isTranscoding()) {
+    // Asking for the track already playing would restart the transcode for nothing.
+    if (Math.max(0, id) === (k === "audio" ? state.aid : state.sid)) return;
+    return serialized(() => switchTranscodeTrack(k, id));
+  }
   try {
     if (k === "audio") {
       const track = id <= 0 ? null : (scratch.audioMap.get(id) ?? null);
@@ -1046,9 +1209,13 @@ export const engine = {
   player,
   playerStart,
   playerStartUrl,
+  playerStartFile,
+  setBackgroundPlayback,
   iptvPlay,
+  iptvPlayCatchup,
   playerStop,
   playerTogglePause,
+  playerSetPause,
   playerSeek,
   playerSetSpeed,
   playerSetAspect,
@@ -1065,9 +1232,8 @@ export const engine = {
 export type Engine = typeof engine;
 
 try {
-  registerSessionCleanup(() => {
-    void engine.playerStop(false);
-  });
+  // Returned so logout waits for the final report before the session goes away.
+  registerSessionCleanup(() => engine.playerStop(false));
 } catch (error) {
   console.warn("[player] could not register the session cleanup", error);
 }

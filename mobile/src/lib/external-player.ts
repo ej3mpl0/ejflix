@@ -1,4 +1,5 @@
 import { Linking, Platform } from "react-native";
+import * as IntentLauncher from "expo-intent-launcher";
 
 /**
  * iOS players that take a stream URL through a link, in order of preference. They
@@ -11,9 +12,10 @@ const IOS_PLAYERS: ((url: string) => string)[] = [
 ];
 
 /**
- * Hands a stream the built-in player cannot decode to another app. Android lets the
- * user pick one from the plain URL (VLC, mpv-android…); on iOS the first installed
- * player from `IOS_PLAYERS` is opened, else Safari gets the URL.
+ * Hands a stream the built-in player cannot decode to another app. Android sends a
+ * VIEW intent typed `video/*` so the user picks a player (VLC, mpv-android…) instead of
+ * the browser; on iOS the first installed player from `IOS_PLAYERS` is opened, else
+ * Safari gets the URL.
  */
 export async function openInExternalPlayer(url: string): Promise<void> {
   if (Platform.OS === "ios") {
@@ -23,6 +25,14 @@ export async function openInExternalPlayer(url: string): Promise<void> {
         await Linking.openURL(link);
         return;
       }
+    }
+  }
+  if (Platform.OS === "android") {
+    try {
+      await IntentLauncher.startActivityAsync("android.intent.action.VIEW", { data: url, type: "video/*" });
+      return;
+    } catch {
+      /* no video app installed: fall back to whatever opens the link */
     }
   }
   await Linking.openURL(url);

@@ -18,6 +18,8 @@ import {
   Magnet,
   RefreshCw,
   Search,
+  ShieldCheck,
+  Clapperboard,
 } from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
 import { IptvSection } from "../components/settings/IptvSection";
@@ -28,6 +30,7 @@ import { hasServer as sessionHasServer, type SavedServer, type Session, type Ski
 import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { Avatar } from "../components/Avatar";
 import { LanguageSelect } from "../components/LanguageSelect";
@@ -35,13 +38,15 @@ import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
-import { Select } from "../components/Select";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { fieldClass as field } from "../lib/ui";
 import { UpdatesSection } from "../components/settings/UpdatesSection";
+import { OpenSubtitlesSection, SubtitleStyleSection, WatchingSection } from "../components/settings/PlaybackExtras";
 import type { MessageKey } from "../lib/i18n";
+import { ParentalSection } from "../components/settings/ParentalSection";
+import { TraktSection } from "../components/settings/TraktSection";
 
 /** "language" is kept as an id (old deep links) but lives in the General section now. */
 type Section =
@@ -54,12 +59,14 @@ type Section =
   | "language"
   | "account"
   | "updates"
-  | "about";
+  | "about"
+  | "parental"
+  | "trakt";
 
 /** Titles and row labels of each section, for the settings search. */
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
-  appearance: ["language", "appLanguage", "theme", "amoled", "posterSize"],
-  playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining"],
+  appearance: ["language", "appLanguage", "theme", "themeAuto", "amoled", "posterSize", "autoplayTrailers"],
+  playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "subOutline", "subPosition", "subAssOverride", "playbackSpeed", "rememberSpeed", "showTimeRemaining", "whilePlayingTitle", "watchedThreshold", "nightModeDefault", "opensubtitlesTitle", "opensubtitlesApiKey"],
   addons: ["addons", "importAddons", "cinemetaRow"],
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled", "iptvWheelZap", "iptvIncludeVod"],
@@ -67,6 +74,8 @@ const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
   account: ["account", "accountEjflix", "accountCredentials", "accountSignOutAccount", "accountDelete", "jellyfinServer", "switchProfile", "signOut"],
   updates: ["updates", "updateAuto"],
   about: ["about", "version", "sourceCode"],
+  parental: ["parentalTitle", "parentalMaxRating", "parentalHideUnrated", "parentalChangePin"],
+  trakt: ["traktTitle", "traktImport", "traktSyncBack", "traktClientId"],
 };
 export type SettingsSectionId = Section;
 
@@ -102,7 +111,7 @@ function LocalAccount({
       onSessionChange(await api.linkServer(url, username.trim(), password));
       setPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -129,7 +138,7 @@ function LocalAccount({
     try {
       onSessionChange(await api.unlinkServer());
     } catch (err) {
-      onToast(err instanceof Error ? err.message : String(err));
+      onToast(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -258,6 +267,7 @@ export function Settings({
   server,
   version,
   initialSection,
+  sectionRequest = 0,
   onSessionChange,
   onSwitchProfile,
   onLogout,
@@ -269,6 +279,8 @@ export function Settings({
   version: string | null;
   /** Section to open first (defaults to Appearance). */
   initialSection?: SettingsSectionId;
+  /** Bumped by every deep link, so the same section can be asked for again after moving away. */
+  sectionRequest?: number;
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
@@ -306,7 +318,7 @@ export function Settings({
 
   useEffect(() => {
     if (initialSection) setSection(initialSection);
-  }, [initialSection]);
+  }, [initialSection, sectionRequest]);
 
   const skipOptions: { value: SkipMode; label: string }[] = [
     { value: "ask", label: t("skipAsk") },
@@ -328,6 +340,8 @@ export function Settings({
     { id: "iptv", label: t("iptv"), icon: Tv },
     { id: "discord", label: t("discord"), icon: MessageCircle },
     { id: "account", label: t("account"), icon: Users },
+    { id: "parental", label: t("parentalTitle"), icon: ShieldCheck },
+    { id: "trakt", label: t("traktTitle"), icon: Clapperboard },
     { id: "updates", label: t("updates"), icon: RefreshCw },
     { id: "about", label: t("about"), icon: Info },
   ];
@@ -421,7 +435,9 @@ export function Settings({
                 <SettingsRow label={t("theme")} stacked>
                   <ThemePicker
                     value={appearance.theme}
-                    onChange={(theme) => void update({ appearance: { theme } })}
+                    onChange={(theme) => void update({ appearance: { theme, autoAccent: false } })}
+                    auto={appearance.autoAccent}
+                    onAuto={() => void update({ appearance: { autoAccent: true } })}
                   />
                 </SettingsRow>
                 <SettingsRow label={t("amoled")} hint={t("amoledHint")}>
@@ -443,6 +459,15 @@ export function Settings({
                       { value: "large", label: t("sizeLarge") },
                     ]}
                     onChange={(posterSize) => void update({ appearance: { posterSize } })}
+                  />
+                </SettingsRow>
+              </SettingsSection>
+              <SettingsSection title={t("trailersTitle")}>
+                <SettingsRow label={t("autoplayTrailers")} hint={t("autoplayTrailersHint")}>
+                  <Toggle
+                    checked={appearance.autoplayTrailers}
+                    onChange={(autoplayTrailers) => void update({ appearance: { autoplayTrailers } })}
+                    label={t("autoplayTrailers")}
                   />
                 </SettingsRow>
               </SettingsSection>
@@ -503,61 +528,7 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
-              <SettingsSection title={t("subStyleTitle")} description={t("subStyleHint")}>
-                {/* Preview of the look over a frame-like backdrop. */}
-                <div className="my-3 grid h-28 place-items-end justify-center rounded-btn bg-[linear-gradient(135deg,#3a4a5a,#1b232b_60%,#4a3a2a)] pb-4">
-                  <span
-                    className="rounded px-2 text-center font-semibold"
-                    style={{
-                      color: playback.subColor,
-                      fontSize: `${Math.round(18 * playback.subScale)}px`,
-                      background: playback.subBackground === "box" ? "rgb(0 0 0 / 0.7)" : "transparent",
-                      textShadow:
-                        playback.subBackground === "box"
-                          ? "none"
-                          : playback.subBackground === "shadow"
-                            ? "0 0 2px #000, 2px 2px 3px #000"
-                            : "0 0 2px #000, 0 0 2px #000, 0 0 2px #000",
-                    }}
-                  >
-                    {t("subPreview")}
-                  </span>
-                </div>
-                <SettingsRow label={t("subSize")}>
-                  <Select
-                    label={t("subSize")}
-                    value={String(playback.subScale)}
-                    onChange={(value) => void update({ playback: { subScale: Number(value) } })}
-                    className="min-w-[130px]"
-                    options={[0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.75, 2].map((v) => ({ value: String(v), label: `${Math.round(v * 100)}%` }))}
-                  />
-                </SettingsRow>
-                <SettingsRow label={t("subColor")}>
-                  <SegmentedControl
-                    label={t("subColor")}
-                    value={playback.subColor}
-                    onChange={(subColor) => void update({ playback: { subColor } })}
-                    options={[
-                      { value: "#FFFFFF", label: t("colorWhite") },
-                      { value: "#FFE45C", label: t("colorYellow") },
-                      { value: "#7DF9FF", label: t("colorCyan") },
-                      { value: "#9CFF8A", label: t("colorGreen") },
-                    ]}
-                  />
-                </SettingsRow>
-                <SettingsRow label={t("subBackground")}>
-                  <SegmentedControl
-                    label={t("subBackground")}
-                    value={playback.subBackground}
-                    onChange={(subBackground) => void update({ playback: { subBackground } })}
-                    options={[
-                      { value: "outline", label: t("subBgOutline") },
-                      { value: "shadow", label: t("subBgShadow") },
-                      { value: "box", label: t("subBgBox") },
-                    ]}
-                  />
-                </SettingsRow>
-              </SettingsSection>
+              <SubtitleStyleSection />
               <SettingsSection title={t("seekStepTitle")}>
                 <SettingsRow label={t("seekStep")} hint={t("seekStepHint")}>
                   <SegmentedControl<number>
@@ -584,6 +555,8 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
+              <WatchingSection />
+              <OpenSubtitlesSection />
             </>
           ) : null}
 
@@ -642,6 +615,10 @@ export function Settings({
           ) : null}
 
           {section === "about" ? <AboutSection version={version} withUpdates={false} /> : null}
+
+          {section === "parental" ? <ParentalSection onToast={onToast} /> : null}
+
+          {section === "trakt" ? <TraktSection onToast={onToast} /> : null}
         </div>
       </div>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Welcome } from "./screens/Welcome";
 import { Login } from "./screens/Login";
 import { Profiles } from "./screens/Profiles";
@@ -18,8 +18,11 @@ import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { DownloadsProvider } from "./lib/downloads-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
+import { errorText } from "./lib/errors";
 import type { AccountStatus, Movie, SavedServer, Session, Toast } from "./lib/types";
 import { SetupStep } from "./screens/SetupStep";
+import { ReminderAlerts } from "./components/ReminderAlerts";
+import { channelToMovie, reminderChannel } from "./lib/iptv";
 
 /** Screens shown while there is no session. */
 type Gate = "welcome" | "login" | "profiles" | "create";
@@ -27,12 +30,20 @@ type Gate = "welcome" | "login" | "profiles" | "create";
 /** What stands between a fresh session and Home: the account offer, or its second factor. */
 type AccountGate = "checking" | "none" | "intro" | "mfa";
 
-/** First-run setup (torrents, addon import) of a profile that has not been through it. */
-function SetupGate() {
+/**
+ * First-run setup (torrents, addon import) of a profile that has not been through it.
+ * `children` learns whether it is showing, so the screen behind can step out of reach.
+ */
+function SetupGate({ enabled, children }: { enabled: boolean; children: (showing: boolean) => ReactNode }) {
   const { settings, ready } = useSettings();
   const [closed, setClosed] = useState(false);
-  if (!ready || closed || settings.onboarding.setupDone) return null;
-  return <SetupStep onDone={() => setClosed(true)} />;
+  const showing = enabled && ready && !closed && !settings.onboarding.setupDone;
+  return (
+    <>
+      {showing ? <SetupStep onDone={() => setClosed(true)} /> : null}
+      {children(showing)}
+    </>
+  );
 }
 
 export default function App() {
@@ -208,25 +219,28 @@ function AppInner() {
                   onToast={toast}
                 />
               ) : null}
-              {accountGate === "none" ? <SetupGate /> : null}
               {/* Home stays mounted while playing so the view and scroll survive the trip. */}
-              <Home
-                session={session}
-                server={server}
-                version={version}
-                hidden={playing != null || accountGate !== "none"}
-                refreshToken={homeRefresh}
-                playFailed={playFailed}
-                onPlay={setPlaying}
-                onToast={toast}
-                onSessionChange={(next) => {
-                  setSession(next);
-                  void api.savedServer().then(setServer).catch(() => undefined);
-                  setHomeRefresh((n) => n + 1);
-                }}
-                onSwitchProfile={() => void switchProfile()}
-                onLogout={() => void logoutServer()}
-              />
+              <SetupGate enabled={accountGate === "none"}>
+                {(setupShowing) => (
+                  <Home
+                    session={session}
+                    server={server}
+                    version={version}
+                    hidden={playing != null || accountGate !== "none" || setupShowing}
+                    refreshToken={homeRefresh}
+                    playFailed={playFailed}
+                    onPlay={setPlaying}
+                    onToast={toast}
+                    onSessionChange={(next) => {
+                      setSession(next);
+                      void api.savedServer().then(setServer).catch(() => undefined);
+                      setHomeRefresh((n) => n + 1);
+                    }}
+                    onSwitchProfile={() => void switchProfile()}
+                    onLogout={() => void logoutServer()}
+                  />
+                )}
+              </SetupGate>
               {playing ? (
                 <Player
                   movie={playing}
@@ -238,6 +252,11 @@ function AppInner() {
                   }}
                 />
               ) : null}
+              {/* Programme reminders; the player overlay shows its own while watching. */}
+              <ReminderAlerts
+                enabled={!playing && accountGate === "none"}
+                onWatch={(reminder) => setPlaying(channelToMovie(reminderChannel(reminder), ""))}
+              />
             </DownloadsProvider>
           </UserDataProvider>
         </SettingsProvider>
@@ -287,7 +306,7 @@ function AppInner() {
                     .localProfileEnter(profile.id, pin)
                     .then(setSession)
                     .catch((err) => {
-                      toast(err instanceof Error ? err.message : String(err));
+                      toast(errorText(t, err));
                       setGate("profiles");
                     });
                 }}

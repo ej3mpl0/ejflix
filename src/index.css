@@ -14,7 +14,7 @@
   --color-line: #252a2a;
   --color-text: #f5f7f8;
   --color-muted: #b8bec5;
-  --color-dim: #969ca3;
+  --color-dim: #9ea4ab;
 
   --color-accent: #e50914;
   --color-on-accent: #ffffff;
@@ -719,4 +719,71 @@ p {
 .setting-hit {
   border-radius: var(--radius-btn);
   animation: setting-hit 1.6s var(--ease-std);
+}
+
+/* --- Keyboard / gamepad focus --- */
+
+/* A poster clips its own button, so the ring (and the lift) go on the card. */
+.poster-card:has(> button:focus-visible),
+:root[data-input="pad"] .poster-card:has(> button:focus) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  transform: scale(1.04) translateY(-6px);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.6);
+}
+/* A gamepad focuses by script, which browsers do not always mark as focus-visible. */
+:root[data-input="pad"] :focus:not(.field-own-focus) {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+/* Whatever arrow keys land on stays clear of the fixed header when it scrolls into view. */
+[data-poster],
+button,
+a[href],
+[tabindex] {
+  scroll-margin-block: 84px 24px;
+}
+
+/* Reduced motion, app-wide: whatever a component forgot is cut short too (spinners and
+   busy pulses keep going, they carry meaning). */
+@media (prefers-reduced-motion: reduce) {
+  *:not(.animate-spin):not(.animate-pulse),
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .poster-card:has(> button:focus-visible),
+  :root[data-input="pad"] .poster-card:has(> button:focus) {
+    transform: none;
+  }
+}
+
+/* Watch party: a reaction rises up the right edge and fades (reduced motion: it just shows). */
+@keyframes party-float {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-24px) scale(1.1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-260px) scale(1);
+  }
+}
+.party-float {
+  animation: party-float 2.6s var(--ease-out-soft) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .party-float {
+    animation: none;
+  }
 }

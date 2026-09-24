@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { sortedVideos, videoToMovie } from "../lib/addons";
 import { cn, episodeCode, formatRuntime } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { Chip } from "./Chip";
 import { Shimmer } from "./Shimmer";
 import { SeasonChips } from "./SeasonChips";
@@ -55,7 +56,7 @@ export function EpisodesPanel({
         setOnlineMeta(meta);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     api
       .addonProgressList()
@@ -101,7 +102,7 @@ export function EpisodesPanel({
         setSeasonId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -118,7 +119,7 @@ export function EpisodesPanel({
         if (alive) setEpisodes(list);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -136,6 +137,7 @@ export function EpisodesPanel({
 
   return (
     <aside
+      data-own-wheel
       className="panel-in absolute inset-y-0 right-0 z-[35] flex w-[420px] flex-col border-l border-white/10 bg-surface/95 text-text shadow-[-24px_0_48px_rgb(0_0_0_/_0.45)] backdrop-blur-md"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}
@@ -168,7 +170,10 @@ export function EpisodesPanel({
                 key={source.id}
                 selected={source.id === movie.mediaSourceId}
                 onClick={() => {
-                  if (source.id !== movie.mediaSourceId) onPlay({ ...movie, mediaSourceId: source.id });
+                  // The other version picks up where this one is, not at the original resume point.
+                  if (source.id !== movie.mediaSourceId) {
+                    onPlay({ ...movie, mediaSourceId: source.id, playbackPositionTicks: Math.round(time * 10_000_000) });
+                  }
                 }}
               >
                 {source.name}

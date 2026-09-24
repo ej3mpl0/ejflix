@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCheck, Clapperboard, Globe, Play, RotateCcw } from "lucide-react";
+import { CheckCheck, Clapperboard, Globe, ListPlus, ListVideo, Play, RotateCcw, Shuffle } from "lucide-react";
 import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
-import { cn, episodeCode } from "../lib/format";
+import { cn, episodeCode, isNewlyAired } from "../lib/format";
 import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
+import { isParentalBlocked } from "../lib/parental";
+import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
 import { Pill } from "../components/Pill";
 import { MetaChips } from "../components/MetaChips";
@@ -21,6 +24,12 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { SeasonChips } from "../components/SeasonChips";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { useUserData } from "../lib/userdata-context";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
+import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useArtworkAccent } from "../lib/auto-accent";
+import { useCustomLists } from "../lib/lists-context";
+import { startShuffle } from "../lib/play-queue";
+import { WatchTogetherButton } from "../components/PartyButton";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -29,12 +38,15 @@ import { useUserData } from "../lib/userdata-context";
 export function ExternalDetailsPage({
   route,
   top,
+  refreshToken = 0,
   onBack,
   onOpen,
   onPlay,
 }: {
   route: DetailsRoute;
   top: boolean;
+  /** Bumped after playback: the remembered positions moved. */
+  refreshToken?: number;
   onBack: () => void;
   /** Opening another title from the "more like this" rail. */
   onOpen: (movie: Movie) => void;
@@ -49,14 +61,22 @@ export function ExternalDetailsPage({
   const [season, setSeason] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   const [reload, setReload] = useState(0);
   const [showTrailer, setShowTrailer] = useState(false);
   const [markingSeason, setMarkingSeason] = useState(false);
   const { setPlayed, flags } = useUserData();
+  const { openPicker } = useCustomLists();
+  const [shuffling, setShuffling] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const movie = meta ? metaFullToMovie(meta) : seed;
   const tint = useDominantColor(movie?.backdropUrl);
   const tintValue = settings.appearance.amoled ? null : tint;
+  const trailerGate = useTrailerGate();
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  useArtworkAccent(`details:${route.key}`, route.leaving ? null : movie?.backdropUrl);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -70,8 +90,17 @@ export function ExternalDetailsPage({
         if (alive) setMeta(full);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive) setError(errorText(t, err));
       });
+    return () => {
+      alive = false;
+    };
+  }, [ext?.type, ext?.metaId, reload]);
+
+  useEffect(() => {
+    if (!ext) return;
+    let alive = true;
     api
       .addonProgressList()
       .then((list) => {
@@ -81,7 +110,7 @@ export function ExternalDetailsPage({
     return () => {
       alive = false;
     };
-  }, [ext?.type, ext?.metaId, reload]);
+  }, [ext?.metaId, reload, refreshToken]);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasons = useMemo(() => {
@@ -116,6 +145,8 @@ export function ExternalDetailsPage({
     </div>
   ) : null;
 
+  if (blocked) return <RestrictedNotice leaving={route.leaving} top={top} onBack={onBack} />;
+
   // Without a seed there is nothing to draw until the addon answers; keep the title bar so
   // the page can always be left.
   if (!ext || !movie) {
@@ -148,7 +179,9 @@ export function ExternalDetailsPage({
     );
   }
 
-  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
+  // Addons send release dates as UTC midnight: read them in UTC, or west of Greenwich
+  // every episode would come out a day early.
+  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const releaseLabel = (iso: string) => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : releaseFormat.format(date);
@@ -180,6 +213,28 @@ export function ExternalDetailsPage({
   const trailer = playableTrailer(movie.remoteTrailers);
   const resumes = Boolean(startItem && startItem.playbackPositionTicks > 0);
   const episodes = meta && season != null ? videos.filter((v) => (v.season ?? 0) === season) : [];
+  /** Play all starts at the first regular episode; the usual chaining carries on from there. */
+  const firstVideo = videos.find((v) => (v.season ?? 0) !== 0) ?? videos[0] ?? null;
+  const shuffle = () => {
+    if (!meta || shuffling) return;
+    setShuffling(true);
+    startShuffle(movie, meta)
+      .then((episode) => {
+        if (episode) onPlay(episode);
+      })
+      .catch(() => undefined)
+      .finally(() => setShuffling(false));
+  };
+  /** Aired episodes of a season not ticked off yet (for the season chips). */
+  const unplayedIn = (s: number): number => {
+    if (!meta) return 0;
+    const now = Date.now();
+    return videos.filter((v) => {
+      if ((v.season ?? 0) !== s) return false;
+      const aired = v.released ? Date.parse(v.released) : NaN;
+      return (!Number.isFinite(aired) || aired <= now) && !flags(videoToMovie(meta, v)).played;
+    }).length;
+  };
 
   return (
     <div
@@ -206,6 +261,13 @@ export function ExternalDetailsPage({
                 ) : (
                   <div className="absolute inset-0 bg-surface" />
                 )}
+                <TrailerBackdrop
+                  url={trailer}
+                  active={top && !route.leaving && !showTrailer && trailerGate.pages}
+                  muted={trailerMuted}
+                  loop
+                  onPhase={setTrailerPhase}
+                />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
               <div
@@ -240,7 +302,11 @@ export function ExternalDetailsPage({
                   >
                     {playLabel}
                   </Pill>
+                  <WatchTogetherButton onPlay={() => startItem && onPlay(startItem)} disabled={!startItem} />
                   <FavoriteButton movie={movie} pill className="h-12" />
+                  <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
+                    {t("listsButton")}
+                  </Pill>
                   {resumes && startItem ? (
                     <Pill
                       variant="tonal"
@@ -253,6 +319,31 @@ export function ExternalDetailsPage({
                     </Pill>
                   ) : null}
                   <WatchedButton movie={movie} pill className="h-12" />
+                  {isSeries && meta && firstVideo ? (
+                    <>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<ListVideo size={17} />}
+                        title={t("playAllHint")}
+                        onClick={() => onPlay(withPosition(videoToMovie(meta, firstVideo)))}
+                      >
+                        {t("playAll")}
+                      </Pill>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<Shuffle size={16} />}
+                        disabled={shuffling}
+                        title={t("shuffleHint")}
+                        onClick={shuffle}
+                      >
+                        {t("shuffle")}
+                      </Pill>
+                    </>
+                  ) : null}
                   {trailer ? (
                     <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
                       {t("trailer")}
@@ -260,6 +351,13 @@ export function ExternalDetailsPage({
                   ) : null}
                 </div>
               </div>
+              {trailerPhase === "playing" ? (
+                <TrailerMuteButton
+                  muted={trailerMuted}
+                  onToggle={() => setTrailerMuted((v) => !v)}
+                  className="absolute right-page bottom-8"
+                />
+              ) : null}
             </section>
 
             <div
@@ -316,6 +414,7 @@ export function ExternalDetailsPage({
                         id: String(s),
                         name: s === 0 ? t("specials") : t("seasonNumber", { n: s }),
                         childCount: videos.filter((v) => (v.season ?? 0) === s).length,
+                        unplayedCount: unplayedIn(s),
                       }))}
                       value={season == null ? null : String(season)}
                       onChange={(id) => setSeason(Number(id))}
@@ -346,6 +445,10 @@ export function ExternalDetailsPage({
                               {flags(item).played ? (
                                 <span className="absolute top-1.5 right-1.5 grid h-6 w-6 place-items-center rounded-full bg-black/70 text-white">
                                   <CheckCheck size={13} />
+                                </span>
+                              ) : isNewlyAired(video.released) ? (
+                                <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+                                  {t("newBadge")}
                                 </span>
                               ) : null}
                               {pct > 0 ? (

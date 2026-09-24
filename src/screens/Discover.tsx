@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Compass, X } from "lucide-react";
+import { Compass, Download, SearchX, X } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
 import { Select } from "../components/Select";
-import { Shimmer } from "../components/Shimmer";
+import { PosterGridItemsSkeleton } from "../components/Skeletons";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { cn } from "../lib/format";
+import { PersonFilter } from "../components/PersonFilter";
+import { useParental } from "../lib/parental";
 
 type Source = "all" | "server" | "online";
 type Kind = "movie" | "series";
@@ -20,6 +23,8 @@ const SERVER_PAGE = 40;
 const MAX_CATALOGS = 6;
 const MAX_ONLINE_PER_PAGE = 60;
 const FIRST_YEAR = 1950;
+/** Minimum rating steps of the filter (community / IMDb rating, out of 10). */
+const RATINGS = [5, 6, 7, 8];
 
 function sameGenre(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
@@ -41,12 +46,22 @@ function titleKey(movie: Movie): string {
  * that supports them; server copies win over online duplicates of the same IMDb id.
  */
 /** Filters survive leaving the tab (the screen unmounts) for the rest of the session. */
-let lastFilters: { source: Source; kind: Kind; genre: string | null; year: number | null; sort: BrowseSort } = {
+let lastFilters: {
+  source: Source;
+  kind: Kind;
+  genre: string | null;
+  year: number | null;
+  sort: BrowseSort;
+  minRating: number | null;
+  person: { id: string; name: string } | null;
+} = {
   source: "all",
   kind: "movie",
   genre: null,
   year: null,
   sort: "popular",
+  minRating: null,
+  person: null,
 };
 
 export function Discover({
@@ -54,14 +69,21 @@ export function Discover({
   onOpen,
   onPlay,
   onError,
+  onImportAddons,
 }: {
   hasServer: boolean;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
   onError: (message: string) => void;
+  /** Settings › Addons with the import panel up (offered when there is nothing to browse). */
+  onImportAddons?: () => void;
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
+  // A restricted profile gets short pages (Rust filters them), which do not mean the end.
+  const parental = useParental();
+  const restricted = useRef(false);
+  restricted.current = parental?.active ?? false;
   const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [serverGenres, setServerGenres] = useState<string[]>([]);
@@ -69,12 +91,21 @@ export function Discover({
   const [kind, setKind] = useState<Kind>(lastFilters.kind);
   const [genre, setGenre] = useState<string | null>(lastFilters.genre);
   const [year, setYear] = useState<number | null>(lastFilters.year);
-  const [sort, setSort] = useState<BrowseSort>(lastFilters.sort);
-  lastFilters = { source, kind, genre, year, sort };
+  const [sort, setSort] = useState<BrowseSort>(
+    !hasServer && lastFilters.sort === "newest" ? "popular" : lastFilters.sort,
+  );
+  const [minRating, setMinRating] = useState<number | null>(lastFilters.minRating);
+  // A person only applies to the library: without the server it is not carried over.
+  const [person, setPerson] = useState<{ id: string; name: string } | null>(
+    hasServer && lastFilters.source !== "online" ? lastFilters.person : null,
+  );
+  lastFilters = { source, kind, genre, year, sort, minRating, person };
   const [items, setItems] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const request = useRef(0);
   const page = useRef(0);
   const onErrorRef = useRef(onError);
@@ -84,8 +115,13 @@ export function Discover({
   const catalogDone = useRef<Record<string, boolean>>({});
 
   const hasAddons = (addons?.length ?? 0) > 0;
-  const useServer = hasServer && source !== "online";
-  const useOnline = hasAddons && source !== "server";
+  // The source switch only shows with both sources; without it (another profile, the
+  // server unlinked) a remembered "server"/"online" would leave nothing to browse.
+  const activeSource: Source = hasServer && hasAddons ? source : "all";
+  const useServer = hasServer && activeSource !== "online";
+  // Addon catalogs cannot filter by a person: with one chosen, only the library answers.
+  const useOnline = hasAddons && activeSource !== "server" && !person;
+  const personFilter = hasServer && activeSource !== "online";
 
   useEffect(() => {
     let alive = true;
@@ -161,6 +197,14 @@ export function Discover({
     return list;
   }, [useServer, t]);
 
+  const ratingOptions = useMemo(
+    () => [
+      { value: "", label: t("anyRating") },
+      ...RATINGS.map((r) => ({ value: String(r), label: t("ratingAtLeast", { n: r }) })),
+    ],
+    [t],
+  );
+
   const genreOptions = useMemo(
     () => [{ value: "", label: t("anyGenre") }, ...genres.map((name) => ({ value: name, label: name }))],
     [genres, t],
@@ -168,6 +212,8 @@ export function Discover({
 
   const fetchPage = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of new filters loads would land on the old list.
+      if (!first && loadingRef.current) return;
       const id = ++request.current;
       if (first) {
         page.current = 0;
@@ -183,14 +229,27 @@ export function Discover({
       if (useServer && !serverDone.current) {
         jobs.push(
           api
-            .browseItems({ type: kind, genre, year, sort, start: current * SERVER_PAGE, limit: SERVER_PAGE })
+            .browseItems({
+              type: kind,
+              genre,
+              year,
+              sort,
+              minRating,
+              personId: person?.id ?? null,
+              start: current * SERVER_PAGE,
+              limit: SERVER_PAGE,
+            })
             .then((list) => {
-              if (list.length < SERVER_PAGE) serverDone.current = true;
+              // A superseded request must not touch the paging state of the current one.
+              if (id === request.current && (list.length === 0 || (list.length < SERVER_PAGE && !restricted.current))) {
+                serverDone.current = true;
+              }
               return list;
             })
             .catch((err) => {
+              if (id !== request.current) return [];
               serverDone.current = true;
-              onErrorRef.current(err instanceof Error ? err.message : String(err));
+              onErrorRef.current(errorText(t, err));
               return [];
             }),
         );
@@ -204,12 +263,16 @@ export function Discover({
         return api
           .addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, genre: matched, skip: catalogSkip.current[key] ?? 0 })
           .then((metas) => {
+            if (id !== request.current) return [];
             catalogSkip.current[key] = (catalogSkip.current[key] ?? 0) + metas.length;
             if (!metas.length) catalogDone.current[key] = true;
-            return metas.filter((m) => year == null || m.year === year).map(metaToMovie);
+            return metas
+              .filter((m) => year == null || m.year === year)
+              .filter((m) => minRating == null || (m.imdbRating ?? 0) >= minRating)
+              .map(metaToMovie);
           })
           .catch(() => {
-            catalogDone.current[key] = true;
+            if (id === request.current) catalogDone.current[key] = true;
             return [];
           });
       });
@@ -250,7 +313,7 @@ export function Discover({
       setLoading(false);
       setLoadingMore(false);
     },
-    [useServer, kind, genre, year, sort, catalogs],
+    [useServer, kind, genre, year, sort, minRating, person, catalogs],
   );
 
   useEffect(() => {
@@ -307,8 +370,9 @@ export function Discover({
             ]}
             onChange={(next) => {
               setSource(next);
-              // Without the library there is nothing to sort by date added.
+              // Without the library there is nothing to sort by date added, nor people to pick.
               if (next === "online" && sort === "newest") setSort("popular");
+              if (next === "online") setPerson(null);
             }}
           />
         ) : null}
@@ -325,13 +389,22 @@ export function Discover({
           onChange={(v) => setGenre(v || null)}
           label={t("filterGenre")}
         />
-        {genre != null || year != null || sort !== "popular" ? (
+        <Select
+          value={minRating == null ? "" : String(minRating)}
+          options={ratingOptions}
+          onChange={(v) => setMinRating(v ? Number(v) : null)}
+          label={t("filterRating")}
+        />
+        {personFilter ? <PersonFilter value={person} onChange={setPerson} /> : null}
+        {genre != null || year != null || sort !== "popular" || minRating != null || person != null ? (
           <button
             type="button"
             onClick={() => {
               setGenre(null);
               setYear(null);
               setSort("popular");
+              setMinRating(null);
+              setPerson(null);
             }}
             className="btn-press inline-flex h-10 items-center gap-1.5 rounded-pill px-3 text-[13px] font-medium text-muted hover:bg-white/8 hover:text-text"
           >
@@ -340,13 +413,12 @@ export function Discover({
           </button>
         ) : null}
       </div>
+      {person && hasAddons && activeSource === "all" ? <p className="-mt-3 mb-5 text-[12px] text-dim">{t("personServerOnly")}</p> : null}
 
       {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
       {loading && !visible.length ? (
         <div className={grid}>
-          {Array.from({ length: 18 }).map((_, i) => (
-            <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
-          ))}
+          <PosterGridItemsSkeleton count={18} />
         </div>
       ) : visible.length ? (
         <>
@@ -361,13 +433,32 @@ export function Discover({
                 delay={Math.min(i, 24) * 20}
               />
             ))}
+            {loadingMore ? <PosterGridItemsSkeleton count={6} /> : null}
           </div>
           {more ? (
-            <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
+            <LoadMoreButton loading={loading || loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (
-        <EmptyState title={t("noDiscoverResults")} hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined} />
+        <EmptyState
+          icon={<SearchX size={26} />}
+          title={t("noDiscoverResults")}
+          hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined}
+          action={
+            !hasServer && !hasAddons && onImportAddons
+              ? { label: t("importAddons"), icon: <Download size={16} />, onClick: onImportAddons }
+              : genre != null || year != null
+                ? {
+                    label: t("clearFilters"),
+                    icon: <X size={16} />,
+                    onClick: () => {
+                      setGenre(null);
+                      setYear(null);
+                    },
+                  }
+                : undefined
+          }
+        />
       )}
     </div>
   );

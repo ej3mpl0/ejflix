@@ -85,6 +85,8 @@ pub struct AddonMeta {
     pub year: Option<i32>,
     /// "tt…" when the id (or the `imdb_id` field) is an IMDb id.
     pub imdb: Option<String>,
+    /// Age rating, for the few addons that publish one (parental controls).
+    pub certification: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -411,7 +413,7 @@ impl AddonClient {
         if cacheable {
             if let Some((at, metas)) = self.catalogs.lock().unwrap().get(&path) {
                 if at.elapsed() < CATALOG_TTL {
-                    return Ok(metas.clone());
+                    return Ok(allowed_only(metas.clone()));
                 }
             }
         }
@@ -430,7 +432,7 @@ impl AddonClient {
             }
             cache.insert(path, (Instant::now(), metas.clone()));
         }
-        Ok(metas)
+        Ok(allowed_only(metas))
     }
 
     /// Full metadata: the first addon that serves `meta` for this type/id, else Cinemeta.
@@ -451,6 +453,9 @@ impl AddonClient {
             let path = format!("{}/meta/{}/{}.json", base_of(&addon.url), enc(kind), enc(id));
             if let Ok(value) = self.get_json(&path).await {
                 if let Some(meta) = value.get("meta").and_then(parse_meta_full) {
+                    if !crate::parental::allows(meta.meta.certification.as_deref()) {
+                        return Err(crate::parental::BLOCKED.into());
+                    }
                     return Ok(meta);
                 }
             }
@@ -472,9 +477,12 @@ impl AddonClient {
         if let Some(cached) = self.imdb_ids.lock().unwrap().get(&key) {
             return cached.clone().map(|imdb| format!("{imdb}{suffix}"));
         }
-        let imdb = self
-            .meta(addons, kind, base)
-            .await
+        let meta = self.meta(addons, kind, base).await;
+        // Hidden from this profile says nothing about the title: not worth caching.
+        if matches!(&meta, Err(err) if err == crate::parental::BLOCKED) {
+            return None;
+        }
+        let imdb = meta
             .ok()
             .and_then(|full| full.meta.imdb)
             .filter(|imdb| imdb.starts_with("tt"));
@@ -834,7 +842,19 @@ fn parse_meta(v: &Value) -> Option<AddonMeta> {
         runtime: text(v, "runtime"),
         year,
         imdb,
+        certification: crate::parental::meta_rating(v),
     })
+}
+
+/// Catalog entries the open profile may see (the cache keeps the full page).
+fn allowed_only(metas: Vec<AddonMeta>) -> Vec<AddonMeta> {
+    if crate::parental::current().is_none() {
+        return metas;
+    }
+    metas
+        .into_iter()
+        .filter(|m| crate::parental::allows(m.certification.as_deref()))
+        .collect()
 }
 
 fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {
@@ -1004,7 +1024,7 @@ pub fn set_library_flags(
     watched: Option<bool>,
 ) -> Result<Vec<LibraryEntry>, String> {
     if entry.key.is_empty() {
-        return Err("La entrada no tiene identificador".into());
+        return Err(crate::errors::code("listItemNoKey"));
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let mut list = load_library(app, user_id);
@@ -1024,7 +1044,7 @@ pub fn set_library_flags(
         library_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(list)
 }
 
@@ -1052,7 +1072,7 @@ pub fn upsert_progress(app: &tauri::AppHandle, user_id: &str, entry: ResumeEntry
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Result<(), String> {
@@ -1063,7 +1083,7 @@ pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Resu
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Replaces the whole list with what the account holds (newest first).
@@ -1078,7 +1098,7 @@ pub fn replace_library(app: &tauri::AppHandle, user_id: &str, mut list: Vec<Libr
         library_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Replaces every remembered position with the merged set from the account.
@@ -1093,7 +1113,7 @@ pub fn replace_progress(app: &tauri::AppHandle, user_id: &str, mut list: Vec<Res
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn now_ms() -> u64 {

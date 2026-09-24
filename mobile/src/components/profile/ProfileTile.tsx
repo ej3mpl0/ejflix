@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
+import { haptic } from "../../lib/haptics";
 import Animated, { FadeInDown, useReducedMotion } from "react-native-reanimated";
 import { Lock, Pencil, type LucideIcon } from "lucide-react-native";
 import { hslToHex } from "../../theme/color";
@@ -59,7 +59,7 @@ export function ProfileTile({ name, avatar, imageUrl, hue, icon: Icon, size, loc
         onLongPress={
           onLongPress
             ? () => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+                haptic("medium");
                 onLongPress();
               }
             : undefined

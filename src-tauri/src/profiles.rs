@@ -48,6 +48,8 @@ pub struct ProfilePatch {
     /// New PIN (4 digits). Ignored when `clear_pin` is set.
     pub pin: Option<String>,
     pub clear_pin: bool,
+    /// The PIN the profile has now, to change or remove it while it is not open.
+    pub current_pin: Option<String>,
 }
 
 impl LocalProfile {
@@ -104,7 +106,7 @@ fn save_list(app: &tauri::AppHandle, list: &[LocalProfile]) -> Result<(), String
         PROFILES_KEY,
         serde_json::to_value(list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn get(app: &tauri::AppHandle, id: &str) -> Result<Option<LocalProfile>, String> {
@@ -170,7 +172,7 @@ pub fn delete(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     if active_id(app).as_deref() == Some(id) {
         store.delete(ACTIVE_KEY);
     }
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Profile restored on the next launch.
@@ -190,7 +192,7 @@ pub fn set_active(app: &tauri::AppHandle, id: Option<&str>) -> Result<(), String
             store.delete(ACTIVE_KEY);
         }
     }
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn clean_name(name: &str) -> Result<String, String> {

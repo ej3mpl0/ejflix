@@ -33,6 +33,8 @@ export type ProfilePatch = {
   avatar?: string;
   pin?: string;
   clearPin?: boolean;
+  /** The PIN the profile has now (changing it from the profile picker). */
+  currentPin?: string;
 };
 
 export type BrowseSort = "popular" | "newest" | "year" | "name";
@@ -45,6 +47,10 @@ export type BrowseArgs = {
   sort?: BrowseSort;
   start?: number;
   limit?: number;
+  /** Minimum community rating (0-10). */
+  minRating?: number | null;
+  /** Only titles this person takes part in (Jellyfin person id). */
+  personId?: string | null;
 };
 
 export type PublicInfo = {
@@ -166,7 +172,13 @@ export type LiveRef = {
   logo: string | null;
   /** "live" | "movie" (VOD entry of the playlist). */
   kind: string;
+  /** A past programme played from the archive (catch-up) instead of the live stream. */
+  catchup?: { start: number; stop: number; title: string } | null;
+  /** Multi-view: the channels of the mosaic in cell order (this channel is the first). */
+  multiview?: MultiviewCell[] | null;
 };
+
+export type MultiviewCell = { channelId: string; name: string; logo: string | null };
 
 export type Movie = {
   id: string;
@@ -224,6 +236,12 @@ export type Movie = {
   dateCreated: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
+  /** ISO-8601 air / release date (Jellyfin `PremiereDate`). */
+  premiereDate?: string | null;
+  /** Play all / shuffle: what comes after this item instead of the next episode. */
+  queue?: PlayQueue | null;
+  /** Watch party: opened to follow the host's title with this key (the player syncs it). */
+  partyKey?: string | null;
 };
 
 export type GenreRow = {
@@ -268,6 +286,37 @@ export type PlayerState = {
   speed: number;
   /** "auto" | "16:9" | "4:3" | "2.35:1" | "fill" */
   aspect: string;
+  /** Subtitle / audio delay in seconds (remembered per title). */
+  subDelay: number;
+  audioDelay: number;
+  /** Night mode (dynamic range compression) is on. */
+  night: boolean;
+  /** The window is the small always-on-top mini player. */
+  mini: boolean;
+};
+
+/** One OpenSubtitles.com search result. */
+export type OnlineSubtitle = {
+  fileId: number;
+  release: string;
+  /** OpenSubtitles language code ("es", "en", "pt-BR"...). */
+  language: string;
+  downloads: number;
+  hearingImpaired: boolean;
+  machineTranslated: boolean;
+  trusted: boolean;
+  fps: number | null;
+};
+
+/** What the online subtitle search looks for. */
+export type SubtitleQuery = {
+  imdb?: string | null;
+  parentImdb?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  title?: string | null;
+  /** ISO 639-2 or 639-1 codes; empty = every language. */
+  languages: string[];
 };
 
 export type Toast = {
@@ -319,6 +368,8 @@ export type AddonMeta = {
   runtime: string | null;
   year: number | null;
   imdb: string | null;
+  /** Age rating, when the addon publishes one. */
+  certification?: string | null;
 };
 
 export type AddonVideo = {
@@ -424,7 +475,15 @@ export type Countdown = 0 | 5 | 10 | 15;
 
 /** Per-profile settings, mirrored from `src-tauri/src/settings.rs`. */
 export type Settings = {
-  appearance: { theme: ThemeId; amoled: boolean; posterSize: PosterSize };
+  appearance: {
+    theme: ThemeId;
+    amoled: boolean;
+    posterSize: PosterSize;
+    /** Muted trailers behind the Home hero and the details backdrop. */
+    autoplayTrailers: boolean;
+    /** The accent follows the artwork on screen (the theme is the fallback). */
+    autoAccent: boolean;
+  };
   playback: {
     skipIntro: SkipMode;
     skipRecap: SkipMode;
@@ -444,6 +503,20 @@ export type Settings = {
     subBackground: SubBackground;
     /** Seconds a seek jumps: 5, 10, 15 or 30. */
     seekStep: number;
+    /** Percentage past which stopping marks the title watched (80, 85, 90, 95); the credits count too. */
+    watchedThreshold: number;
+    /** Night mode on when playback starts. */
+    nightMode: boolean;
+    /** Vertical subtitle position (mpv sub-pos): 100 = bottom, 50 to 100. */
+    subPos: number;
+    /** Subtitle outline thickness, 0 to 6. */
+    subOutline: number;
+    /** Apply the look to styled (ASS/SSA) subtitles too. */
+    subAssOverride: boolean;
+    /** OpenSubtitles.com API key ("" = online search off). */
+    opensubtitlesApiKey: string;
+    /** Optional OpenSubtitles.com username; the password is stored apart. */
+    opensubtitlesUser: string;
   };
   library: { pinned: string[] };
   /** `disabled` holds the URLs of addons kept in the list but switched off. */
@@ -628,6 +701,8 @@ export type Channel = {
   favorite: boolean;
   /** A programme guide is attached to this channel. */
   epg: boolean;
+  /** Days of past programmes that can be played again (0 or absent = none). */
+  catchupDays?: number;
 };
 
 export type Programme = {
@@ -682,7 +757,7 @@ export type MfaEnrollment = {
 export type SyncReport = { pushed: string[]; pulled: string[]; skipped: string | null };
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: "crimson", amoled: false, posterSize: "medium" },
+  appearance: { theme: "crimson", amoled: false, posterSize: "medium", autoplayTrailers: true, autoAccent: false },
   playback: {
     skipIntro: "ask",
     skipRecap: "ask",
@@ -697,6 +772,13 @@ export const DEFAULT_SETTINGS: Settings = {
     subColor: "#FFFFFF",
     subBackground: "outline",
     seekStep: 10,
+    watchedThreshold: 90,
+    nightMode: false,
+    subPos: 100,
+    subOutline: 3,
+    subAssOverride: false,
+    opensubtitlesApiKey: "",
+    opensubtitlesUser: "",
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true, disabled: [] },
@@ -714,4 +796,110 @@ export const DEFAULT_SETTINGS: Settings = {
   torrents: { enabled: true, share: true, cacheGb: 5, uploadKbps: 512, downloadKbps: 0 },
   // Until the real settings arrive nothing asks for the setup step.
   onboarding: { setupDone: true },
+};
+
+/** "Remind me" on a future programme (per profile, kept by Rust). */
+export type Reminder = {
+  channelId: string;
+  sourceId: string;
+  channelName: string;
+  logo: string | null;
+  group: string;
+  number: number | null;
+  title: string;
+  /** Unix seconds. */
+  start: number;
+  stop: number;
+  notified?: boolean;
+};
+
+// --- discovery ---
+
+/** One title in a custom list (Jellyfin item or online title). */
+export type ListItem = {
+  /** "jf:<item id>" for a Jellyfin item, the Stremio video id for an online title. */
+  key: string;
+  source: "jellyfin" | "online";
+  /** Jellyfin: "Movie" | "Series" | "Episode"; online: "movie" | "series". */
+  type: string;
+  itemId: string | null;
+  metaId: string | null;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  year: number | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  addedMs: number;
+};
+
+export type CustomList = {
+  id: string;
+  name: string;
+  /** Newest first. */
+  items: ListItem[];
+  createdMs: number;
+  updatedMs: number;
+};
+
+/** Jellyfin episodes around today and the series the user follows. */
+export type CalendarData = {
+  episodes: Movie[];
+  followed: string[];
+};
+
+/** A Jellyfin recommendation row and the title (or person) it grew from. */
+export type RecommendationRow = {
+  kind: string;
+  baseline: string;
+  items: Movie[];
+};
+
+/**
+ * What plays after the current item when it was started from "Play all" / "Shuffle".
+ * `list`: the rest of a list, in order. `shuffle`: another random episode of the series.
+ */
+export type PlayQueue =
+  | { mode: "list"; items: Movie[] }
+  | { mode: "shuffle"; seriesId: string | null; metaId: string | null; seen: string[] };
+
+// --- profiles & integrations ---
+
+/** Age limits a profile can have; 18 is "no limit". */
+export type ParentalLevel = 0 | 7 | 12 | 16 | 18;
+
+/** Parental restriction of the open profile. */
+export type ParentalStatus = {
+  maxAge: ParentalLevel;
+  hideUnrated: boolean;
+  /** The parental PIN exists (changing a restriction asks for it). */
+  pinSet: boolean;
+  active: boolean;
+};
+
+export type TraktStatus = {
+  clientId: string;
+  hasSecret: boolean;
+  connected: boolean;
+  username: string;
+  syncBack: boolean;
+  lastImportMs: number;
+};
+
+export type TraktDeviceCode = {
+  userCode: string;
+  verificationUrl: string;
+  expiresIn: number;
+  interval: number;
+};
+
+export type TraktPoll = "pending" | "slow_down" | "connected" | "expired" | "denied" | "invalid";
+
+export type TraktImportReport = {
+  watchlist: number;
+  watched: number;
+  episodes: number;
+  unmatched: number;
+  skipped: number;
 };

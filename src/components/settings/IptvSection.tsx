@@ -16,11 +16,14 @@ import { api } from "../../lib/api";
 import { cn } from "../../lib/format";
 import { formatAgo } from "../../lib/iptv";
 import { useI18n } from "../../lib/locale-context";
+import { errorText } from "../../lib/errors";
 import { useSettings } from "../../lib/settings-context";
 import { SegmentedControl } from "./SegmentedControl";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
 import { fieldClass as field } from "../../lib/ui";
+import { ListRowsSkeleton } from "../Skeletons";
+import { useSettingsIntent } from "../../lib/settings-intent";
 
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
@@ -81,10 +84,6 @@ function formOf(source: IptvSource): Form {
   };
 }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 /** Settings › IPTV: playlists (M3U by URL or file), Xtream Codes accounts, guide and preferences. */
 export function IptvSection({ onToast }: { onToast: (message: string, action?: { label: string; run: () => void }) => void }) {
   const { t, locale } = useI18n();
@@ -98,6 +97,13 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
   const [account, setAccount] = useState<XtreamAccount | null>(null);
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // "Add list" from the TV tab or the palette: open the form straight away.
+  useSettingsIntent("iptv-add", () => {
+    setForm((current) => current ?? { ...EMPTY });
+    setError("");
+    setAccount(null);
+  });
 
   const load = async () => {
     try {
@@ -156,7 +162,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       onToast(t("iptvSaved", { name: saved.name }));
       void load();
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -170,7 +176,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
     try {
       setAccount(await api.iptvXtreamCheck({ url: form.url, username: form.username, password: form.password, userAgent: form.userAgent }));
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(t, err));
     } finally {
       setChecking(false);
     }
@@ -183,12 +189,12 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       if (form?.id === source.id) setForm(null);
       void load();
     } catch (err) {
-      onToast(errorText(err));
+      onToast(errorText(t, err));
     }
   };
 
   const refresh = (source: IptvSource) => {
-    api.iptvRefresh(source.id).catch((err) => onToast(errorText(err)));
+    api.iptvRefresh(source.id).catch((err) => onToast(errorText(t, err)));
   };
 
   const kindLabel = (kind: IptvSourceKind) =>
@@ -221,14 +227,14 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       return (
         <span className="flex items-center gap-1.5 text-danger">
           <AlertCircle size={12} />
-          {source.error}
+          {errorText(t, source.error)}
         </span>
       );
     }
     if (!source.channelCount) return t("iptvNotLoaded");
     const parts = [
-      t("iptvChannels", { n: source.channelCount }),
-      t("iptvGroups", { n: source.groupCount }),
+      source.channelCount === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: source.channelCount }),
+      source.groupCount === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: source.groupCount }),
       source.epgChannels ? t("iptvEpgChannels", { n: source.epgChannels }) : source.epgError ? t("iptvEpgError") : t("iptvEpgNone"),
       source.updatedMs ? t("iptvUpdated", { time: formatAgo(source.updatedMs, locale) }) : null,
     ];
@@ -241,7 +247,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
     <>
       <SettingsSection title={t("iptv")} description={t("iptvHint")}>
         {sources == null ? (
-          <p className="py-4 text-[13px] text-dim">{t("loading")}…</p>
+          <ListRowsSkeleton />
         ) : sources.length ? (
           sources.map((source) => (
             <div key={source.id} className={cn("flex items-center gap-4 py-3", !source.enabled && "opacity-60")}>

@@ -10,6 +10,7 @@ import {
   ListVideo,
   Lock,
   Pause,
+  PictureInPicture2,
   Play,
   Ratio,
   RotateCcw,
@@ -53,7 +54,13 @@ import { trackShortName } from "./TrackSheet";
 export type PlayerSheet = "speed" | "audio" | "sub" | "stats" | null;
 
 /** What the chrome shows while an IPTV channel plays (desktop `LiveInfo`). */
-export type LiveInfo = { number: number | null; now: Programme | null; next: Programme | null };
+export type LiveInfo = {
+  number: number | null;
+  now: Programme | null;
+  next: Programme | null;
+  /** A past programme from the archive: labelled as such, with its own progress. */
+  catchup?: boolean;
+};
 
 /** Height of the bottom block, so floating cards can sit above it. */
 export const CHROME_BOTTOM_HEIGHT = 168;
@@ -93,7 +100,7 @@ function ControlChip({
 }
 
 /** "EN DIRECTO" pill with a slowly pulsing dot, in place of the clock. */
-function LivePill() {
+function LivePill({ catchup = false }: { catchup?: boolean }) {
   const s = useStyles();
   const { t } = useI18n();
   const reduced = useReducedMotion();
@@ -109,7 +116,7 @@ function LivePill() {
   return (
     <View style={s.livePill}>
       <Animated.View style={[s.livePillDot, dotStyle]} />
-      <Text style={s.livePillText}>{t("liveBadge")}</Text>
+      <Text style={s.livePillText}>{catchup ? t("catchup") : t("liveBadge")}</Text>
     </View>
   );
 }
@@ -141,6 +148,7 @@ export function PlayerChrome({
   onLock,
   onPanel,
   externalSub = null,
+  onPip = null,
   onZap,
   onReveal,
   onHoldUi,
@@ -172,6 +180,8 @@ export function PlayerChrome({
   onPanel: () => void;
   /** Name of the subtitle file the app is drawing itself, if one is loaded. */
   externalSub?: string | null;
+  /** Enters picture-in-picture; null when the device cannot. */
+  onPip?: (() => void) | null;
   /** Previous (−1) / next (+1) channel of the group. */
   onZap: (dir: 1 | -1) => void;
   onReveal: () => void;
@@ -286,7 +296,7 @@ export function PlayerChrome({
             {live ? (
               <View style={s.liveBadge}>
                 <View style={s.liveDot} />
-                <Text style={s.liveBadgeText}>{tr("liveBadge")}</Text>
+                <Text style={s.liveBadgeText}>{live.catchup ? tr("catchup") : tr("liveBadge")}</Text>
               </View>
             ) : null}
             {live && live.number != null ? <Text style={s.number}>{String(live.number)}</Text> : null}
@@ -305,6 +315,9 @@ export function PlayerChrome({
           </View>
         </View>
         <View style={s.topRight}>
+          {onPip ? (
+            <IconButton icon={PictureInPicture2} label={tr("pip")} onPress={onPip} size={20} hit={44} color={t.white(0.85)} />
+          ) : null}
           <IconButton icon={Lock} label={tr("lockControls")} onPress={onLock} size={19} hit={44} color={t.white(0.85)} />
           {showPanel ? (
             <IconButton
@@ -326,7 +339,11 @@ export function PlayerChrome({
         style={[s.bottom, { paddingLeft: padLeft, paddingRight: padRight, paddingBottom: insets.bottom + 10 }]}
       >
         {live ? (
-          <LiveStrip now={live.now} next={live.next} />
+          <LiveStrip
+            now={live.now}
+            next={live.next}
+            progress={live.catchup && live.now ? state.time / Math.max(1, live.now.stop - live.now.start) : undefined}
+          />
         ) : (
           <Timeline
             movie={timelineMovie}
@@ -359,7 +376,7 @@ export function PlayerChrome({
               color={t.colors.text}
             />
             {live ? (
-              <LivePill />
+              <LivePill catchup={live.catchup} />
             ) : (
               <PressableScale
                 accessibilityRole="button"

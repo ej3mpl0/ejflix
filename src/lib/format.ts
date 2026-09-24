@@ -70,3 +70,8 @@ export function sessionAvatar(session: {
   if (session.mode === "local") return session.avatarUrl ?? null;
   return session.avatarUrl || `http://jfimg.localhost/Users/${session.userId}/Images/Primary?quality=90`;
 }
+
+/** True when an episode aired (`iso`) within the last `days` days, and not in the future. */
+export function isNewlyAired(iso: string | null | undefined, days = 7): boolean {
+  return isRecentlyAdded(iso, days);
+}

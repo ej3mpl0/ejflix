@@ -11,6 +11,7 @@ import { SettingsProvider, useSettings } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
 import { ToastProvider, useToast } from "./lib/toast-context";
 import { StreamPickerProvider } from "./lib/stream-picker-context";
+import { PartyProvider } from "./lib/party-context";
 import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import type { ThemePrefs } from "./theme/tokens";
@@ -19,6 +20,7 @@ import { navigationRef } from "./navigation/navigationRef";
 import { useNavigationTheme } from "./navigation/navTheme";
 import { UpdateAvailableModal } from "./components/update/UpdateAvailableModal";
 import { WhatsNewModal } from "./components/update/WhatsNewModal";
+import { ReminderAlerts } from "./components/live/ReminderAlerts";
 
 // Keep the native splash until the session restore resolved.
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -87,7 +89,10 @@ function Shell() {
       <NavigationContainer ref={navigationRef} theme={navTheme} onStateChange={onStateChange}>
         {/* One stream picker for the whole app: Home, the item menus and both details pages open it. */}
         <StreamPickerProvider>
-          <RootNavigator />
+          {/* Watch party (guest): the join sheet and the host's titles opened here. */}
+          <PartyProvider>
+            <RootNavigator />
+          </PartyProvider>
         </StreamPickerProvider>
       </NavigationContainer>
       <Overlays playing={playing} />
@@ -97,13 +102,15 @@ function Shell() {
 
 /** Update dialogs above everything: the "what's new" card first, never while watching. */
 function Overlays({ playing }: { playing: boolean }) {
-  const { boot, notesVersion, dismissNotes } = useSession();
+  const { boot, notesVersion, dismissNotes, session } = useSession();
   const { modalOpen } = useUpdate();
   if (boot) return null;
   return (
     <>
       {notesVersion ? <WhatsNewModal version={notesVersion} onClose={dismissNotes} /> : null}
       {modalOpen && !notesVersion && !playing ? <UpdateAvailableModal /> : null}
+      {/* Programme reminders of the profile, over every screen (the player too). */}
+      {session ? <ReminderAlerts key={session.userId} /> : null}
     </>
   );
 }

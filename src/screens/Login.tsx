@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, ChevronDown, LoaderCircle, Wifi } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
 import { LanguageSelect } from "../components/LanguageSelect";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import type { SavedServer } from "../lib/types";
 import { fieldLgClass } from "../lib/ui";
 import { cn } from "../lib/format";
@@ -24,16 +25,20 @@ export function Login({
   const [testing, setTesting] = useState(false);
   const [tested, setTested] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
+  const urlRef = useRef(url);
+  urlRef.current = url;
 
   const test = async () => {
     setError("");
     setTested(null);
     setTesting(true);
+    const tried = url;
     try {
-      const info = await api.testServer(url);
-      setTested(`${info.serverName} · Jellyfin ${info.version}`);
+      const info = await api.testServer(tried);
+      // The address was edited meanwhile: this answer is about another server.
+      if (urlRef.current === tried) setTested(`${info.serverName} · Jellyfin ${info.version}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (urlRef.current === tried) setError(errorText(t, err));
     } finally {
       setTesting(false);
     }
@@ -52,7 +57,7 @@ export function Login({
         },
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     } finally {
       setLoading(false);
     }

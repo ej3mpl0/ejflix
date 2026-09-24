@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "./api";
+import { errorText } from "./errors";
+import { useI18n } from "./locale-context";
 import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "./types";
 import { applyTheme } from "./theme";
 import { readLegacyPinned, clearLegacyPinned } from "./libraries";
@@ -60,18 +62,26 @@ export function SettingsProvider({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onErrorRef = useRef(onError);
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   onErrorRef.current = onError;
 
   const update = useCallback(async (patch: SettingsPatch) => {
     const previous = settingsRef.current;
     const optimistic = mergePatch(previous, patch);
+    // Kept in step at once, so a second update before the next render builds on this one.
+    settingsRef.current = optimistic;
     setSettings(optimistic);
     try {
       const saved = await api.settingsSet(patch);
       setSettings(saved);
     } catch (err) {
-      setSettings(previous);
-      onErrorRef.current?.(err instanceof Error ? err.message : String(err));
+      // Roll back to what Rust holds: a snapshot would also undo updates made meanwhile.
+      const current = await api.settingsGet().catch(() => previous);
+      settingsRef.current = current;
+      setSettings(current);
+      onErrorRef.current?.(errorText(tRef.current, err));
     }
   }, []);
 

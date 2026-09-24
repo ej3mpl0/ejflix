@@ -11,14 +11,21 @@ const kbps = (bits: unknown) => {
   return value == null ? "—" : value >= 1_000_000 ? `${(value / 1_000_000).toFixed(1)} Mb/s` : `${Math.round(value / 1000)} kb/s`;
 };
 
-/** "I" overlay in the player: codec, resolution, bitrates, dropped frames, cache and torrent. */
+/** "I" overlay in the player: source, codecs, resolution, bitrates, dropped frames, cache and torrent. */
 export function StatsPanel({
   torrent,
   delays,
+  source,
+  speed,
+  night,
   onClose,
 }: {
   torrent: TorrentStatus | null;
   delays: { sub: number; audio: number };
+  /** Where the stream comes from (direct play, online, torrent, live). */
+  source: string;
+  speed: number;
+  night: boolean;
   onClose: () => void;
 }) {
   const { t } = useI18n();
@@ -47,14 +54,41 @@ export function StatsPanel({
   const fps = num(props["estimated-vf-fps"]);
   const cache = num(props["demuxer-cache-duration"]);
   const drops = (num(props["frame-drop-count"]) ?? 0) + (num(props["decoder-frame-drop-count"]) ?? 0);
+  const channels = num(props["audio-params/channel-count"]);
+  const outChannels = num(props["audio-out-params/channel-count"]);
+  const rate = num(props["audio-params/samplerate"]);
+  const container = typeof props["file-format"] === "string" ? props["file-format"].split(",")[0] : null;
   const rows: Array<[string, string]> = [
-    [t("statsVideo"), [props["video-codec"], width && height ? `${width}×${height}` : null, fps ? `${fps.toFixed(2)} fps` : null].filter(Boolean).join(" · ") || "—"],
-    [t("statsAudio"), String(props["audio-codec-name"] ?? "—")],
+    [t("statsSource"), [source, container].filter(Boolean).join(" · ")],
+    [
+      t("statsVideo"),
+      [
+        props["video-codec"],
+        width && height ? `${width}×${height}` : null,
+        fps ? `${fps.toFixed(2)} fps` : null,
+        props["video-params/pixelformat"],
+      ]
+        .filter(Boolean)
+        .join(" · ") || "—",
+    ],
+    [
+      t("statsAudio"),
+      [
+        props["audio-codec-name"],
+        channels ? t("statsChannels", { n: channels }) : null,
+        rate ? `${(rate / 1000).toFixed(1)} kHz` : null,
+        outChannels && channels && outChannels !== channels ? `→ ${t("statsChannels", { n: outChannels })}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || "—",
+    ],
     [t("statsBitrate"), `${kbps(props["video-bitrate"])} / ${kbps(props["audio-bitrate"])}`],
     [t("statsDecoder"), props["hwdec-current"] && props["hwdec-current"] !== "no" ? `${t("statsHardware")} (${props["hwdec-current"]})` : t("statsSoftware")],
     [t("statsDropped"), String(drops)],
     [t("statsCache"), cache == null ? "—" : `${cache.toFixed(1)} s`],
     [t("statsDelays"), `${t("subtitles")} ${delays.sub.toFixed(1)} s · ${t("audio")} ${delays.audio.toFixed(1)} s`],
+    [t("playbackSpeed"), `${Number(speed.toFixed(2))}x`],
+    [t("nightMode"), night ? t("statsOn") : t("statsOff")],
   ];
   if (torrent?.known) {
     rows.push([

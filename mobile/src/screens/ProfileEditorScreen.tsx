@@ -16,7 +16,7 @@ import { Spinner } from "../components/ui/Spinner";
 import { AuthHeader } from "../components/auth/AuthHeader";
 import { ProfileForm } from "../components/profile/ProfileForm";
 
-type EditorParams = { profileId?: string; from?: "welcome" | "profiles" };
+type EditorParams = { profileId?: string; from?: "welcome" | "profiles"; unlockPin?: string };
 
 /**
  * Create / edit a local profile. Lives in both stacks: in Auth (`from` decides where
@@ -104,7 +104,13 @@ export function ProfileEditorScreen() {
                   <Spinner />
                 </View>
               ) : (
-                <ProfileForm initial={initial} onCancel={leave} onSaved={saved} onDeleted={!creating ? deleted : undefined} />
+                <ProfileForm
+                  initial={initial}
+                  unlockPin={params.unlockPin ?? null}
+                  onCancel={leave}
+                  onSaved={saved}
+                  onDeleted={!creating ? deleted : undefined}
+                />
               )}
             </CardSurface>
           </Animated.View>

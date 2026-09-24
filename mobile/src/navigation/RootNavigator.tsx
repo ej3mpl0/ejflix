@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import * as ScreenOrientation from "expo-screen-orientation";
+import { api } from "../lib/api";
 import { useSession } from "../lib/session-context";
 import { useSettings } from "../lib/settings-context";
 import { SetupScreen } from "../screens/SetupScreen";
@@ -29,6 +30,11 @@ function TabsRoute() {
 function MainNavigator() {
   const t = useTheme();
   const { isTablet } = useLayout();
+
+  // Queued downloads of this profile resume, and positions watched offline get reported.
+  useEffect(() => {
+    api.downloadsKick();
+  }, []);
 
   // Phones stay portrait (the player flips to landscape on its own screen).
   useEffect(() => {

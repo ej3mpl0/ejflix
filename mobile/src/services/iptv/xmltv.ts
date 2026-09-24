@@ -7,7 +7,8 @@ import type { Programme } from "../../lib/types";
 import { normalize } from "./m3u";
 
 /** Programmes kept around "now": six hours back, two days ahead (mobile window). */
-export const EPG_PAST = 6 * 3600;
+/** A day back: channels with catch-up offer yesterday's programmes in the guide. */
+export const EPG_PAST = 24 * 3600;
 export const EPG_FUTURE = 2 * 86_400;
 export const MAX_DESC = 240;
 

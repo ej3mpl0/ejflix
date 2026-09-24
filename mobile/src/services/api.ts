@@ -21,6 +21,7 @@ import type {
   IptvSourceInput,
   IptvStatus,
   Programme,
+  Reminder,
   XtreamAccount,
   HomeData,
   UpdateCheck,
@@ -39,6 +40,7 @@ import type {
   Session,
   Settings,
   SettingsPatch,
+  ParentalStatus,
 } from "../lib/types";
 import { emit, listen, type PlayerError } from "./events";
 import * as session from "./session";
@@ -50,6 +52,8 @@ import * as addons from "./addons";
 import * as iptv from "./iptv";
 import { engine } from "./player/engine";
 import * as updates from "./updates";
+import * as parental from "./parental";
+import * as downloads from "./downloads/downloads";
 
 const EXTERNAL_ALLOWLIST = ["https://github.com/", "https://discord.com/developers/", "https://introdb.app/"];
 
@@ -66,11 +70,14 @@ export const api = {
   logoutServer: (): Promise<void> => session.logoutServer(),
   // Local (online) profiles
   localProfilesList: (): Promise<LocalProfile[]> => profiles.localProfilesList(),
-  localProfileCreate: (name: string, avatar: string, pin?: string | null): Promise<LocalProfile> =>
-    profiles.localProfileCreate(name, avatar, pin ?? null),
+  /** `parentalPin` is asked for while a profile has a parental restriction. */
+  localProfileCreate: (name: string, avatar: string, pin?: string | null, parentalPin?: string | null): Promise<LocalProfile> =>
+    profiles.localProfileCreate(name, avatar, pin ?? null, parentalPin ?? null),
   localProfileUpdate: (id: string, patch: ProfilePatch): Promise<LocalProfile> =>
     profiles.localProfileUpdate(id, patch),
-  localProfileDelete: (id: string): Promise<void> => profiles.localProfileDelete(id),
+  /** `pin`: the profile's own PIN (unless it is open); `parentalPin` when it is restricted. */
+  localProfileDelete: (id: string, pin?: string | null, parentalPin?: string | null): Promise<void> =>
+    profiles.localProfileDelete(id, pin ?? null, parentalPin ?? null),
   /** Opens a local profile; `pin` is required when the profile has one. */
   localProfileEnter: (id: string, pin?: string | null): Promise<Session> =>
     profiles.localProfileEnter(id, pin ?? null),
@@ -140,6 +147,7 @@ export const api = {
     title: string;
     startSeconds?: number;
     mediaSourceId?: string | null;
+    forceTranscode?: boolean;
   }): Promise<PlayerState> => engine.playerStart(args),
   /** `switching`: another item starts right away (keeps the player screen). */
   playerStop: (switching = false): Promise<void> => engine.playerStop(switching),
@@ -184,6 +192,15 @@ export const api = {
   iptvFavorite: (id: string, on: boolean): Promise<string[]> => iptv.iptvFavorite(id, on),
   iptvPlay: (id: string): Promise<PlayerState> => engine.iptvPlay(id),
   onIptvChanged: (handler: () => void): Promise<() => void> => listen("iptv://changed", () => handler()),
+  iptvReminders: (): Promise<Reminder[]> => iptv.iptvReminders(),
+  iptvReminderSet: (reminder: Reminder): Promise<Reminder[]> => iptv.iptvReminderSet(reminder),
+  iptvReminderRemove: (channelId: string, start: number): Promise<Reminder[]> => iptv.iptvReminderRemove(channelId, start),
+  /** Reminders that go off now; each one is returned once. */
+  iptvDueReminders: (): Promise<Reminder[]> => iptv.iptvDueReminders(),
+  onIptvReminders: (handler: () => void): Promise<() => void> => listen("iptv://reminders", () => handler()),
+  /** Plays a past programme from the archive of a channel with catch-up. */
+  iptvPlayCatchup: (id: string, start: number, stop: number, title: string): Promise<PlayerState> =>
+    engine.iptvPlayCatchup(id, start, stop, title),
   updateInfo: (): Promise<{ current: string; showNotes: boolean }> => updates.updateInfo(),
   updateCheck: (force = false): Promise<UpdateCheck> => updates.updateCheck(force),
   updatePrefs: (): Promise<UpdatePrefs> => updates.updatePrefs(),
@@ -207,6 +224,35 @@ export const api = {
   settingsSet: (patch: SettingsPatch): Promise<Settings> => settings.settingsSet(patch),
   onSettingsChanged: (handler: (settings: Settings) => void): Promise<() => void> =>
     listen("settings://changed", handler),
+  // --- profiles & integrations ---
+  /** Checks a profile's PIN without opening it (rejects with "PIN incorrecto"). */
+  localProfileCheckPin: (id: string, pin: string): Promise<void> => profiles.localProfileCheckPin(id, pin),
+  parentalStatus: (): Promise<ParentalStatus> => parental.parentalStatus(),
+  /** `pin` is the parental PIN, or the new one when none exists yet. */
+  parentalSet: (pin: string, maxAge: number, hideUnrated: boolean, newPin?: string | null): Promise<ParentalStatus> =>
+    parental.parentalSet(pin, maxAge, hideUnrated, newPin ?? null),
+  onParentalChanged: (handler: (status: ParentalStatus) => void): Promise<() => void> =>
+    listen("parental://changed", handler),
+  // Offline downloads (mobile only)
+  /** Plays a finished download from the device. */
+  playerStartFile: (args: {
+    downloadId: string;
+    title: string;
+    startSeconds?: number;
+    entry?: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs"> | null;
+  }): Promise<PlayerState> => engine.playerStartFile(args),
+  downloadsList: () => downloads.downloadsList(),
+  downloadsKick: () => downloads.downloadsKick(),
+  downloadJellyfin: (movie: Movie) => downloads.downloadJellyfin(movie),
+  downloadAddon: (movie: Movie, stream: AddonStream) => downloads.downloadAddon(movie, stream),
+  downloadPause: (id: string) => downloads.downloadPause(id),
+  downloadResume: (id: string) => downloads.downloadResume(id),
+  downloadRemove: (id: string) => downloads.downloadRemove(id),
+  downloadsStorage: () => downloads.downloadsStorage(),
+  playableDownload: (movie: Movie) => downloads.playableDownload(movie),
+  /** The open profile's parental rule lets this download play. */
+  downloadPlayable: (entry: downloads.DownloadEntry) => downloads.downloadPlayable(entry),
+  onDownloadsChanged: (handler: () => void): Promise<() => void> => listen("downloads://changed", () => handler()),
 };
 
 export type Api = typeof api;

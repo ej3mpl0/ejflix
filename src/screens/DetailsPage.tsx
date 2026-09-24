@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Globe, Play, RotateCcw } from "lucide-react";
+import { Clapperboard, Globe, ListPlus, ListVideo, Play, RotateCcw, Shuffle } from "lucide-react";
 import type { Movie, Person } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
@@ -9,6 +9,9 @@ import { chapterImageUrl, hasChapterImages } from "../lib/trickplay";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
+import { isParentalBlocked } from "../lib/parental";
+import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
 import { Pill } from "../components/Pill";
@@ -25,6 +28,12 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { ScrollRow } from "../components/ScrollRow";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { PersonDialog } from "../components/PersonDialog";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
+import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useArtworkAccent } from "../lib/auto-accent";
+import { useCustomLists } from "../lib/lists-context";
+import { startShuffle } from "../lib/play-queue";
+import { WatchTogetherButton } from "../components/PartyButton";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -33,6 +42,7 @@ import { PersonDialog } from "../components/PersonDialog";
 export function DetailsPage({
   route,
   top,
+  refreshToken = 0,
   onBack,
   onPush,
   onPlay,
@@ -41,6 +51,8 @@ export function DetailsPage({
   route: DetailsRoute;
   /** Only the topmost page reacts to back navigation. */
   top: boolean;
+  /** Bumped after playback: the resume point and the next episode moved. */
+  refreshToken?: number;
   onBack: () => void;
   onPush: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
@@ -50,6 +62,10 @@ export function DetailsPage({
   const { t } = useI18n();
   const { settings } = useSettings();
   const { version: userDataVersion } = useUserData();
+  const { openPicker } = useCustomLists();
+  /** "Play all" / "Shuffle" waiting for the server. */
+  const [starting, setStarting] = useState<"all" | "shuffle" | null>(null);
+  const [startError, setStartError] = useState("");
   const [detail, setDetail] = useState<Movie | null>(route.seed);
   const [seasons, setSeasons] = useState<Movie[]>([]);
   const [seasonId, setSeasonId] = useState<string | null>(route.seasonId);
@@ -59,6 +75,8 @@ export function DetailsPage({
   const [showTrailer, setShowTrailer] = useState(false);
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   /** Seasons or episodes failed: shown in the episodes section with a retry, not as an endless skeleton. */
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
@@ -66,6 +84,10 @@ export function DetailsPage({
   const loadedSeason = useRef<string | null>(null);
   const isSeries = route.kind === "Series";
   const tint = useDominantColor(detail?.backdropUrl);
+  const trailerGate = useTrailerGate();
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  useArtworkAccent(`details:${route.key}`, route.leaving ? null : detail?.backdropUrl);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -77,12 +99,13 @@ export function DetailsPage({
         if (alive) setDetail(full);
       })
       .catch((err) => {
-        if (alive && !route.seed) setError(err instanceof Error ? err.message : String(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive && !route.seed) setError(errorText(t, err));
       });
     return () => {
       alive = false;
     };
-  }, [route.id, route.seed]);
+  }, [route.id, route.seed, refreshToken]);
 
   useEffect(() => {
     if (!isSeries) return;
@@ -96,12 +119,12 @@ export function DetailsPage({
         setSeasonId((current) => current ?? next?.seasonId ?? list[0]?.id ?? null);
       })
       .catch((err) => {
-        if (alive) setListError(err instanceof Error ? err.message : String(err));
+        if (alive) setListError(errorText(t, err));
       });
     return () => {
       alive = false;
     };
-  }, [route.id, isSeries, reload]);
+  }, [route.id, isSeries, reload, refreshToken]);
 
   useEffect(() => {
     if (!isSeries || !seasonId) return;
@@ -118,12 +141,12 @@ export function DetailsPage({
         setEpisodes(list);
       })
       .catch((err) => {
-        if (alive) setListError(err instanceof Error ? err.message : String(err));
+        if (alive) setListError(errorText(t, err));
       });
     return () => {
       alive = false;
     };
-  }, [isSeries, route.id, seasonId, userDataVersion, reload]);
+  }, [isSeries, route.id, seasonId, userDataVersion, reload, refreshToken]);
 
   const movie = detail;
   const heading = movie?.name ?? route.seed?.name ?? "";
@@ -154,6 +177,31 @@ export function DetailsPage({
     if (ref) onOnline({ ...item, external: ref });
   };
 
+  /** Play all from the first episode of the first regular season (the chain goes on from there). */
+  const playAll = async () => {
+    const first = seasons.find((season) => season.seasonNumber !== 0) ?? seasons[0];
+    if (!first) return;
+    const list = first.id === seasonId && episodes ? episodes : await api.getEpisodes(route.id, first.id);
+    const episode = list.find((item) => item.seasonNumber !== 0) ?? list[0];
+    if (episode) onPlay(episode);
+  };
+
+  const begin = (kind: "all" | "shuffle") => {
+    if (!movie || starting) return;
+    setStarting(kind);
+    setStartError("");
+    const job =
+      kind === "all"
+        ? playAll()
+        : startShuffle(movie).then((episode) => {
+            if (episode) onPlay(episode);
+            else setStartError(t("noEpisodes"));
+          });
+    job
+      .catch((err) => setStartError(errorText(t, err)))
+      .finally(() => setStarting(null));
+  };
+
   const play = () => {
     if (isSeries) {
       if (startEpisode) onPlay(startEpisode);
@@ -161,6 +209,8 @@ export function DetailsPage({
     }
     if (movie) onPlay(movie);
   };
+
+  if (blocked) return <RestrictedNotice leaving={route.leaving} top={top} onBack={onBack} />;
 
   return (
     <div
@@ -209,6 +259,13 @@ export function DetailsPage({
                 ) : (
                   <div className="absolute inset-0 bg-surface" />
                 )}
+                <TrailerBackdrop
+                  url={trailer}
+                  active={top && !route.leaving && !showTrailer && trailerGate.pages}
+                  muted={trailerMuted}
+                  loop
+                  onPhase={setTrailerPhase}
+                />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
               <div
@@ -244,6 +301,7 @@ export function DetailsPage({
                   >
                     {playLabel}
                   </Pill>
+                  <WatchTogetherButton onPlay={play} disabled={isSeries && !startEpisode} />
                   {resume ? (
                     <Pill
                       variant="tonal"
@@ -256,7 +314,36 @@ export function DetailsPage({
                     </Pill>
                   ) : null}
                   <FavoriteButton movie={movie} pill className="h-12" />
+                  <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
+                    {t("listsButton")}
+                  </Pill>
                   <WatchedButton movie={movie} pill className="h-12" />
+                  {isSeries && seasons.length ? (
+                    <>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<ListVideo size={17} />}
+                        disabled={starting != null}
+                        title={t("playAllHint")}
+                        onClick={() => begin("all")}
+                      >
+                        {t("playAll")}
+                      </Pill>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<Shuffle size={16} />}
+                        disabled={starting != null}
+                        title={t("shuffleHint")}
+                        onClick={() => begin("shuffle")}
+                      >
+                        {t("shuffle")}
+                      </Pill>
+                    </>
+                  ) : null}
                   {trailer ? (
                     <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
                       {t("trailer")}
@@ -268,7 +355,15 @@ export function DetailsPage({
                     </Pill>
                   ) : null}
                 </div>
+                {startError ? <p className="mt-3 text-[13px] text-danger" role="alert">{startError}</p> : null}
               </div>
+              {trailerPhase === "playing" ? (
+                <TrailerMuteButton
+                  muted={trailerMuted}
+                  onToggle={() => setTrailerMuted((v) => !v)}
+                  className="absolute right-page bottom-8"
+                />
+              ) : null}
             </section>
 
             <div
@@ -384,7 +479,7 @@ export function DetailsPage({
               ) : null}
 
               <div className="-mx-page">
-                <SimilarRail itemId={movie.id} onOpen={onPush} onPlay={onPlay} />
+                <SimilarRail itemId={movie.id} name={movie.name} onOpen={onPush} onPlay={onPlay} />
               </div>
             </div>
           </>

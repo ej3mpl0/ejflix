@@ -39,6 +39,11 @@ export function useNextEpisodeCard({
   const onPlayNextRef = useRef(onPlayNext);
   onPlayNextRef.current = onPlayNext;
 
+  // The player resets `ready` for every new item: a dismissal only applies to the one it was for.
+  useEffect(() => {
+    if (!ready) setDismissed("none");
+  }, [ready]);
+
   const triggerAt = outro ? outro.startSeconds : duration - NEXT_BUTTON_WINDOW;
   const inWindow = ready && duration > 0 && (eof || time >= triggerAt);
   const visible =

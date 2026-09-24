@@ -105,7 +105,12 @@ export function SetupStep({ onDone }: { onDone: () => void }) {
               <h1 className="mb-1 text-[24px] font-semibold tracking-tight [text-wrap:balance]">{t("setupStyleTitle")}</h1>
               <p className="mb-6 text-[13px] leading-[1.55] text-dim">{t("setupStyleText")}</p>
               <p className="mb-2 text-[13px] font-medium">{t("theme")}</p>
-              <ThemePicker value={settings.appearance.theme} onChange={(theme) => void update({ appearance: { theme } })} />
+              <ThemePicker
+                value={settings.appearance.theme}
+                onChange={(theme) => void update({ appearance: { theme, autoAccent: false } })}
+                auto={settings.appearance.autoAccent}
+                onAuto={() => void update({ appearance: { autoAccent: true } })}
+              />
               <div className="mt-5 grid gap-4 sm:grid-cols-2">
                 <div>
                   <p className="mb-2 text-[13px] font-medium">{t("appLanguage")}</p>

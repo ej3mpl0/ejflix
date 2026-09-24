@@ -4,6 +4,9 @@ import { cn } from "../lib/format";
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
+/** Open dialogs, oldest first: only the top one answers Escape and keeps Tab inside. */
+const openDialogs: object[] = [];
+
 /**
  * Modal shell: dimmed backdrop, `role="dialog"`, focus moved inside on open (to the first
  * `[data-autofocus]` or focusable element), Tab kept inside, focus handed back on close.
@@ -34,8 +37,13 @@ export function Dialog({
     const root = panel.current;
     const first = root?.querySelector<HTMLElement>("[data-autofocus]") ?? root?.querySelector<HTMLElement>(FOCUSABLE);
     (first ?? root)?.focus();
+    // Several can be up at once (the Ctrl+K palette over a list picker...); they all listen
+    // on window, where stopPropagation does not keep the one underneath from closing too.
+    const token = {};
+    openDialogs.push(token);
 
     const onKey = (e: KeyboardEvent) => {
+      if (openDialogs[openDialogs.length - 1] !== token) return;
       if (e.key === "Escape" && onEscapeRef.current) {
         e.preventDefault();
         e.stopPropagation();
@@ -64,6 +72,7 @@ export function Dialog({
     window.addEventListener("keydown", onKey, true);
     return () => {
       window.removeEventListener("keydown", onKey, true);
+      openDialogs.splice(openDialogs.indexOf(token), 1);
       if (previous?.isConnected) previous.focus();
     };
   }, []);

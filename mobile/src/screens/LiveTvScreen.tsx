@@ -1,14 +1,25 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FlatList, ScrollView, Text, View } from "react-native";
+import { FlatList, RefreshControl, ScrollView, Text, View } from "react-native";
+import { Image } from "expo-image";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { CalendarClock, CircleAlert, LayoutGrid, ListFilter, RefreshCw, Search, Settings as SettingsIcon, Tv, X } from "lucide-react-native";
-import type { Channel, ChannelGroup, EpgNow, IptvStatus } from "../lib/types";
+import { Bell, CalendarClock, CircleAlert, LayoutGrid, ListFilter, Play, RefreshCw, Search, Settings as SettingsIcon, Tv, X } from "lucide-react-native";
+import type { Channel, ChannelGroup, EpgNow, IptvStatus, Programme, Reminder } from "../lib/types";
 import { api } from "../lib/api";
-import { channelToMovie } from "../lib/iptv";
+import {
+  catchupToMovie,
+  channelInitials,
+  channelToMovie,
+  formatWhen,
+  reminderChannel,
+  reminderKey,
+  reminderOf,
+  sourceErrorText,
+} from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 import { useToast } from "../lib/toast-context";
 import { usePlay } from "../lib/play";
+import { errorText } from "../services/errors";
 import type { MainStackParamList } from "../navigation/types";
 import { makeStyles, useTheme } from "../theme/ThemeProvider";
 import { useLayout } from "../theme/responsive";
@@ -17,7 +28,7 @@ import { EmptyCard } from "../components/ui/EmptyCard";
 import { IconButton } from "../components/ui/IconButton";
 import { Pill } from "../components/ui/Pill";
 import { SelectSheet } from "../components/ui/SelectSheet";
-import { Shimmer } from "../components/ui/Shimmer";
+import { ChannelGridSkeleton, NavListSkeleton } from "../components/ui/Skeletons";
 import { Spinner } from "../components/ui/Spinner";
 import { TextField } from "../components/ui/TextField";
 import { TAB_BAR_HEIGHT } from "../components/ui/Toast";
@@ -28,10 +39,6 @@ const EPG_REFRESH_MS = 60_000;
 /** Gap between the tablet sidebar and the grid. */
 const SIDEBAR_GAP = 24;
 const SEARCH_DEBOUNCE_MS = 200;
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Pill labels are laid out at their natural width: keep long group names short. */
 function short(value: string, max = 22): string {
@@ -46,7 +53,7 @@ function short(value: string, max = 22): string {
 export function LiveTvScreen() {
   const s = useStyles();
   const t = useTheme();
-  const { t: tr } = useI18n();
+  const { t: tr, locale } = useI18n();
   const { toast } = useToast();
   const play = usePlay();
   const layout = useLayout();
@@ -58,6 +65,7 @@ export function LiveTvScreen() {
   const [status, setStatus] = useState<IptvStatus | null>(null);
   const [sourceId, setSourceId] = useState("");
   const [groups, setGroups] = useState<ChannelGroup[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -69,9 +77,12 @@ export function LiveTvScreen() {
   const [sheet, setSheet] = useState<"source" | "groups" | null>(null);
 
   const request = useRef(0);
+  const groupsRequest = useRef(0);
   const alive = useRef(true);
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  const trRef = useRef(tr);
+  trRef.current = tr;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
@@ -125,17 +136,28 @@ export function LiveTvScreen() {
   }, [enabledKey, sourceId]);
 
   const loadGroups = useCallback(async () => {
+    // Only the latest filter may fill the sidebar (a slower earlier answer is dropped).
+    const id = ++groupsRequest.current;
     try {
       const next = await api.iptvGroups(sourceId || null);
-      if (alive.current) setGroups(next);
+      if (alive.current && id === groupsRequest.current) setGroups(next);
     } catch {
-      if (alive.current) setGroups([]);
+      if (alive.current && id === groupsRequest.current) setGroups([]);
+    } finally {
+      if (alive.current && id === groupsRequest.current) setGroupsLoading(false);
     }
   }, [sourceId]);
 
   const loadChannels = useCallback(
     async (first: boolean) => {
       const id = ++request.current;
+      if (selection.type === "reminders") {
+        // The reminders view lists programmes, not channels.
+        setItems([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
       if (first) setLoading(true);
       else setLoadingMore(true);
       try {
@@ -152,7 +174,7 @@ export function LiveTvScreen() {
         setItems((previous) => (first ? page.items : [...previous, ...page.items]));
         setTotal(page.total);
       } catch (err) {
-        if (id === request.current) toastRef.current(errorText(err));
+        if (id === request.current) toastRef.current(errorText(err, trRef.current));
       } finally {
         if (id === request.current) {
           setLoading(false);
@@ -239,13 +261,79 @@ export function LiveTvScreen() {
       })
       .catch((err: unknown) => {
         setItems((list) => list.map((c) => (c.id === channel.id ? { ...c, favorite: !on } : c)));
-        toastRef.current(errorText(err));
+        toastRef.current(errorText(err, trRef.current));
       });
   }, []);
 
   const refresh = useCallback(() => {
-    api.iptvRefresh(sourceId || null).catch((err: unknown) => toastRef.current(errorText(err)));
+    api.iptvRefresh(sourceId || null).catch((err: unknown) => toastRef.current(errorText(err, trRef.current)));
   }, [sourceId]);
+
+  // Pull to refresh: downloads the lists again; the spinner stays until the refresh the
+  // pull started is over (or goes away quickly when nothing needed downloading).
+  const [pulling, setPulling] = useState(false);
+  const sawLoading = useRef(false);
+  const onPull = useCallback(() => {
+    sawLoading.current = false;
+    setPulling(true);
+    refresh();
+    loadEpg();
+  }, [refresh, loadEpg]);
+  useEffect(() => {
+    if (!pulling) return;
+    if (anyLoading) sawLoading.current = true;
+    else if (sawLoading.current) setPulling(false);
+  }, [pulling, anyLoading]);
+  useEffect(() => {
+    if (!pulling) return;
+    const handle = setTimeout(() => {
+      if (!sawLoading.current) setPulling(false);
+    }, 2500);
+    return () => clearTimeout(handle);
+  }, [pulling]);
+  const refreshControl = (
+    <RefreshControl refreshing={pulling} onRefresh={onPull} tintColor={t.colors.accent} colors={[t.colors.accent]} progressBackgroundColor={t.colors.panel} />
+  );
+
+  // ---- reminders (per profile; announced in the app a minute before the start) ----
+
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  useEffect(() => {
+    const load = () => {
+      api
+        .iptvReminders()
+        .then((list) => {
+          if (alive.current) setReminders(list);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const unlisten = api.onIptvReminders(load);
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => undefined);
+    };
+  }, []);
+  const reminderKeys = useMemo(() => new Set(reminders.map((r) => reminderKey(r.channelId, r.start))), [reminders]);
+
+  const toggleReminder = useCallback(
+    (channel: Channel, programme: Programme, on: boolean) => {
+      const request = on ? api.iptvReminderSet(reminderOf(channel, programme)) : api.iptvReminderRemove(channel.id, programme.start);
+      request
+        .then((list) => {
+          if (alive.current) setReminders(list);
+          toastRef.current(on ? tr("reminderSet", { title: programme.title }) : tr("reminderRemoved"));
+        })
+        .catch((err: unknown) => toastRef.current(errorText(err, trRef.current)));
+    },
+    [tr],
+  );
+
+  const playCatchup = useCallback(
+    (channel: Channel, programme: Programme) => {
+      play(catchupToMovie(channel, namesRef.current.get(channel.sourceId) ?? "", programme));
+    },
+    [play],
+  );
 
   const openSettings = useCallback(() => navigation.navigate("SettingsSection", { section: "iptv" }), [navigation]);
 
@@ -278,9 +366,11 @@ export function LiveTvScreen() {
         ? tr("favorites")
         : selection.type === "recent"
           ? tr("recent")
-          : selection.name || tr("noGroup");
+          : selection.type === "reminders"
+            ? tr("reminders")
+            : selection.name || tr("noGroup");
 
-  const errorLines = enabled.filter((src) => src.error).map((src) => `${src.name}: ${src.error}`);
+  const errorLines = enabled.filter((src) => src.error).map((src) => `${src.name}: ${sourceErrorText(src, tr)}`);
   const epgErrorLines = enabled.filter((src) => !src.error && src.epgError).map((src) => `${src.name}: ${tr("iptvEpgError")}`);
 
   const searchField = (
@@ -374,13 +464,8 @@ export function LiveTvScreen() {
   );
 
   const skeleton = (
-    <View style={[s.skeleton, { paddingHorizontal: gridPad, gap: rail }]}>
-      {Array.from({ length: cols * 3 }).map((_, i) => (
-        <View key={i} style={{ width: itemW }}>
-          <Shimmer width={itemW} height={Math.round((itemW * 9) / 16)} radius={t.radii.poster} delay={(i % cols) * 60} />
-          <Shimmer width={Math.round(itemW * 0.7)} height={12} radius={6} delay={(i % cols) * 60} style={s.skeletonLine} />
-        </View>
-      ))}
+    <View style={{ paddingHorizontal: gridPad }}>
+      <ChannelGridSkeleton cols={cols} itemW={itemW} gap={rail} />
     </View>
   );
 
@@ -431,6 +516,8 @@ export function LiveTvScreen() {
         channelTotal={channelTotal}
         names={names}
         multiSource={multiSource}
+        reminderCount={reminders.length}
+        loading={groupsLoading}
       />
     </>
   );
@@ -455,10 +542,63 @@ export function LiveTvScreen() {
     );
   }
 
-  const grid = layoutMode === "guide" ? (
+  const reminderList = (
+    <FlatList
+      data={reminders}
+      keyExtractor={(r) => reminderKey(r.channelId, r.start)}
+      ListHeaderComponent={wide ? undefined : header}
+      ListEmptyComponent={
+        <View style={[s.empty, { paddingHorizontal: gridPad }]}>
+          <Bell size={24} color={t.colors.dim} strokeWidth={2} />
+          <Text style={[s.emptyTitle, s.emptyGap]}>{tr("remindersEmpty")}</Text>
+          <Text style={s.emptyHint}>{tr("remindersEmptyHint")}</Text>
+        </View>
+      }
+      refreshControl={refreshControl}
+      contentContainerStyle={{ paddingHorizontal: gridPad, rowGap: 8, paddingBottom: bottomPad }}
+      showsVerticalScrollIndicator={false}
+      style={wide ? s.gridPane : undefined}
+      renderItem={({ item }) => (
+        <View style={s.reminderRow}>
+          <View style={s.reminderLogo}>
+            {item.logo ? (
+              <Image source={{ uri: item.logo }} contentFit="contain" style={s.reminderLogoImage} />
+            ) : (
+              <Text style={s.reminderInitials}>{channelInitials(item.channelName)}</Text>
+            )}
+          </View>
+          <View style={s.reminderText}>
+            <Text numberOfLines={1} style={s.reminderTitle}>
+              {item.title}
+            </Text>
+            <Text numberOfLines={1} style={s.reminderMeta}>
+              {formatWhen(item.start, locale)} · {item.channelName}
+            </Text>
+          </View>
+          <IconButton icon={Play} label={`${tr("watchLive")} ${item.channelName}`} variant="tonal" size={16} hit={40} onPress={() => playChannel(reminderChannel(item))} />
+          <IconButton
+            icon={X}
+            label={`${tr("reminderCancel")}: ${item.title}`}
+            variant="tonal"
+            size={16}
+            hit={40}
+            onPress={() => toggleReminder(reminderChannel(item), { start: item.start, stop: item.stop, title: item.title, desc: null, category: null }, false)}
+          />
+        </View>
+      )}
+    />
+  );
+
+  const grid = selection.type === "reminders" ? reminderList : layoutMode === "guide" ? (
     <EpgGuide
       channels={items}
       onPlay={playChannel}
+      reminders={reminderKeys}
+      onToggleReminder={toggleReminder}
+      onCatchup={playCatchup}
+      loading={loading}
+      skeleton={<NavListSkeleton count={8} />}
+      refreshControl={refreshControl}
       header={wide ? undefined : header}
       footer={footer}
       contentPadding={{ horizontal: gridPad, bottom: bottomPad }}
@@ -474,6 +614,7 @@ export function LiveTvScreen() {
       ListHeaderComponent={wide ? undefined : header}
       ListEmptyComponent={loading ? skeleton : empty}
       ListFooterComponent={footer}
+      refreshControl={refreshControl}
       contentContainerStyle={{ paddingHorizontal: gridPad, rowGap: rail + 6, paddingBottom: bottomPad }}
       keyboardShouldPersistTaps="handled"
       keyboardDismissMode="on-drag"
@@ -500,6 +641,8 @@ export function LiveTvScreen() {
               channelTotal={channelTotal}
               names={names}
               multiSource={multiSource}
+              reminderCount={reminders.length}
+              loading={groupsLoading}
               contentStyle={{ paddingBottom: bottomPad }}
             />
             {grid}
@@ -542,8 +685,31 @@ const useStyles = makeStyles((t) => ({
   bannerTextError: { color: t.colors.danger },
   panes: { flex: 1, flexDirection: "row" },
   gridPane: { flex: 1 },
-  skeleton: { flexDirection: "row", flexWrap: "wrap" },
-  skeletonLine: { marginTop: 8 },
+  emptyGap: { marginTop: 10 },
+  reminderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: t.radii.card,
+    backgroundColor: t.colors.surface,
+  },
+  reminderLogo: {
+    width: 52,
+    height: 38,
+    borderRadius: 8,
+    backgroundColor: t.white(0.06),
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    padding: 4,
+  },
+  reminderLogoImage: { width: "100%", height: "100%" },
+  reminderInitials: { ...text(11, "bold"), color: t.white(0.7) },
+  reminderText: { flex: 1, minWidth: 0 },
+  reminderTitle: { ...text(14, "medium"), color: t.colors.text },
+  reminderMeta: { ...text(12, "regular", { tabular: true }), color: t.colors.dim, marginTop: 2 },
   empty: { paddingVertical: 40, alignItems: "center" },
   emptyTitle: { ...text(16, "medium"), color: t.colors.text, textAlign: "center" },
   emptyHint: { ...text(13), color: t.colors.dim, textAlign: "center", marginTop: 6 },
