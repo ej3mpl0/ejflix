@@ -195,6 +195,10 @@ function classifyError(detail: string): PlayerErrorCode {
 }
 
 function emitError(error: unknown, url: string | null, transcoding: boolean = isTranscoding()): void {
+  // The library refuses a title above the profile's age limit with a bare marker.
+  if (!(error instanceof PlaybackError) && errorDetail(error) === BLOCKED) {
+    error = new PlaybackError("parentalBlockedTitle", BLOCKED);
+  }
   if (error instanceof PlaybackError) {
     emit("player://error", { message: error.message, detail: error.detail, code: "unknown", url, key: error.key, transcoding });
     return;

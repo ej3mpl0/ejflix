@@ -3,10 +3,10 @@ import { AppState, Text, View } from "react-native";
 import { Image } from "expo-image";
 import Animated, { FadeInUp, FadeOut, useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Haptics from "expo-haptics";
 import { BellRing, Play, X } from "lucide-react-native";
 import type { Reminder } from "../../lib/types";
 import { api } from "../../lib/api";
+import { haptic } from "../../lib/haptics";
 import { channelInitials, channelToMovie, formatTime, reminderChannel, reminderKey } from "../../lib/iptv";
 import { useI18n } from "../../lib/locale-context";
 import { openPlayer } from "../../navigation/navigationRef";
@@ -43,7 +43,7 @@ export function ReminderAlerts() {
         .iptvDueReminders()
         .then((due) => {
           if (!alive || !due.length) return;
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => undefined);
+          haptic("warning");
           setNow(Date.now());
           const keys = new Set(due.map((r) => reminderKey(r.channelId, r.start)));
           setAlerts((list) => [...list.filter((r) => !keys.has(reminderKey(r.channelId, r.start))), ...due]);

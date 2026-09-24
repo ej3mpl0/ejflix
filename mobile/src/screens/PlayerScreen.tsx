@@ -9,7 +9,6 @@ import { useKeepAwake } from "expo-keep-awake";
 import { useFocusEffect } from "@react-navigation/native";
 import { ChevronDown, ChevronUp, Cpu, ExternalLink, FastForward, Globe, ListVideo, RotateCcw } from "lucide-react-native";
 import * as DocumentPicker from "expo-document-picker";
-import * as Haptics from "expo-haptics";
 import { File } from "expo-file-system";
 import { api } from "../lib/api";
 import { engine } from "../services/player/engine";
@@ -697,7 +696,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     nextSent.current = true;
     setPanel(false);
     // A light tick confirms the zap before the new stream shows up.
-    void Haptics.selectionAsync().catch(() => undefined);
+    haptic("selection");
     navigation.setParams({ movie: channelToMovie(channel, live.sourceName) });
   };
 
@@ -921,10 +920,17 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   const cardRight = 24 + insets.right;
   const cardBottom = insets.bottom + (visible ? CHROME_BOTTOM_HEIGHT : 24);
   const gesturesEnabled = !locked && !panel && sheet === null && !pip;
+  // A long press cut short (PiP, a sheet, the lock) never reports its release.
+  useEffect(() => {
+    if (!gesturesEnabled) onHold(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gesturesEnabled]);
   const errorSource: ErrorSourceKind = live ? "live" : offline ? "offline" : movie.external ? "addon" : "jellyfin";
-  const actions = playError
-    ? errorActions({ source: errorSource, code: playError.code, transcoding: Boolean(playError.transcoding), hasUrl: Boolean(playError.url) })
-    : [];
+  // Nothing gets past a parental limit: only "Back".
+  const actions =
+    playError && playError.key !== "parentalBlockedTitle"
+      ? errorActions({ source: errorSource, code: playError.code, transcoding: Boolean(playError.transcoding), hasUrl: Boolean(playError.url) })
+      : [];
   // A translated failure (`key`) has no technical text worth showing.
   const errorDetail = playError ? playError.detail || (playError.key ? "" : playError.message) : "";
   const actionMeta: Record<ErrorAction, { label: string; icon: typeof RotateCcw }> = {
