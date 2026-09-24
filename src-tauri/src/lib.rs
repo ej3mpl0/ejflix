@@ -17,6 +17,7 @@ mod torrent;
 mod update;
 mod parental;
 mod trakt;
+mod party;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -2895,6 +2896,16 @@ pub fn run() {
             iptv_play_catchup,
             iptv_multiview,
             player_multiview_audio,
+            // watch party
+            party::party_start,
+            party::party_join,
+            party::party_leave,
+            party::party_status,
+            party::party_send,
+            party::party_set_title,
+            party::party_set_open,
+            party::party_player_pause,
+            party::party_find_library_item,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

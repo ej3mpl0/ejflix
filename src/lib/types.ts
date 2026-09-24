@@ -240,6 +240,8 @@ export type Movie = {
   premiereDate?: string | null;
   /** Play all / shuffle: what comes after this item instead of the next episode. */
   queue?: PlayQueue | null;
+  /** Watch party: opened to follow the host's title with this key (the player syncs it). */
+  partyKey?: string | null;
 };
 
 export type GenreRow = {

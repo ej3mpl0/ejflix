@@ -23,6 +23,7 @@ const VOD: Array<[string[], MessageKey]> = [
   [["S", "Enter"], "keySkip"],
   [["N"], "keyNext"],
   [["E"], "keyPanel"],
+  [["W"], "keyParty"],
   [["?"], "keyHelp"],
   [["Esc"], "keyBack"],
 ];

@@ -1025,6 +1025,19 @@ async function playerTogglePause(): Promise<void> {
   push();
 }
 
+/** Pause or play outright: a watch party guest follows the host, a toggle could invert it. */
+async function playerSetPause(paused: boolean): Promise<void> {
+  if (!ctx) return;
+  try {
+    if (paused) player.pause();
+    else player.play();
+    state.paused = paused;
+  } catch (error) {
+    console.warn("[player] set pause failed", error);
+  }
+  push();
+}
+
 /** `fast` is used while scrubbing: seeks are coalesced to one every 200 ms. */
 async function playerSeek(seconds: number, relative: boolean, fast = false): Promise<void> {
   if (!ctx || !Number.isFinite(seconds)) return;
@@ -1195,6 +1208,7 @@ export const engine = {
   iptvPlayCatchup,
   playerStop,
   playerTogglePause,
+  playerSetPause,
   playerSeek,
   playerSetSpeed,
   playerSetAspect,

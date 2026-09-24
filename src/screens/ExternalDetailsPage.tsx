@@ -29,6 +29,7 @@ import { useTrailerGate } from "../lib/trailer-autoplay";
 import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
+import { WatchTogetherButton } from "../components/PartyButton";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -301,6 +302,7 @@ export function ExternalDetailsPage({
                   >
                     {playLabel}
                   </Pill>
+                  <WatchTogetherButton onPlay={() => startItem && onPlay(startItem)} disabled={!startItem} />
                   <FavoriteButton movie={movie} pill className="h-12" />
                   <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
                     {t("listsButton")}

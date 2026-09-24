@@ -221,6 +221,8 @@ export type Movie = {
   premiereDate?: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
+  /** Watch party: opened to follow the host's title with this key (the player syncs it). */
+  partyKey?: string | null;
 };
 
 export type GenreRow = {

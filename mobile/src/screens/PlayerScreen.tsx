@@ -33,6 +33,7 @@ import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
 import { usePauseInfo } from "../hooks/usePauseInfo";
+import { usePartyGuestSync } from "../hooks/usePartyGuestSync";
 import { useBackHandler } from "../navigation/useBackHandler";
 import type { MainScreenProps } from "../navigation/types";
 import { makeStyles } from "../theme/ThemeProvider";
@@ -198,6 +199,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   stateRef.current = state;
   toastRef.current = toast;
   tRef.current = t;
+
+  // Watch party guest: follow the host; without its permission, local controls only say so.
+  const partySync = usePartyGuestSync({
+    movie,
+    state,
+    onNotice: (paused, name) => toast(t(paused ? "partyHostPaused" : "partyHostResumed", { name: name || "?" })),
+  });
+  /** A guest does not chain on its own: the host's next title arrives through the party. */
+  const chainNext = partySync.guest ? null : nextEpisode;
+  const partyLocked = () => {
+    if (!partySync.locked) return false;
+    toast(t("partyHostControls"));
+    return true;
+  };
 
   const showLockHint = () => {
     setLockHint(true);
@@ -470,9 +485,9 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   // End of file without anything to chain into: leave. With a next episode the card
   // below decides whether and when to continue.
   useEffect(() => {
-    if (!state.eof || nextEpisode) return;
+    if (!state.eof || chainNext) return;
     exitRef.current();
-  }, [state.eof, nextEpisode]);
+  }, [state.eof, chainNext]);
 
   // First frame: the file is loaded once the engine reports a duration or advances time.
   useEffect(() => {
@@ -618,21 +633,32 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const togglePause = async () => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: stateRef.current.paused ? "play" : "pause" });
     showFlash(stateRef.current.paused ? "play" : "pause");
     await api.playerTogglePause();
   };
 
   const seekBy = (delta: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, stateRef.current.time + delta) });
     haptic("light");
     showFlash(delta < 0 ? "back" : "fwd", Math.abs(delta));
     void api.playerSeek(delta, true);
   };
 
   const seekTo = (seconds: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, seconds) });
     void api.playerSeek(seconds, false);
   };
 
   const setSpeed = (speed: number) => {
+    // The host's speed is the party's speed.
+    if (partySync.guest) {
+      toast(t("partyHostControls"));
+      return;
+    }
     void api.playerSetSpeed(speed);
     if (settings.playback.rememberSpeed) void updateSettings({ playback: { lastSpeed: speed } });
   };
@@ -646,12 +672,20 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const playNext = () => {
+    if (partySync.guest) {
+      toast(t("partyHostPicks"));
+      return;
+    }
     if (!nextEpisode || nextSent.current) return;
     nextSent.current = true;
     navigation.setParams({ movie: nextEpisode });
   };
 
   const playFromPanel = (target: Movie) => {
+    if (partySync.guest) {
+      toast(t("partyHostPicks"));
+      return;
+    }
     if (nextSent.current) return;
     nextSent.current = true;
     setPanel(false);
@@ -753,6 +787,10 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const onScrubGesture = (phase: PanPhase, dx: number) => {
+    if (partySync.locked) {
+      if (phase === "start") partyLocked();
+      return;
+    }
     const { duration, time } = stateRef.current;
     if (duration <= 0) return;
     if (phase === "start") {
@@ -852,13 +890,13 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     ready,
     settings,
     controlsVisible: visible,
-    nextEpisode,
+    nextEpisode: chainNext,
     onSeekTo: seekTo,
     onPlayNext: playNext,
   });
   revealRef.current = skipPrompt.reveal;
   const nextCard = useNextEpisodeCard({
-    nextEpisode,
+    nextEpisode: chainNext,
     outro,
     time: state.time,
     duration: state.duration,
@@ -987,9 +1025,9 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
             <PauseInfo movie={detail ?? movie} heading={heading} top={insets.top + 72} left={24 + insets.left} />
           ) : null}
 
-          {locked ? null : nextEpisode && nextCard.visible ? (
+          {locked ? null : chainNext && nextCard.visible ? (
             <NextEpisodeCard
-              episode={nextEpisode}
+              episode={chainNext}
               countdown={nextCard.countdown}
               onPlay={playNext}
               onDismiss={nextCard.dismiss}
@@ -1079,7 +1117,9 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
               onTogglePause={() => void togglePause()}
               onSeek={seekBy}
               onSeekTo={seekTo}
-              onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
+              onScrub={(seconds) => {
+                if (!partySync.locked) void api.playerSeek(seconds, false, true);
+              }}
               onMute={() => void api.playerSetMute(!stateRef.current.mute)}
               onAspect={cycleAspect}
               onLock={lock}

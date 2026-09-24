@@ -43,6 +43,9 @@ import { requestSettingsIntent } from "../lib/settings-intent";
 import { CalendarPage } from "./CalendarPage";
 import { MyListPage } from "./MyListPage";
 import { useCalendar } from "../lib/calendar";
+import { usePartyGuest } from "../hooks/usePartyGuest";
+import { PartyDialog } from "../components/PartyDialog";
+import { PartyButton } from "../components/PartyButton";
 
 const PAGE_EXIT_MS = 250;
 
@@ -120,6 +123,18 @@ export function Home({
   const [shortcuts, setShortcuts] = useState(false);
   /** Episodes aired since the calendar was last opened: a counter on its tab. */
   const { fresh: newEpisodes } = useCalendar(hasServer, session.userId);
+  /** Watch party: its dialog, and (as a guest) opening what the host plays. */
+  const [partyOpen, setPartyOpen] = useState(false);
+  const party = usePartyGuest({
+    hasServer,
+    onPlay,
+    onPick: (movie) => {
+      lastPicker.current = null;
+      setPicker(movie);
+    },
+    onToast,
+    onOpened: () => setPartyOpen(false),
+  });
 
   // The player could not start: put the user back in front of the other sources.
   useEffect(() => {
@@ -535,6 +550,7 @@ export function Home({
         hidden={hasStack || seeAll != null}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
+        actions={<PartyButton status={party.status} onClick={() => setPartyOpen(true)} />}
       />
       <TrailerGate.Provider value={trailerGate}>
       <SeeAllContext.Provider value={setSeeAll}>
@@ -703,9 +719,13 @@ export function Home({
           }}
           onSwitchProfile={onSwitchProfile}
           onShortcuts={() => setShortcuts(true)}
+          onParty={() => setPartyOpen(true)}
         />
       ) : null}
       {shortcuts ? <ShortcutsHelp app onClose={() => setShortcuts(false)} /> : null}
+      {partyOpen && !hidden ? (
+        <PartyDialog status={party.status} onClose={() => setPartyOpen(false)} onOpenTitle={party.openTitle} />
+      ) : null}
     </div>
   );
 }

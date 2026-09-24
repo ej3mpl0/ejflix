@@ -760,3 +760,30 @@ a[href],
     transform: none;
   }
 }
+
+/* Watch party: a reaction rises up the right edge and fades (reduced motion: it just shows). */
+@keyframes party-float {
+  0% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(-24px) scale(1.1);
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-260px) scale(1);
+  }
+}
+.party-float {
+  animation: party-float 2.6s var(--ease-out-soft) forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  .party-float {
+    animation: none;
+  }
+}
