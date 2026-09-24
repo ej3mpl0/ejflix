@@ -7,7 +7,17 @@ import type { XtreamAccount } from "../../lib/types";
 import { fetchWithTimeout, shortError } from "../http";
 import { PATHS, deleteIfExists, readTextIfExists, writeTextAtomic } from "../store";
 import { nowMs } from "../util";
-import { MAX_EPG_BYTES, MAX_PLAYLIST_BYTES, downloadToFile, readTextFile, streamTextFile } from "./download";
+import {
+  MAX_EPG_BYTES,
+  MAX_PLAYLIST_BYTES,
+  connectError,
+  downloadToFile,
+  fileTooBigError,
+  readTextFile,
+  streamTextFile,
+  tooBigError,
+} from "./download";
+import { LocalizedError } from "../errors";
 import { EpgWriter } from "./epgdb";
 import { MAX_CHANNELS, parseM3u, type IptvChannel } from "./m3u";
 import { userAgentOf, type StoredSource } from "./sources";
@@ -110,13 +120,6 @@ export function deleteCache(sourceId: string): void {
 
 // ---- Xtream ----
 
-function connectError(error: unknown): Error {
-  const message = shortError(error);
-  if (message === "Tiempo de espera agotado") return new Error("No se pudo conectar: tiempo de espera agotado");
-  if (message === "No se pudo conectar") return new Error("No se pudo conectar: no responde");
-  return new Error(`No se pudo conectar: ${message}`);
-}
-
 export async function xtreamJson(
   source: Pick<StoredSource, "url" | "username" | "userAgent">,
   password: string,
@@ -130,20 +133,21 @@ export async function xtreamJson(
   } catch (error) {
     throw connectError(error);
   }
-  if (!res.ok) throw new Error(`El servidor respondió ${res.status}`);
+  if (!res.ok) throw new LocalizedError("errServerStatus", `El servidor respondió ${res.status}`, { status: res.status });
   const length = Number(res.headers.get("content-length") ?? 0);
-  if (length > MAX_JSON_BYTES) throw new Error("La respuesta es demasiado grande");
+  if (length > MAX_JSON_BYTES) throw tooBigError();
   let text: string;
   try {
     text = await res.text();
   } catch (error) {
-    throw new Error(`Descarga interrumpida: ${shortError(error)}`);
+    const detail = shortError(error);
+    throw new LocalizedError("iptvErrInterrupted", `Descarga interrumpida: ${detail}`, { detail });
   }
-  if (text.length > MAX_JSON_BYTES) throw new Error("La respuesta es demasiado grande");
+  if (text.length > MAX_JSON_BYTES) throw tooBigError();
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new Error("El servidor no respondió como Xtream Codes");
+    throw new LocalizedError("iptvErrNotXtream", "El servidor no respondió como Xtream Codes");
   }
 }
 
@@ -171,7 +175,7 @@ export async function buildChannels(
         maxBytes: MAX_PLAYLIST_BYTES,
       });
       try {
-        const text = await readTextFile(file, MAX_PLAYLIST_BYTES, "La respuesta es demasiado grande");
+        const text = await readTextFile(file, MAX_PLAYLIST_BYTES, tooBigError);
         const parsed = parseM3u(text, source.id);
         catalog.channels = parsed.channels;
         headerEpg = parsed.epgUrl;
@@ -182,14 +186,14 @@ export async function buildChannels(
     }
     case "m3uFile": {
       const file = PATHS.iptvImported(source.id);
-      if (!file.exists) throw new Error("No se pudo leer el archivo M3U");
-      if ((file.size ?? 0) > MAX_PLAYLIST_BYTES) throw new Error("El archivo es demasiado grande");
+      const unreadable = () => new LocalizedError("iptvErrFileUnreadable", "No se pudo leer el archivo M3U");
+      if (!file.exists) throw unreadable();
+      if ((file.size ?? 0) > MAX_PLAYLIST_BYTES) throw fileTooBigError();
       let text: string;
       try {
-        text = await readTextFile(file, MAX_PLAYLIST_BYTES, "El archivo es demasiado grande");
+        text = await readTextFile(file, MAX_PLAYLIST_BYTES, fileTooBigError);
       } catch (error) {
-        const message = shortError(error);
-        throw new Error(message === "El archivo es demasiado grande" ? message : "No se pudo leer el archivo M3U");
+        throw error instanceof LocalizedError && error.key === "iptvErrFileTooBig" ? error : unreadable();
       }
       const parsed = parseM3u(text, source.id);
       catalog.channels = parsed.channels;
@@ -213,7 +217,7 @@ export async function buildChannels(
       break;
     }
   }
-  if (catalog.channels.length === 0) throw new Error("La lista no contiene canales");
+  if (catalog.channels.length === 0) throw new LocalizedError("iptvErrNoChannels", "La lista no contiene canales");
   if (catalog.channels.length > MAX_CHANNELS) catalog.channels.length = MAX_CHANNELS;
   return { catalog: catalog.finish(), headerEpg };
 }

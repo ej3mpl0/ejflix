@@ -6,6 +6,7 @@
 import type { Channel, ChannelGroup, ChannelPage, ChannelQuery, EpgNow, IptvSource, Programme } from "../../lib/types";
 import { emit } from "../events";
 import { shortError } from "../http";
+import { LocalizedError } from "../errors";
 import { nowMs } from "../util";
 import { Catalog, attachEpg, buildChannels, deleteCache, readCache, writeCache } from "./catalog";
 import * as epgdb from "./epgdb";
@@ -17,14 +18,14 @@ import { hidesAdult, isAdultChannel } from "../parental";
 /** Cached playlists older than this are refreshed on launch (when the preference is on). */
 export const STALE_AFTER_MS = 12 * 3600 * 1000;
 
-type Entry = { catalog: Catalog | null; loading: boolean; error: string | null };
+type Entry = { catalog: Catalog | null; loading: boolean; error: string | null; errorKey: IptvSource["errorKey"] };
 
 const entries = new Map<string, Entry>();
 
 function entryOf(id: string): Entry {
   let entry = entries.get(id);
   if (!entry) {
-    entry = { catalog: null, loading: false, error: null };
+    entry = { catalog: null, loading: false, error: null, errorKey: null };
     entries.set(id, entry);
   }
   return entry;
@@ -59,6 +60,7 @@ export function spawnRefresh(source: StoredSource, epg: boolean): void {
   if (entry.loading) return;
   entry.loading = true;
   entry.error = null;
+  entry.errorKey = null;
   emit("iptv://changed");
   // Removing the source (`forget`) or leaving the profile (`clear`) drops the entry:
   // from then on this refresh must not write its cache or guide back.
@@ -77,8 +79,10 @@ export function spawnRefresh(source: StoredSource, epg: boolean): void {
       catalog.updatedMs = nowMs();
       writeCache(source.id, catalog);
       entry.error = null;
+      entry.errorKey = null;
     } catch (error) {
       entry.error = shortError(error);
+      entry.errorKey = error instanceof LocalizedError ? { key: error.key, vars: error.vars } : null;
     } finally {
       entry.loading = false;
       emit("iptv://changed");
@@ -126,6 +130,7 @@ export function views(sources: StoredSource[]): IptvSource[] {
       updatedMs: catalog?.updatedMs ?? 0,
       loading: entry?.loading ?? false,
       error: entry?.error ?? null,
+      errorKey: entry?.errorKey ?? null,
       epgError: catalog?.epgError ?? null,
       epgSource: catalog?.epgSource ?? null,
       account: catalog?.account ?? null,

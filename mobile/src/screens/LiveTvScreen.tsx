@@ -14,6 +14,7 @@ import {
   reminderChannel,
   reminderKey,
   reminderOf,
+  sourceErrorText,
 } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 import { useToast } from "../lib/toast-context";
@@ -369,7 +370,7 @@ export function LiveTvScreen() {
             ? tr("reminders")
             : selection.name || tr("noGroup");
 
-  const errorLines = enabled.filter((src) => src.error).map((src) => `${src.name}: ${src.error}`);
+  const errorLines = enabled.filter((src) => src.error).map((src) => `${src.name}: ${sourceErrorText(src, tr)}`);
   const epgErrorLines = enabled.filter((src) => !src.error && src.epgError).map((src) => `${src.name}: ${tr("iptvEpgError")}`);
 
   const searchField = (

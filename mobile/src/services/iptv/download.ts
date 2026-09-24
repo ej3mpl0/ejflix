@@ -7,6 +7,7 @@ import { Gunzip } from "fflate";
 import { USER_AGENT, isGzip, shortError } from "../http";
 import { deleteIfExists } from "../store";
 import { sleep } from "../util";
+import { LocalizedError } from "../errors";
 import { Utf8Stream, decodeUtf8 } from "./m3u";
 
 export const MAX_PLAYLIST_BYTES = 32 * 1024 * 1024;
@@ -15,13 +16,33 @@ export const MAX_EPG_BYTES = 100 * 1024 * 1024;
 const MAX_INFLATED_BYTES = 512 * 1024 * 1024;
 const HTTP_TIMEOUT_MS = 120_000;
 
-function describeDownloadError(error: unknown): string {
+const TOO_BIG = "La respuesta es demasiado grande";
+const FILE_TOO_BIG = "El archivo es demasiado grande";
+
+export function tooBigError(): LocalizedError {
+  return new LocalizedError("iptvErrTooBig", TOO_BIG);
+}
+
+export function fileTooBigError(): LocalizedError {
+  return new LocalizedError("iptvErrFileTooBig", FILE_TOO_BIG);
+}
+
+/** The server could not be reached (timeout, no answer, or the system's reason). */
+export function connectError(error: unknown): LocalizedError {
   const message = shortError(error);
-  const status = message.match(/\b([45]\d\d)\b/);
-  if (status) return `El servidor respondió ${status[1]}`;
-  if (message === "No se pudo conectar") return "No se pudo conectar: no responde";
-  if (message === "Tiempo de espera agotado") return "No se pudo conectar: tiempo de espera agotado";
-  return `No se pudo conectar: ${message}`;
+  if (message === "Tiempo de espera agotado") return timeoutError();
+  if (message === "No se pudo conectar") return new LocalizedError("iptvErrNoAnswer", "No se pudo conectar: no responde");
+  return new LocalizedError("errUnreachable", `No se pudo conectar: ${message}`, { detail: message });
+}
+
+function timeoutError(): LocalizedError {
+  return new LocalizedError("iptvErrTimeout", "No se pudo conectar: tiempo de espera agotado");
+}
+
+function describeDownloadError(error: unknown): LocalizedError {
+  const status = shortError(error).match(/\b([45]\d\d)\b/);
+  if (status) return new LocalizedError("errServerStatus", `El servidor respondió ${status[1]}`, { status: status[1] });
+  return connectError(error);
 }
 
 /** Downloads `url` into `file`, rejecting anything over `maxBytes`. */
@@ -48,15 +69,15 @@ export async function downloadToFile(
     });
   } catch (error) {
     deleteIfExists(file);
-    if (tooBig) throw new Error("La respuesta es demasiado grande");
-    if (controller.signal.aborted) throw new Error("No se pudo conectar: tiempo de espera agotado");
-    throw new Error(describeDownloadError(error));
+    if (tooBig) throw tooBigError();
+    if (controller.signal.aborted) throw timeoutError();
+    throw describeDownloadError(error);
   } finally {
     clearTimeout(timer);
   }
   if ((file.size ?? 0) > options.maxBytes) {
     deleteIfExists(file);
-    throw new Error("La respuesta es demasiado grande");
+    throw tooBigError();
   }
   return file;
 }
@@ -67,14 +88,14 @@ export function gunzipCapped(bytes: Uint8Array, max: number): Uint8Array {
   let total = 0;
   const inflater = new Gunzip((data) => {
     total += data.length;
-    if (total > max) throw new Error("La respuesta es demasiado grande");
+    if (total > max) throw tooBigError();
     chunks.push(data);
   });
   try {
     inflater.push(bytes, true);
   } catch (error) {
-    const message = shortError(error);
-    throw new Error(message === "La respuesta es demasiado grande" ? message : "No se pudo descomprimir la lista");
+    if (shortError(error) === TOO_BIG) throw tooBigError();
+    throw new LocalizedError("iptvErrUnzip", "No se pudo descomprimir la lista");
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -86,9 +107,9 @@ export function gunzipCapped(bytes: Uint8Array, max: number): Uint8Array {
 }
 
 /** Whole file as text (gzip-aware), for playlists. */
-export async function readTextFile(file: File, max: number, tooBig: string): Promise<string> {
+export async function readTextFile(file: File, max: number, tooBig: () => Error): Promise<string> {
   let bytes: Uint8Array = await file.bytes();
-  if (bytes.length > max) throw new Error(tooBig);
+  if (bytes.length > max) throw tooBig();
   if (isGzip(bytes)) bytes = gunzipCapped(bytes, max);
   return decodeUtf8(bytes);
 }
@@ -124,7 +145,7 @@ export async function streamTextFile(file: File, onText: (text: string) => void 
         if (isGzip(value)) {
           gunzip = new Gunzip((data) => {
             inflated += data.length;
-            if (inflated > MAX_INFLATED_BYTES) throw new Error("La respuesta es demasiado grande");
+            if (inflated > MAX_INFLATED_BYTES) throw tooBigError();
             feed(data);
           });
         }

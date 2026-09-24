@@ -5,7 +5,8 @@ import { File } from "expo-file-system";
 import { CircleAlert, EllipsisVertical, FileText, Link2, Pencil, Plus, RefreshCw, Server, Trash2, Upload } from "lucide-react-native";
 import type { IptvSource, IptvSourceKind, XtreamAccount } from "../../lib/types";
 import { api } from "../../lib/api";
-import { formatAgo } from "../../lib/iptv";
+import { formatAgo, sourceErrorText } from "../../lib/iptv";
+import { errorText } from "../../services/errors";
 import { useI18n } from "../../lib/locale-context";
 import { useSettings } from "../../lib/settings-context";
 import { useToast } from "../../lib/toast-context";
@@ -74,9 +75,6 @@ function formOf(source: IptvSource): Form {
   };
 }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Settings › IPTV: playlists (M3U by URL or file), Xtream Codes accounts, guide and preferences. */
 export function IptvSection() {
@@ -164,7 +162,7 @@ export function IptvSection() {
       toast(tr("iptvSaved", { name: saved.name }));
       void load();
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(err, tr));
     } finally {
       setBusy(false);
     }
@@ -178,7 +176,7 @@ export function IptvSection() {
     try {
       setAccount(await api.iptvXtreamCheck({ url: form.url, username: form.username, password: form.password, userAgent: form.userAgent }));
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(err, tr));
     } finally {
       setChecking(false);
     }
@@ -191,12 +189,12 @@ export function IptvSection() {
       if (form?.id === source.id) setForm(null);
       void load();
     } catch (err) {
-      toast(errorText(err));
+      toast(errorText(err, tr));
     }
   };
 
   const refresh = (source: IptvSource) => {
-    api.iptvRefresh(source.id).catch((err) => toast(errorText(err)));
+    api.iptvRefresh(source.id).catch((err) => toast(errorText(err, tr)));
   };
 
   const kindLabel = (kind: IptvSourceKind) => (kind === "xtream" ? tr("iptvKindXtream") : kind === "m3uFile" ? tr("iptvKindM3uFile") : tr("iptvKindM3uUrl"));
@@ -216,7 +214,7 @@ export function IptvSection() {
 
   const statusLine = (source: IptvSource) => {
     if (source.loading) return tr("iptvDownloading");
-    if (source.error) return source.error;
+    if (source.error) return sourceErrorText(source, tr);
     if (!source.channelCount) return tr("iptvNotLoaded");
     const parts = [
       tr("iptvChannels", { n: source.channelCount }),

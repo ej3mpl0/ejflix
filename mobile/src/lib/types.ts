@@ -1,3 +1,5 @@
+import type { MessageKey } from "./i18n";
+
 /**
  * Who is using the app: a Jellyfin user, or a local ("online") profile that may have a
  * Jellyfin account linked. `serverUrl` is null when there is no server at all.
@@ -528,6 +530,8 @@ export type IptvSource = {
   updatedMs: number;
   loading: boolean;
   error: string | null;
+  /** Translatable form of `error`, when the failure has one. */
+  errorKey?: { key: MessageKey; vars: Record<string, string | number> } | null;
   epgError: string | null;
   epgSource: string | null;
   account: XtreamAccount | null;

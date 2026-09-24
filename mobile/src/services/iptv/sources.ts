@@ -8,7 +8,7 @@ import type { IptvSourceInput, IptvSourceKind } from "../../lib/types";
 import { KEYS, PATHS, SECRET, deleteIfExists, secrets, store, writeTextAtomic } from "../store";
 import { nowMs, uuid } from "../util";
 import { LocalizedError } from "../errors";
-import { MAX_PLAYLIST_BYTES } from "./download";
+import { MAX_PLAYLIST_BYTES, fileTooBigError } from "./download";
 import type { IptvChannel } from "./m3u";
 import { hostOf, normalizeHttpUrl, parseXtreamUrl, xtreamStreamUrl } from "./xtream";
 
@@ -157,7 +157,7 @@ function upsert(list: StoredSource[], source: StoredSource): StoredSource[] {
 export async function saveSource(uid: string, input: IptvSourceInput): Promise<StoredSource> {
   const list = listSources(uid);
   const existing = input.id ? list.find((s) => s.id === input.id) : undefined;
-  if (!existing && list.length >= MAX_SOURCES) throw new Error(`Máximo ${MAX_SOURCES} listas IPTV`);
+  if (!existing && list.length >= MAX_SOURCES) throw new LocalizedError("iptvErrMaxSources", `Máximo ${MAX_SOURCES} listas IPTV`, { max: MAX_SOURCES });
   const source: StoredSource = existing ? { ...existing } : newSource();
   source.kind = input.kind;
   source.enabled = input.enabled;
@@ -169,7 +169,7 @@ export async function saveSource(uid: string, input: IptvSourceInput): Promise<S
   source.username = take(input.username.trim(), 200);
   let newPassword: string | null = null;
   if (input.password) {
-    if (input.password.length > 200) throw new Error("Contraseña demasiado larga");
+    if (input.password.length > 200) throw new LocalizedError("iptvErrPasswordTooLong", "Contraseña demasiado larga");
     newPassword = input.password;
   }
   switch (input.kind) {
@@ -179,7 +179,7 @@ export async function saveSource(uid: string, input: IptvSourceInput): Promise<S
       source.imported = false;
       break;
     case "m3uFile":
-      if (!source.imported || !PATHS.iptvImported(source.id).exists) throw new Error("Elige un archivo M3U");
+      if (!source.imported || !PATHS.iptvImported(source.id).exists) throw new LocalizedError("iptvErrPickFile", "Elige un archivo M3U");
       source.url = "";
       break;
     case "xtream": {
@@ -188,12 +188,12 @@ export async function saveSource(uid: string, input: IptvSourceInput): Promise<S
       if (source.username === "") source.username = parsed.username ?? "";
       if (!source.hasPassword && newPassword === null && parsed.password) newPassword = parsed.password;
       if (source.username === "" || (!source.hasPassword && newPassword === null)) {
-        throw new Error("Xtream Codes necesita usuario y contraseña");
+        throw new LocalizedError("iptvErrXtreamCredentials", "Xtream Codes necesita usuario y contraseña");
       }
       break;
     }
     default:
-      throw new Error("Tipo de lista no válido");
+      throw new LocalizedError("iptvErrBadKind", "Tipo de lista no válido");
   }
   const name = take(input.name.trim(), 60);
   source.name = name === "" ? defaultName(source) : name;
@@ -216,13 +216,13 @@ export async function importPlaylist(
   fileName: string,
   text: string,
 ): Promise<StoredSource> {
-  if (text.length > MAX_PLAYLIST_BYTES) throw new Error("El archivo es demasiado grande");
+  if (text.length > MAX_PLAYLIST_BYTES) throw fileTooBigError();
   if (!text.trimStart().startsWith("#EXTM3U") && !text.includes("#EXTINF")) {
-    throw new Error("El archivo no parece una lista M3U");
+    throw new LocalizedError("iptvErrNotM3u", "El archivo no parece una lista M3U");
   }
   const list = listSources(uid);
   const existing = id ? list.find((s) => s.id === id) : undefined;
-  if (!existing && list.length >= MAX_SOURCES) throw new Error(`Máximo ${MAX_SOURCES} listas IPTV`);
+  if (!existing && list.length >= MAX_SOURCES) throw new LocalizedError("iptvErrMaxSources", `Máximo ${MAX_SOURCES} listas IPTV`, { max: MAX_SOURCES });
   const source: StoredSource = existing ? { ...existing } : newSource();
   source.kind = "m3uFile";
   source.url = "";
