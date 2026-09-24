@@ -3,6 +3,7 @@
  * `downloads.ts` owns the native transfer tasks, the files and the store.
  */
 import type { AddonStream, Movie } from "../../lib/types";
+import { allowsRating, type Rule } from "../parental.pure";
 
 export type DownloadStatus = "queued" | "downloading" | "paused" | "done" | "error";
 export type DownloadSource = "jellyfin" | "addon";
@@ -39,6 +40,11 @@ export type DownloadEntry = {
   durationSeconds: number;
   /** Jellyfin: a position watched offline that the server has not heard about yet. */
   pendingSync: boolean;
+  /**
+   * Age rating the parental rule judges (an episode's series rating when it has none of
+   * its own), so a limit set after downloading still applies offline.
+   */
+  rating: string | null;
 };
 
 export type DownloadAction =
@@ -167,6 +173,8 @@ export function sanitizeDownloads(value: unknown): DownloadEntry[] {
       positionSeconds: num(e.positionSeconds, 0),
       durationSeconds: num(e.durationSeconds, 0),
       pendingSync: e.pendingSync === true,
+      // Older entries had no rating of their own: the snapshot's is the best there is.
+      rating: typeof e.rating === "string" ? e.rating : (e.movie.officialRating ?? null),
     });
   }
   return out;
@@ -223,4 +231,9 @@ export function canDownload(movie: Pick<Movie, "kind" | "live" | "external">): b
   if (movie.live) return false;
   if (movie.external) return movie.kind === "Episode" || movie.external.type === "movie";
   return movie.kind === "Movie" || movie.kind === "Episode" || movie.kind === "Video";
+}
+
+/** Whether the open profile's parental rule lets this download play (null rule: no limit). */
+export function downloadAllowed(entry: Pick<DownloadEntry, "rating">, rule: Rule | null): boolean {
+  return allowsRating(rule, entry.rating);
 }

@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { AVATAR_PRESETS, fileToAvatar, presetGradient, presetId } from "../lib/avatars";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { Avatar } from "./Avatar";
 import { Toggle } from "./settings/Toggle";
 import { fieldLgClass as field } from "../lib/ui";
@@ -55,7 +56,7 @@ export function ProfileForm({
       setAvatar(await fileToAvatar(file));
       setError("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     }
   };
 
@@ -78,7 +79,7 @@ export function ProfileForm({
       }
     } catch (err) {
       if (!editing && needsParentalPin(err)) setParental("create");
-      else setError(err instanceof Error ? err.message : String(err));
+      else setError(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -92,7 +93,7 @@ export function ProfileForm({
       onDeleted?.(initial);
     } catch (err) {
       if (needsParentalPin(err)) setParental("delete");
-      else setError(err instanceof Error ? err.message : String(err));
+      else setError(errorText(t, err));
       setBusy(false);
     }
   };

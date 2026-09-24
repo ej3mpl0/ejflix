@@ -152,7 +152,7 @@ fn status_of(stored: &Stored) -> TraktStatus {
 async fn user_id(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     crate::settings_user(app, state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 fn request(method: reqwest::Method, path: &str, client_id: &str) -> reqwest::RequestBuilder {
@@ -164,7 +164,7 @@ fn request(method: reqwest::Method, path: &str, client_id: &str) -> reqwest::Req
 }
 
 fn net(err: reqwest::Error) -> String {
-    format!("Error de red: {err}")
+    crate::errors::detail("network", err)
 }
 
 /// Stores the tokens of a `/oauth/device/token` or `/oauth/token` answer.
@@ -214,7 +214,7 @@ async fn access_token(app: &tauri::AppHandle, user_id: &str, force: bool) -> Res
         return Err("trakt_expired".into());
     }
     if !res.status().is_success() {
-        return Err(format!("Trakt {}", res.status()));
+        return Err(crate::errors::detail("traktStatus", res.status().as_u16()));
     }
     let value: Value = res.json().await.map_err(|_| "trakt_bad_response".to_string())?;
     apply_tokens(&mut stored, &value)?;
@@ -244,7 +244,7 @@ async fn call(
             continue;
         }
         if !res.status().is_success() {
-            return Err(format!("Trakt {}", res.status()));
+            return Err(crate::errors::detail("traktStatus", res.status().as_u16()));
         }
         return Ok(res.json().await.unwrap_or(Value::Null));
     }
@@ -306,7 +306,7 @@ pub async fn trakt_device_start(app: tauri::AppHandle, state: State<'_, AppState
         return Err("trakt_bad_app".into());
     }
     if !res.status().is_success() {
-        return Err(format!("Trakt {}", res.status()));
+        return Err(crate::errors::detail("traktStatus", res.status().as_u16()));
     }
     let value: Value = res.json().await.map_err(|_| "trakt_bad_response".to_string())?;
     let text = |k: &str| value.get(k).and_then(|v| v.as_str()).unwrap_or_default().to_string();
@@ -424,7 +424,7 @@ pub async fn trakt_set_sync_back(app: tauri::AppHandle, state: State<'_, AppStat
 #[tauri::command]
 pub fn trakt_open(url: String) -> Result<(), String> {
     if !url.starts_with("https://trakt.tv/") || url.chars().any(|c| c.is_control() || c == '"' || c.is_whitespace()) {
-        return Err("Enlace no permitido".into());
+        return Err(crate::errors::code("linkNotAllowed"));
     }
     std::process::Command::new("rundll32.exe")
         .args(["url.dll,FileProtocolHandler", &url])

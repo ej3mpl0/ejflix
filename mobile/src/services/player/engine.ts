@@ -34,7 +34,8 @@ import { matchesLang } from "../jellyfin/languages";
 import { settingsGet } from "../settings";
 import { upsertProgress } from "../addons";
 import { resolveCatchupPlayback, resolveChannelPlayback } from "../iptv";
-import { downloadFileUri, downloadGet, downloadRecordPosition, downloadsSyncPending } from "../downloads/downloads";
+import { downloadFileUri, downloadGet, downloadPlayable, downloadRecordPosition, downloadsSyncPending } from "../downloads/downloads";
+import { BLOCKED } from "../parental";
 import { registerSessionCleanup } from "../session";
 import { aspectBox, isAspectMode } from "./aspect";
 import { ProgressLoop, reportTick } from "./progress";
@@ -195,7 +196,7 @@ function classifyError(detail: string): PlayerErrorCode {
 
 function emitError(error: unknown, url: string | null, transcoding: boolean = isTranscoding()): void {
   if (error instanceof PlaybackError) {
-    emit("player://error", { message: error.message, detail: "", code: "unknown", url, key: error.key, transcoding });
+    emit("player://error", { message: error.message, detail: error.detail, code: "unknown", url, key: error.key, transcoding });
     return;
   }
   const detail = errorDetail(error);
@@ -854,7 +855,9 @@ async function playerStartFile(args: {
     try {
       const download = downloadGet(args.downloadId);
       const uri = downloadFileUri(args.downloadId);
-      if (!download || !uri) throw new Error("La descarga ya no está en el dispositivo");
+      if (!download || !uri) throw new PlaybackError("playErrDownloadGone", "La descarga ya no está en el dispositivo");
+      // A parental limit set after downloading still applies offline.
+      if (!downloadPlayable(download)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
       if (ctx) await stopInner(false);
       const prefs = await loadPrefs();
       const start = Math.max(0, args.startSeconds ?? 0);

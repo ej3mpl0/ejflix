@@ -2,6 +2,7 @@ mod account;
 mod addons;
 mod discord;
 mod downloads;
+mod errors;
 mod inflate;
 mod iptv;
 mod jellyfin;
@@ -424,7 +425,7 @@ async fn settings_set(
 ) -> Result<Settings, String> {
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let saved = settings::merge_and_save(&app, &uid, patch)?;
     let _ = app.emit("settings://changed", &saved);
@@ -487,7 +488,7 @@ async fn login(
     )?;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 // ---- local profiles ----
@@ -593,7 +594,7 @@ async fn local_profile_enter(
     state.account.activate(&app, &profile.id).await;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 /// Puts the Jellyfin account linked to a local profile back in memory, dropping the
@@ -652,7 +653,7 @@ async fn link_server(
     state.segments.clear().await;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 #[tauri::command]
@@ -669,7 +670,7 @@ async fn unlink_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     clear_session_at(&app, &profiles::session_key(&profile.id))?;
     account_view(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 #[tauri::command]
@@ -733,6 +734,7 @@ async fn logout(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(),
     let was_local = state.local.write().await.take().is_some();
     state.jellyfin.set_session(None).await;
     state.account.deactivate().await;
+    opensubs::forget_token();
     state.segments.clear().await;
     state.iptv.clear().await;
     profiles::set_active(&app, None)?;
@@ -750,6 +752,7 @@ async fn logout_server(app: tauri::AppHandle, state: State<'_, AppState>) -> Res
     state.jellyfin.set_session(None).await;
     state.account.deactivate().await;
     state.segments.clear().await;
+    opensubs::forget_token();
     profiles::set_active(&app, None)?;
     // The ejFlix accounts those users signed into go with them: nothing would be
     // left on screen to sign them out, and a later login must not pick them up.
@@ -949,7 +952,7 @@ async fn player_start(
     args: PlayArgs,
 ) -> Result<PlayerState, String> {
     if !jellyfin::valid_item_id(&args.item_id) {
-        return Err("Ítem no válido".into());
+        return Err(crate::errors::code("invalidItem"));
     }
     let movie = state.jellyfin.get_item(&args.item_id).await?;
     let session = state.jellyfin.require_session().await?;
@@ -1185,14 +1188,14 @@ async fn player_props(state: State<'_, AppState>) -> Result<serde_json::Map<Stri
 #[tauri::command]
 async fn player_sub_add_text(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
     if content.len() > 8 * 1024 * 1024 {
-        return Err("El archivo de subtítulos es demasiado grande".into());
+        return Err(crate::errors::code("subTooLarge"));
     }
     let ext = std::path::Path::new(&name)
         .extension()
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase())
         .filter(|e| ["srt", "vtt", "ass", "ssa", "sub"].contains(&e.as_str()))
-        .ok_or_else(|| "Formato de subtítulos no admitido".to_string())?;
+        .ok_or_else(|| crate::errors::code("subFormat"))?;
     let dir = std::env::temp_dir().join("ejflix-subs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{}.{ext}", Uuid::new_v4()));
@@ -1270,10 +1273,10 @@ fn player_mini_drag(app: tauri::AppHandle) -> Result<(), String> {
 async fn opensubtitles_prefs(app: &tauri::AppHandle, state: &AppState) -> Result<(String, settings::Playback), String> {
     let uid = settings_user(app, state)
         .await
-        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
     let playback = settings::load(app, &uid).unwrap_or_default().playback;
     if playback.opensubtitles_api_key.is_empty() {
-        return Err("Añade tu clave de API de OpenSubtitles en Ajustes › Reproducción".into());
+        return Err(crate::errors::code("osNoApiKey"));
     }
     Ok((uid, playback))
 }
@@ -1297,7 +1300,7 @@ async fn opensubtitles_download(app: tauri::AppHandle, state: State<'_, AppState
         ("", _) | (_, None) => None,
         (user, Some(password)) => Some((user, password)),
     };
-    let path = opensubs::download(&playback.opensubtitles_api_key, login, file_id).await?;
+    let path = opensubs::download(&playback.opensubtitles_api_key, &uid, login, file_id).await?;
     state.player.sub_add(&path.to_string_lossy()).await
 }
 
@@ -1315,7 +1318,7 @@ async fn opensubtitles_has_password(app: tauri::AppHandle, state: State<'_, AppS
 async fn opensubtitles_set_password(app: tauri::AppHandle, state: State<'_, AppState>, password: String) -> Result<(), String> {
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
     opensubs::save_password(&app, &uid, &password)
 }
 
@@ -1886,7 +1889,7 @@ async fn addon_add(app: tauri::AppHandle, state: State<'_, AppState>, url: Strin
     let info = state.addons.manifest(&url, false).await?;
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let mut urls = settings::load(&app, &uid)?.addons.urls;
     if !urls.contains(&url) {
@@ -1915,7 +1918,7 @@ async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: St
     let url = addons::normalize_manifest_url(&url)?;
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
     let current = settings::load(&app, &uid)?.addons;
     let urls: Vec<String> = current.urls.into_iter().filter(|u| u != &url).collect();
@@ -2063,7 +2066,7 @@ async fn addon_library_set(
 ) -> Result<Vec<addons::LibraryEntry>, String> {
     let uid = settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
     if let Some(watched) = args.watched {
         trakt::spawn_entry_history(&app, &args.entry, watched);
     }
@@ -2149,7 +2152,7 @@ async fn get_media_segments_external(
 async fn iptv_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     settings_user(app, state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())
+        .ok_or_else(|| crate::errors::code("noSession"))
 }
 
 async fn iptv_prefs(app: &tauri::AppHandle, uid: &str) -> settings::IptvPrefs {
@@ -2312,14 +2315,14 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         .iptv
         .find(&id)
         .await
-        .ok_or_else(|| "Canal no encontrado".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelNotFound"))?;
     if parental::hides_adult() && iptv::is_adult(&channel) {
         return Err(parental::BLOCKED.into());
     }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
-        .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelListGone"))?;
     let (url, headers) = iptv::stream_for(&source, &channel)?;
     let playback = settings::load(&app, &uid).unwrap_or_default().playback;
     let prefs = PlaybackPrefs {
@@ -2458,14 +2461,14 @@ async fn iptv_play_catchup(
         .iptv
         .find(&id)
         .await
-        .ok_or_else(|| "Canal no encontrado".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelNotFound"))?;
     if parental::hides_adult() && iptv::is_adult(&channel) {
         return Err(parental::BLOCKED.into());
     }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
-        .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+        .ok_or_else(|| crate::errors::code("channelListGone"))?;
     let now = addons::now_ms() / 1000;
     let url = iptv::catchup_url(&source, &channel, start, stop, now, catalog.server_offset)?;
     let (_, headers) = iptv::stream_for(&source, &channel)?;
@@ -2514,14 +2517,14 @@ async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: 
             .iptv
             .find(id)
             .await
-            .ok_or_else(|| "Canal no encontrado".to_string())?;
+            .ok_or_else(|| crate::errors::code("channelNotFound"))?;
         if parental::hides_adult() && iptv::is_adult(&channel) {
             return Err(parental::BLOCKED.into());
         }
         let source = sources
             .iter()
             .find(|s| s.id == channel.source_id)
-            .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+            .ok_or_else(|| crate::errors::code("channelListGone"))?;
         let (url, headers) = iptv::stream_for(source, &channel)?;
         resolved.push((id.clone(), channel, url, headers, catalog.account.clone()));
     }
@@ -2633,7 +2636,7 @@ async fn lists_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, 
     if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
         return Err("No hay ningún perfil activo".into());
     }
-    settings_user(app, state).await.ok_or_else(|| "No hay ningún perfil activo".to_string())
+    settings_user(app, state).await.ok_or_else(|| crate::errors::code("noProfile"))
 }
 
 #[tauri::command]

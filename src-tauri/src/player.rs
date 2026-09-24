@@ -1077,7 +1077,7 @@ impl Player {
             .stderr(Stdio::null())
             .creation_flags(CREATE_NO_WINDOW)
             .spawn()
-            .map_err(|e| format!("No se pudo iniciar mpv ({mpv}): {e}"))?;
+            .map_err(|e| crate::errors::detail("mpvStart", format!("{mpv}: {e}")))?;
         *self.child.lock().unwrap() = Some(child);
 
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<IpcRequest>();
@@ -1421,7 +1421,7 @@ fn find_mpv(app: &AppHandle) -> Result<String, String> {
             }
         }
     }
-    Err("No se encontró mpv.exe. Copia el binario a src-tauri/resources o instálalo en C:\\mpv.".into())
+    Err(crate::errors::code("mpvMissing"))
 }
 
 fn create_video_host(parent: isize, w: i32, h: i32) -> Result<isize, String> {
@@ -1445,7 +1445,7 @@ fn create_video_host(parent: isize, w: i32, h: i32) -> Result<isize, String> {
         )
     };
     if hwnd == 0 {
-        Err("No se pudo crear la ventana de vídeo".into())
+        Err(crate::errors::code("videoWindow"))
     } else {
         Ok(hwnd)
     }

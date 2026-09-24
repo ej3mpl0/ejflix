@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { cn, episodeCode } from "../lib/format";
 import { formatSize, isTorrentOnly, streamView, type StreamKind, type StreamView } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { useBackNavigation } from "../lib/use-back";
 import { useDownloads } from "../lib/downloads-context";
@@ -163,7 +164,7 @@ export function StreamPicker({
         if (alive) setStreams(list);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;

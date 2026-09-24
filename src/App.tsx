@@ -18,6 +18,7 @@ import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { DownloadsProvider } from "./lib/downloads-context";
 import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
+import { errorText } from "./lib/errors";
 import type { AccountStatus, Movie, SavedServer, Session, Toast } from "./lib/types";
 import { SetupStep } from "./screens/SetupStep";
 import { ReminderAlerts } from "./components/ReminderAlerts";
@@ -305,7 +306,7 @@ function AppInner() {
                     .localProfileEnter(profile.id, pin)
                     .then(setSession)
                     .catch((err) => {
-                      toast(err instanceof Error ? err.message : String(err));
+                      toast(errorText(t, err));
                       setGate("profiles");
                     });
                 }}

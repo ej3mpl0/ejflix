@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { fieldClass } from "../lib/ui";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { Dialog } from "./Dialog";
 import { Chip } from "./Chip";
@@ -99,7 +100,7 @@ export function SubtitleSearch({
       .catch((err) => {
         if (mine !== seq.current) return;
         setResults(null);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(t, err));
       })
       .finally(() => {
         if (mine === seq.current) setLoading(false);
@@ -116,7 +117,7 @@ export function SubtitleSearch({
         onLoaded();
         onClose();
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => setError(errorText(t, err)))
       .finally(() => setDownloading(null));
   };
 

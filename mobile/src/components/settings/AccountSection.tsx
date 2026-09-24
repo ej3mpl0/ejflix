@@ -8,6 +8,7 @@ import { sessionAvatar } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
 import { useSession } from "../../lib/session-context";
 import { useToast } from "../../lib/toast-context";
+import { errorText } from "../../services/errors";
 import { hasServer, type Session } from "../../lib/types";
 import type { MainStackParamList } from "../../navigation/types";
 import { makeStyles, useTheme } from "../../theme/ThemeProvider";
@@ -44,7 +45,7 @@ function LocalAccount({ session }: { session: Session }) {
       setPassword("");
       void refreshServer();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, tr));
     } finally {
       setBusy(false);
     }
@@ -57,7 +58,7 @@ function LocalAccount({ session }: { session: Session }) {
       setSession(await api.unlinkServer());
       void refreshServer();
     } catch (err) {
-      toast(err instanceof Error ? err.message : String(err));
+      toast(errorText(err, tr));
     } finally {
       setBusy(false);
     }

@@ -4,6 +4,7 @@ import type { ImportedAddon } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { fieldClass, labelClass } from "../lib/ui";
 import { Pill } from "./Pill";
@@ -55,7 +56,7 @@ export function AddonImport({ onImported }: { onImported?: (added: number) => vo
             ? t("stremioErrNetwork")
             : code === "stremio_unexpected"
               ? t("stremioErrUnexpected")
-              : code,
+              : errorText(t, code),
       );
     } finally {
       setBusy(false);

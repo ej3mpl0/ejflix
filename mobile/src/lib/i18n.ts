@@ -616,6 +616,18 @@ const es = {
   catchupAvailable: "Disponible en diferido",
   programmeUpcoming: "Próximamente",
   programmeEnded: "Ya emitido",
+  // --- pending fixes ---
+  playErrDownloadGone: "La descarga ya no est\u00e1 en el dispositivo.",
+  playErrServerCode: "El servidor no puede reproducir este t\u00edtulo.",
+  errNoSession: "No hay ninguna sesi\u00f3n abierta.",
+  errNoLocalProfile: "No hay ning\u00fan perfil local abierto.",
+  errJellyfinUnreachable: "No se puede conectar con Jellyfin: {detail}",
+  errUnreachable: "No se puede conectar con el servidor: {detail}",
+  errServerStatus: "El servidor ha respondido con el c\u00f3digo {status}.",
+  errBadServerReply: "Respuesta no v\u00e1lida del servidor: {detail}",
+  errProfilesUnreadable: "No se pueden leer los perfiles: {detail}",
+  errWrongCredentials: "Usuario o contrase\u00f1a incorrectos.",
+  errLoginIncomplete: "El servidor no ha devuelto un inicio de sesi\u00f3n completo.",
 };
 
 const en: typeof es = {
@@ -1234,6 +1246,18 @@ const en: typeof es = {
   catchupAvailable: "Available on catch-up",
   programmeUpcoming: "Coming up",
   programmeEnded: "Already aired",
+  // --- pending fixes ---
+  playErrDownloadGone: "The download is no longer on the device.",
+  playErrServerCode: "The server cannot play this title.",
+  errNoSession: "No session is open.",
+  errNoLocalProfile: "No local profile is open.",
+  errJellyfinUnreachable: "Cannot connect to Jellyfin: {detail}",
+  errUnreachable: "Cannot connect to the server: {detail}",
+  errServerStatus: "The server answered with code {status}.",
+  errBadServerReply: "Invalid response from the server: {detail}",
+  errProfilesUnreadable: "Cannot read the profiles: {detail}",
+  errWrongCredentials: "Wrong username or password.",
+  errLoginIncomplete: "The server did not return a complete sign-in.",
 };
 
 export const dictionaries = { es, en };

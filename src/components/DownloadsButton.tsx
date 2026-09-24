@@ -3,6 +3,7 @@ import { CheckCircle2, Download, FolderOpen, LoaderCircle, Trash2, X } from "luc
 import type { DownloadItem } from "../lib/types";
 import { cn, formatBytes } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useDownloads } from "../lib/downloads-context";
 
 function percent(item: DownloadItem): number {
@@ -54,7 +55,7 @@ export function DownloadsButton() {
         : formatBytes(item.received);
     }
     if (item.status === "done") return `${t("downloadDone")} · ${formatBytes(item.received)}`;
-    if (item.status === "error") return item.error || t("downloadFailedShort");
+    if (item.status === "error") return item.error ? errorText(t, item.error) : t("downloadFailedShort");
     return t("downloadCanceled");
   };
 

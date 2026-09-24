@@ -365,7 +365,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
               transcoding,
             }
           : err instanceof PlaybackError
-            ? { message: err.message, detail: "", code: "unknown", url: null, key: err.key, transcoding }
+            ? { message: err.message, detail: err.detail, code: "unknown", url: null, key: err.key, transcoding }
             : {
                 message: tRef.current("playerStartError"),
                 detail: err instanceof Error ? err.message : "",

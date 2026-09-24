@@ -27,7 +27,9 @@ static HTTP: LazyLock<reqwest::Client> = LazyLock::new(|| {
 });
 
 /// Login token of the current account: (username, token, API host, obtained at).
-static TOKEN: LazyLock<Mutex<Option<(String, String, String, Instant)>>> = LazyLock::new(|| Mutex::new(None));
+/// Login token of the last account used: (profile id, username, token, API host, when).
+/// Keyed by profile too, so another profile with the same username never reuses it.
+static TOKEN: LazyLock<Mutex<Option<(String, String, String, String, Instant)>>> = LazyLock::new(|| Mutex::new(None));
 
 /// What the player knows about the title being searched.
 #[derive(Debug, Clone, Default, serde::Deserialize)]
@@ -126,7 +128,7 @@ fn search_params(query: &SearchQuery) -> Result<Vec<(&'static str, String)>, Str
             params.push(("episode_number", episode.to_string()));
         }
     } else {
-        return Err("No hay nada con lo que buscar subtítulos".into());
+        return Err(crate::errors::code("osNothingToSearch"));
     }
     let mut langs: Vec<&str> = query.languages.iter().flat_map(|l| os_languages(l)).collect();
     langs.sort_unstable();
@@ -145,10 +147,10 @@ fn api_error(status: reqwest::StatusCode, body: &Value) -> String {
         .and_then(|v| v.as_str())
         .unwrap_or("");
     match status.as_u16() {
-        401 | 403 if message.is_empty() => "OpenSubtitles rechazó la clave de API o el usuario".into(),
-        429 => "Demasiadas peticiones a OpenSubtitles; espera un momento".into(),
-        _ if !message.is_empty() => format!("OpenSubtitles: {message}"),
-        code => format!("OpenSubtitles respondió con un error ({code})"),
+        401 | 403 if message.is_empty() => crate::errors::code("osRejected"),
+        429 => crate::errors::code("osRateLimited"),
+        _ if !message.is_empty() => crate::errors::detail("osMessage", message),
+        code => crate::errors::detail("osStatus", code),
     }
 }
 
@@ -161,7 +163,7 @@ pub async fn search(api_key: &str, query: &SearchQuery) -> Result<Vec<SubtitleRe
         .query(&params)
         .send()
         .await
-        .map_err(|_| "No se pudo conectar con OpenSubtitles".to_string())?;
+        .map_err(|_| crate::errors::code("osUnreachable"))?;
     let status = res.status();
     let body: Value = res.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -204,9 +206,9 @@ pub async fn search(api_key: &str, query: &SearchQuery) -> Result<Vec<SubtitleRe
 }
 
 /// Login token and API host for the account, logging in when there is none yet.
-async fn token(api_key: &str, username: &str, password: &str) -> Result<(String, String), String> {
-    if let Some((user, token, host, at)) = TOKEN.lock().unwrap().clone() {
-        if user == username && at.elapsed() < TOKEN_TTL {
+async fn token(api_key: &str, profile: &str, username: &str, password: &str) -> Result<(String, String), String> {
+    if let Some((owner, user, token, host, at)) = TOKEN.lock().unwrap().clone() {
+        if owner == profile && user == username && at.elapsed() < TOKEN_TTL {
             return Ok((token, host));
         }
     }
@@ -217,12 +219,12 @@ async fn token(api_key: &str, username: &str, password: &str) -> Result<(String,
         .json(&json!({ "username": username, "password": password }))
         .send()
         .await
-        .map_err(|_| "No se pudo conectar con OpenSubtitles".to_string())?;
+        .map_err(|_| crate::errors::code("osUnreachable"))?;
     let status = res.status();
     let body: Value = res.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
         return Err(if status.as_u16() == 401 {
-            "Usuario o contraseña de OpenSubtitles incorrectos".into()
+            crate::errors::code("osWrongCredentials")
         } else {
             api_error(status, &body)
         });
@@ -230,7 +232,7 @@ async fn token(api_key: &str, username: &str, password: &str) -> Result<(String,
     let token = body
         .get("token")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "OpenSubtitles no devolvió la sesión".to_string())?
+        .ok_or_else(|| crate::errors::code("osNoSession"))?
         .to_string();
     // VIP accounts are served from their own host; only accept OpenSubtitles hosts.
     let host = body
@@ -239,7 +241,7 @@ async fn token(api_key: &str, username: &str, password: &str) -> Result<(String,
         .map(|h| h.trim().trim_start_matches("https://").trim_end_matches('/').to_string())
         .filter(|h| h == "api.opensubtitles.com" || h == "vip-api.opensubtitles.com")
         .unwrap_or_else(|| "api.opensubtitles.com".into());
-    *TOKEN.lock().unwrap() = Some((username.to_string(), token.clone(), host.clone(), Instant::now()));
+    *TOKEN.lock().unwrap() = Some((profile.to_string(), username.to_string(), token.clone(), host.clone(), Instant::now()));
     Ok((token, host))
 }
 
@@ -247,11 +249,16 @@ pub fn forget_token() {
     *TOKEN.lock().unwrap() = None;
 }
 
-/// Downloads one subtitle file to a temporary path and returns it.
-pub async fn download(api_key: &str, login: Option<(&str, &str)>, file_id: u64) -> Result<std::path::PathBuf, String> {
+/// Downloads one subtitle file to a temporary path and returns it. `profile` owns `login`.
+pub async fn download(
+    api_key: &str,
+    profile: &str,
+    login: Option<(&str, &str)>,
+    file_id: u64,
+) -> Result<std::path::PathBuf, String> {
     let (auth, base) = match login {
         Some((user, password)) => {
-            let (token, host) = token(api_key, user, password).await?;
+            let (token, host) = token(api_key, profile, user, password).await?;
             (Some(token), format!("https://{host}/api/v1"))
         }
         None => (None, API.to_string()),
@@ -267,7 +274,7 @@ pub async fn download(api_key: &str, login: Option<(&str, &str)>, file_id: u64) 
     let res = req
         .send()
         .await
-        .map_err(|_| "No se pudo conectar con OpenSubtitles".to_string())?;
+        .map_err(|_| crate::errors::code("osUnreachable"))?;
     let status = res.status();
     let body: Value = res.json().await.unwrap_or(Value::Null);
     if !status.is_success() {
@@ -280,7 +287,7 @@ pub async fn download(api_key: &str, login: Option<(&str, &str)>, file_id: u64) 
         .get("link")
         .and_then(|v| v.as_str())
         .filter(|l| l.starts_with("https://"))
-        .ok_or_else(|| "OpenSubtitles no devolvió el enlace de descarga".to_string())?;
+        .ok_or_else(|| crate::errors::code("osNoLink"))?;
     let ext = body
         .get("file_name")
         .and_then(|v| v.as_str())
@@ -292,13 +299,13 @@ pub async fn download(api_key: &str, login: Option<(&str, &str)>, file_id: u64) 
         .get(link)
         .send()
         .await
-        .map_err(|_| "No se pudo descargar el subtítulo".to_string())?;
+        .map_err(|_| crate::errors::code("subDownloadFailed"))?;
     if !file.status().is_success() {
-        return Err("No se pudo descargar el subtítulo".into());
+        return Err(crate::errors::code("subDownloadFailed"));
     }
     let bytes = file.bytes().await.map_err(|e| e.to_string())?;
     if bytes.len() > MAX_SUBTITLE_BYTES {
-        return Err("El archivo de subtítulos es demasiado grande".into());
+        return Err(crate::errors::code("subTooLarge"));
     }
     let dir = std::env::temp_dir().join("ejflix-subs");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -324,7 +331,7 @@ pub fn load_password(app: &tauri::AppHandle, user_id: &str) -> Option<String> {
 /// Saves the password (empty removes it).
 pub fn save_password(app: &tauri::AppHandle, user_id: &str, password: &str) -> Result<(), String> {
     if password.len() > 256 {
-        return Err("Contraseña demasiado larga".into());
+        return Err(crate::errors::code("passwordTooLong"));
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     if password.is_empty() {

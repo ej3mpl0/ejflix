@@ -15,6 +15,7 @@ import {
   reminderOf,
 } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { ChannelCard } from "../components/ChannelCard";
 import { Shimmer } from "../components/Shimmer";
 import { EmptyState } from "../components/EmptyState";
@@ -127,7 +128,7 @@ export function LiveTv({
         setItems((previous) => (first ? page.items : [...previous, ...page.items]));
         setTotal(page.total);
       } catch (err) {
-        if (id === request.current) onErrorRef.current(err instanceof Error ? err.message : String(err));
+        if (id === request.current) onErrorRef.current(errorText(t, err));
       } finally {
         if (id === request.current) {
           setLoading(false);
@@ -191,14 +192,14 @@ export function LiveTv({
       setReminders(list);
       onToast?.(on ? t("reminderSet", { title: programme.title }) : t("reminderRemoved"));
     } catch (err) {
-      onErrorRef.current(err instanceof Error ? err.message : String(err));
+      onErrorRef.current(errorText(t, err));
     }
   };
 
   const cancelReminder = (reminder: Reminder) => {
     setReminders((list) => list.filter((r) => r !== reminder));
     api.iptvReminderRemove(reminder.channelId, reminder.start).then(setReminders, (err: unknown) => {
-      onErrorRef.current(err instanceof Error ? err.message : String(err));
+      onErrorRef.current(errorText(t, err));
     });
   };
 
@@ -233,12 +234,12 @@ export function LiveTv({
       }
     } catch (err) {
       setItems((list) => list.map((c) => (c.id === channel.id ? { ...c, favorite: !on } : c)));
-      onErrorRef.current(err instanceof Error ? err.message : String(err));
+      onErrorRef.current(errorText(t, err));
     }
   };
 
   const refresh = () => {
-    api.iptvRefresh(sourceId || null).catch((err) => onErrorRef.current(err instanceof Error ? err.message : String(err)));
+    api.iptvRefresh(sourceId || null).catch((err) => onErrorRef.current(errorText(t, err)));
   };
 
   const visibleGroups = useMemo(() => {

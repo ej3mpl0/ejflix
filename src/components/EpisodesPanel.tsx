@@ -5,6 +5,7 @@ import { api } from "../lib/api";
 import { sortedVideos, videoToMovie } from "../lib/addons";
 import { cn, episodeCode, formatRuntime } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { Chip } from "./Chip";
 import { Shimmer } from "./Shimmer";
 import { SeasonChips } from "./SeasonChips";
@@ -55,7 +56,7 @@ export function EpisodesPanel({
         setOnlineMeta(meta);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     api
       .addonProgressList()
@@ -101,7 +102,7 @@ export function EpisodesPanel({
         setSeasonId((current) => current ?? list[0]?.id ?? null);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -118,7 +119,7 @@ export function EpisodesPanel({
         if (alive) setEpisodes(list);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;

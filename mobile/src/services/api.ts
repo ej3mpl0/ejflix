@@ -250,6 +250,8 @@ export const api = {
   downloadRemove: (id: string) => downloads.downloadRemove(id),
   downloadsStorage: () => downloads.downloadsStorage(),
   playableDownload: (movie: Movie) => downloads.playableDownload(movie),
+  /** The open profile's parental rule lets this download play. */
+  downloadPlayable: (entry: downloads.DownloadEntry) => downloads.downloadPlayable(entry),
   onDownloadsChanged: (handler: () => void): Promise<() => void> => listen("downloads://changed", () => handler()),
 };
 
