@@ -4,6 +4,7 @@
  * small store the screens subscribe to. React Native has no CSP, so the socket lives
  * in JS here. The phone has no ejFlix account, so only public channels are joined.
  */
+import { AppState } from "react-native";
 import {
   backoffMs,
   broadcastMessage,
@@ -43,6 +44,8 @@ const HOST_GRACE_MS = 45_000;
 const PRESENCE_SETTLE_MS = 3000;
 const FIRST_JOIN_TRIES = 3;
 const MAX_DATA_BYTES = 8 * 1024;
+/** After the app comes back, how long a heartbeat may take before the socket counts as dead. */
+const WAKE_BEAT_MS = 5000;
 /** What the screens may send (the rest is the party's own plumbing). */
 const APP_EVENTS = ["sync", "sync_req", "control", "chat", "react", "ping", "pong"];
 
@@ -99,6 +102,8 @@ class PartySession {
   private hostGoneSince: number | null = null;
   private joinedAt = 0;
   private closed = false;
+  /** Whoever sent the first title before presence named a host (the presumed host). */
+  private titleFrom: string | null = null;
   private readonly topic: string;
 
   constructor(
@@ -235,10 +240,18 @@ class PartySession {
     const host = presenceHost(this.presence);
     // Until presence names the host, take the word of whoever speaks as one.
     const fromHost = host == null || host === b.from;
-    if (b.event === "title" && fromHost) {
+    if (b.event === "title") {
+      // Before presence names the host, only the first sender of a title is believed.
+      if (host == null) {
+        if (this.titleFrom != null && this.titleFrom !== b.from) return;
+        this.titleFrom = b.from;
+      } else if (host !== b.from) {
+        return;
+      }
       setStatus(this, { title: parseTitle(b.data) });
-    } else if (b.event === "end" && fromHost) {
-      this.end("party:host_ended");
+    } else if (b.event === "end") {
+      // Only a known host ends the party (a vanished one is caught by `checkHost`).
+      if (host != null && host === b.from) this.end("party:host_ended");
     } else if (APP_EVENTS.includes(b.event)) {
       const message: PartyMessage = { event: b.event, from: b.from, fromHost, data: b.data };
       for (const listener of messageListeners) listener(message);
@@ -298,6 +311,28 @@ class PartySession {
     this.timers.push(setTimeout(() => this.connect(), backoffMs(this.attempt, Math.random())));
   }
 
+  /** Back in the foreground: a socket that died meanwhile is replaced right away. */
+  wake() {
+    if (this.closed) return;
+    const ws = this.ws;
+    if (ws && ws.readyState === WebSocket.CONNECTING) return;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      this.clearTimers();
+      this.closeSocket();
+      this.connect();
+      return;
+    }
+    if (!this.joined) return;
+    // Open as far as the OS says: a heartbeat that does not come back soon means it is not.
+    const beat = this.ref();
+    this.pendingBeat = beat;
+    if (!this.write(heartbeatMessage(beat))) {
+      this.dropped();
+      return;
+    }
+    this.timers.push(setTimeout(() => this.pendingBeat === beat && this.dropped(), WAKE_BEAT_MS));
+  }
+
   send(event: string, data: unknown): boolean {
     if (!this.joined) return false;
     return this.write(broadcastMessage(this.topic, event, this.selfId, data, this.ref(), this.joinRef));
@@ -352,6 +387,14 @@ export function partyLeave(): void {
   current = null;
   status = IDLE;
   for (const listener of statusListeners) listener();
+}
+
+try {
+  AppState.addEventListener("change", (next) => {
+    if (next === "active") current?.wake();
+  });
+} catch {
+  /* no AppState in tests */
 }
 
 export function partySend(event: string, data: unknown): boolean {

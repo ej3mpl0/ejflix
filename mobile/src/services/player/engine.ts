@@ -20,6 +20,7 @@ import * as NavigationBar from "expo-navigation-bar";
 import { Platform } from "react-native";
 import type { Movie, PlayerState, PlayerTrack } from "../../lib/types";
 import { emit, PlaybackError, type PlayerErrorCode } from "../events";
+import { LocalizedError } from "../errors";
 import { clamp, ticksFromSeconds } from "../util";
 import { getItem } from "../jellyfin/library";
 import {
@@ -198,6 +199,8 @@ function emitError(error: unknown, url: string | null, transcoding: boolean = is
   // The library refuses a title above the profile's age limit with a bare marker.
   if (!(error instanceof PlaybackError) && errorDetail(error) === BLOCKED) {
     error = new PlaybackError("parentalBlockedTitle", BLOCKED);
+  } else if (error instanceof LocalizedError && Object.keys(error.vars).length === 0) {
+    error = new PlaybackError(error.key, error.message);
   }
   if (error instanceof PlaybackError) {
     emit("player://error", { message: error.message, detail: error.detail, code: "unknown", url, key: error.key, transcoding });

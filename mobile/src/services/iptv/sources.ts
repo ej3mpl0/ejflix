@@ -7,6 +7,7 @@ import { Platform } from "react-native";
 import type { IptvSourceInput, IptvSourceKind } from "../../lib/types";
 import { KEYS, PATHS, SECRET, deleteIfExists, secrets, store, writeTextAtomic } from "../store";
 import { nowMs, uuid } from "../util";
+import { LocalizedError } from "../errors";
 import { MAX_PLAYLIST_BYTES } from "./download";
 import type { IptvChannel } from "./m3u";
 import { hostOf, normalizeHttpUrl, parseXtreamUrl, xtreamStreamUrl } from "./xtream";
@@ -293,7 +294,7 @@ export function streamFor(
 ): { url: string; headers: Record<string, string> } {
   let url: string;
   if (source.kind === "xtream") {
-    if (channel.streamId === "" || password === "") throw new Error("Canal no disponible");
+    if (channel.streamId === "" || password === "") throw new LocalizedError("iptvErrChannelUnavailable", "Canal no disponible");
     // AVPlayer cannot play a raw MPEG-TS stream, only HLS: on iOS every Xtream live
     // channel is asked for as .m3u8 whatever the source says.
     const output = Platform.OS === "ios" ? "m3u8" : source.output;
@@ -302,7 +303,7 @@ export function streamFor(
     url = channel.url;
   }
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    throw new Error("Solo se pueden reproducir canales http o https");
+    throw new LocalizedError("playErrHttpOnly", "Solo se pueden reproducir canales http o https");
   }
   const headers: Record<string, string> = {};
   const ua = channel.userAgent ?? userAgentOf(source);

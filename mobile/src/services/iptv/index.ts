@@ -17,6 +17,7 @@ import type {
 } from "../../lib/types";
 import { Platform } from "react-native";
 import { emit, PlaybackError } from "../events";
+import { LocalizedError } from "../errors";
 import { KEYS, store } from "../store";
 import { addReminder, catchupUrl, dropReminder, dueReminders, pruneReminders } from "./catchup";
 import { nowMs } from "../util";
@@ -31,7 +32,7 @@ import { BLOCKED, hidesAdult, isAdultChannel } from "../parental";
 
 function requireUser(): string {
   const uid = settingsUser();
-  if (!uid) throw new Error("No hay sesión activa");
+  if (!uid) throw new LocalizedError("errNoSession", "No hay sesión activa");
   return uid;
 }
 
@@ -143,7 +144,7 @@ export async function iptvEpgChannel(id: string): Promise<Programme[]> {
 
 export async function iptvFavorite(id: string, on: boolean): Promise<string[]> {
   const uid = requireUser();
-  if (sources.sourceOf(id) === null) throw new Error("Canal no válido");
+  if (sources.sourceOf(id) === null) throw new LocalizedError("iptvErrInvalidChannel", "Canal no válido");
   return sources.setFavorite(uid, id, on);
 }
 
@@ -231,7 +232,7 @@ export async function iptvReminders(): Promise<Reminder[]> {
 
 export async function iptvReminderSet(reminder: Reminder): Promise<Reminder[]> {
   const uid = requireUser();
-  if (sources.sourceOf(reminder.channelId) === null) throw new Error("Canal no válido");
+  if (sources.sourceOf(reminder.channelId) === null) throw new LocalizedError("iptvErrInvalidChannel", "Canal no válido");
   if (hidesAdult() && isAdultReminder(reminder)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
   return saveReminders(uid, addReminder(loadReminders(uid), reminder, nowSeconds()));
 }

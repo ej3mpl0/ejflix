@@ -9,6 +9,7 @@ import { AppState } from "react-native";
 import { Directory, DownloadTask, File, Paths, type DownloadPauseState } from "expo-file-system";
 import type { AddonStream, Movie } from "../../lib/types";
 import { emit } from "../events";
+import { LocalizedError } from "../errors";
 import { KEYS, store } from "../store";
 import { settingsUser } from "../settings";
 import { registerSessionCleanup } from "../session";
@@ -134,7 +135,7 @@ function find(profile: string, id: string): DownloadEntry | null {
 function requestHeaders(entry: DownloadEntry): Record<string, string> {
   if (entry.source === "addon") return { ...entry.headers };
   const session = jellyfin.session;
-  if (!session) throw new Error("No hay sesión de Jellyfin");
+  if (!session) throw new LocalizedError("dlErrNoJellyfin", "No hay sesión de Jellyfin");
   return authHeaders(session.deviceId, session.token);
 }
 
@@ -316,9 +317,9 @@ function newEntry(
 /** Queues the original file of a Jellyfin movie or episode (`/Items/{id}/Download`). */
 export async function downloadJellyfin(movie: Movie): Promise<DownloadEntry> {
   const profile = owner();
-  if (!profile) throw new Error("No hay sesión activa");
+  if (!profile) throw new LocalizedError("errNoSession", "No hay sesión activa");
   const session = jellyfin.require();
-  if (!validItemId(movie.id)) throw new Error("Ítem no válido");
+  if (!validItemId(movie.id)) throw new LocalizedError("playErrInvalidItem", "Ítem no válido");
   const existing = find(profile, movie.id);
   if (existing && existing.status !== "error") return existing;
   const mediaSourceId = movie.mediaSourceId ?? movie.mediaSources[0]?.id ?? null;
@@ -357,9 +358,9 @@ export async function downloadJellyfin(movie: Movie): Promise<DownloadEntry> {
 /** Queues a direct http(s) stream of an online title. */
 export function downloadAddon(movie: Movie, stream: AddonStream): DownloadEntry {
   const profile = owner();
-  if (!profile) throw new Error("No hay sesión activa");
-  if (!movie.external) throw new Error("No es un título online");
-  if (!isDownloadableStream(stream) || !stream.url) throw new Error("Esta fuente no se puede descargar");
+  if (!profile) throw new LocalizedError("errNoSession", "No hay sesión activa");
+  if (!movie.external) throw new LocalizedError("dlErrNotOnline", "No es un título online");
+  if (!isDownloadableStream(stream) || !stream.url) throw new LocalizedError("downloadNotDirect", "Esta fuente no se puede descargar");
   const existing = find(profile, movie.id);
   if (existing && existing.status !== "error") return existing;
   const headers: Record<string, string> = {};

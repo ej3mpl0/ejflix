@@ -4,6 +4,7 @@
  */
 import type { Reminder } from "../../lib/types";
 import { percentEncode } from "../addons.pure";
+import { LocalizedError } from "../errors";
 
 /** Catch-up fields of a catalog channel (absent when the channel has no archive). */
 export type CatchupInfo = {
@@ -148,14 +149,14 @@ export function catchupUrl(
   offset = 0,
 ): string {
   const days = catchupWindow(channel);
-  if (days === 0) throw new Error("Este canal no permite ver programas anteriores");
+  if (days === 0) throw new LocalizedError("catchupErrNoArchive", "Este canal no permite ver programas anteriores");
   if (stop <= start || start >= now || start + days * 86_400 < now) {
-    throw new Error("Este programa no está disponible en diferido");
+    throw new LocalizedError("catchupErrUnavailable", "Este programa no está disponible en diferido");
   }
   let url: string;
   switch (channel.catchup) {
     case "xtream": {
-      if (!xtream || channel.streamId === "" || xtream.password === "") throw new Error("Canal no disponible");
+      if (!xtream || channel.streamId === "" || xtream.password === "") throw new LocalizedError("iptvErrChannelUnavailable", "Canal no disponible");
       const minutes = Math.max(1, Math.ceil((stop - start) / 60));
       url = `${xtream.base}/timeshift/${percentEncode(xtream.username)}/${percentEncode(xtream.password)}/${minutes}/${formatStamp("Y-m-d:H-M", start + offset)}/${channel.streamId}.${xtream.output}`;
       break;
@@ -170,10 +171,10 @@ export function catchupUrl(
       url = `${channel.url}${channel.url.includes("?") ? "&" : "?"}utc=${start}&lutc=${now}`;
       break;
     default:
-      throw new Error("Este canal no permite ver programas anteriores");
+      throw new LocalizedError("catchupErrNoArchive", "Este canal no permite ver programas anteriores");
   }
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    throw new Error("Solo se pueden reproducir canales http o https");
+    throw new LocalizedError("playErrHttpOnly", "Solo se pueden reproducir canales http o https");
   }
   return url;
 }
@@ -193,9 +194,9 @@ export function pruneReminders(list: Reminder[], now: number): Reminder[] {
 
 /** Adds (or replaces) the reminder of a programme that has not started yet. */
 export function addReminder(list: Reminder[], reminder: Reminder, now: number): Reminder[] {
-  if (reminder.start <= now) throw new Error("El programa ya ha empezado");
+  if (reminder.start <= now) throw new LocalizedError("reminderErrStarted", "El programa ya ha empezado");
   const rest = pruneReminders(list, now).filter((r) => !(r.channelId === reminder.channelId && r.start === reminder.start));
-  if (rest.length >= MAX_REMINDERS) throw new Error("Hay demasiados recordatorios");
+  if (rest.length >= MAX_REMINDERS) throw new LocalizedError("reminderErrTooMany", "Hay demasiados recordatorios");
   return pruneReminders([...rest, { ...reminder, title: reminder.title.slice(0, 200), notified: false }], now);
 }
 

@@ -7,6 +7,7 @@ import { useI18n } from "../../lib/locale-context";
 import { useToast } from "../../lib/toast-context";
 import { useDownloadEntry } from "../../lib/use-downloads";
 import { haptic } from "../../lib/haptics";
+import { errorText } from "../../services/errors";
 import { openPlayer } from "../../navigation/navigationRef";
 import { canDownload, isDownloadableStream, progressOf, type DownloadEntry } from "../../services/downloads/downloads.pure";
 import { makeStyles, useTheme } from "../../theme/ThemeProvider";
@@ -16,10 +17,6 @@ import { IconButton } from "../ui/IconButton";
 import { Pill } from "../ui/Pill";
 import { PressableScale } from "../ui/PressableScale";
 import { StreamPickerSheet } from "./StreamPickerSheet";
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Short state line of a download ("Downloading 42%", "Paused"...). */
 export function useDownloadLabel(): (entry: DownloadEntry | null) => string {
@@ -112,7 +109,7 @@ export function DownloadButton({
     api
       .downloadJellyfin(movie)
       .then(() => toast(tr("downloadAdded", { title: movie.name })))
-      .catch((err) => toast(errorText(err)))
+      .catch((err) => toast(errorText(err, tr)))
       .finally(() => setBusy(false));
   };
 
@@ -126,7 +123,7 @@ export function DownloadButton({
       api.downloadAddon(movie, stream);
       toast(tr("downloadAdded", { title: movie.name }));
     } catch (err) {
-      toast(errorText(err));
+      toast(errorText(err, tr));
     }
   };
 
