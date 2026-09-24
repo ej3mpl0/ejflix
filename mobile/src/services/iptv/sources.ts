@@ -268,6 +268,7 @@ export async function deleteProfileSources(uid: string): Promise<string[]> {
   store.remove(KEYS.iptv(uid));
   store.remove(KEYS.iptvFavorites(uid));
   store.remove(KEYS.iptvRecent(uid));
+  store.remove(KEYS.iptvReminders(uid));
   return ids;
 }
 

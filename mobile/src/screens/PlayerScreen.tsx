@@ -9,6 +9,7 @@ import { useKeepAwake } from "expo-keep-awake";
 import { useFocusEffect } from "@react-navigation/native";
 import { ExternalLink, ListVideo, RotateCcw } from "lucide-react-native";
 import * as DocumentPicker from "expo-document-picker";
+import * as Haptics from "expo-haptics";
 import { File } from "expo-file-system";
 import { api } from "../lib/api";
 import { engine } from "../services/player/engine";
@@ -247,6 +248,14 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           ? [movie.seriesName, episodeCode(movie, "S{s}:E{e}"), movie.name].filter(Boolean).join(" · ")
           : movie.name;
       try {
+        if (movie.live?.catchup) {
+          // A past programme from the channel's archive.
+          const { start, stop, title: programme } = movie.live.catchup;
+          const next = await api.iptvPlayCatchup(movie.live.channelId, start, stop, programme);
+          if (cancelled) return;
+          setState(next);
+          return;
+        }
         if (movie.live) {
           // IPTV channel: the engine resolves the stream URL (Xtream credentials stay there).
           const next = await api.iptvPlay(movie.live.channelId);
@@ -586,9 +595,11 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   };
 
   const playChannel = (channel: Channel) => {
-    if (!live || nextSent.current || channel.id === live.channelId) return;
+    if (!live || nextSent.current || (channel.id === live.channelId && !live.catchup)) return;
     nextSent.current = true;
     setPanel(false);
+    // A light tick confirms the zap before the new stream shows up.
+    void Haptics.selectionAsync().catch(() => undefined);
     navigation.setParams({ movie: channelToMovie(channel, live.sourceName) });
   };
 
@@ -910,7 +921,18 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           sheet={sheet}
           remaining={remaining}
           panelOpen={panel}
-          live={live ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null } : null}
+          live={
+            live?.catchup
+              ? {
+                  number: live.number,
+                  now: { start: live.catchup.start, stop: live.catchup.stop, title: live.catchup.title, desc: null, category: null },
+                  next: null,
+                  catchup: true,
+                }
+              : live
+                ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null }
+                : null
+          }
           onSheet={setSheet}
           onToggleRemaining={toggleRemaining}
           onBack={exit}

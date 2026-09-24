@@ -13,6 +13,7 @@ import { MAX_CHANNELS, parseM3u, type IptvChannel } from "./m3u";
 import { userAgentOf, type StoredSource } from "./sources";
 import { XmltvScanner, linkGuide, wantedFromChannels } from "./xmltv";
 import { parseAccount, xtreamApiUrl, xtreamChannels, xtreamXmltvUrl } from "./xtream";
+import { serverOffset } from "./catchup";
 
 const MAX_JSON_BYTES = 48 * 1024 * 1024;
 const HTTP_TIMEOUT_MS = 120_000;
@@ -23,6 +24,8 @@ export class Catalog {
   channelEpg = new Map<string, string>();
   updatedMs = 0;
   account: XtreamAccount | null = null;
+  /** Xtream server clock minus UTC (seconds): timeshift URLs are in server time. */
+  serverOffset = 0;
   epgSource: string | null = null;
   epgError: string | null = null;
   private index = new Map<string, IptvChannel>();
@@ -53,6 +56,7 @@ export class Catalog {
       channelEpg: Object.fromEntries(this.channelEpg),
       updatedMs: this.updatedMs,
       account: this.account,
+      serverOffset: this.serverOffset,
       epgSource: this.epgSource,
       epgError: this.epgError,
     });
@@ -80,6 +84,7 @@ export class Catalog {
     }
     catalog.updatedMs = typeof r.updatedMs === "number" ? r.updatedMs : 0;
     catalog.account = typeof r.account === "object" && r.account !== null ? (r.account as XtreamAccount) : null;
+    catalog.serverOffset = typeof r.serverOffset === "number" && Number.isFinite(r.serverOffset) ? r.serverOffset : 0;
     catalog.epgSource = typeof r.epgSource === "string" ? r.epgSource : null;
     catalog.epgError = typeof r.epgError === "string" ? r.epgError : null;
     return catalog.finish();
@@ -194,6 +199,7 @@ export async function buildChannels(
     case "xtream": {
       const auth = await xtreamJson(source, password, null);
       catalog.account = parseAccount(auth);
+      catalog.serverOffset = serverOffset(auth);
       const categories = await xtreamJson(source, password, "get_live_categories").catch(() => null);
       const streams = await xtreamJson(source, password, "get_live_streams");
       catalog.channels = xtreamChannels(source.id, categories, streams, "live");

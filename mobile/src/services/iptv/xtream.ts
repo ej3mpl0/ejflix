@@ -5,6 +5,7 @@
 import type { XtreamAccount } from "../../lib/types";
 import { percentEncode } from "../addons.pure";
 import { MAX_CHANNELS, cleanName, utf8Lossy, type IptvChannel } from "./m3u";
+import { xtreamCatchup } from "./catchup";
 
 type Json = unknown;
 
@@ -220,6 +221,7 @@ export function xtreamChannels(sourceId: string, categories: Json, streams: Json
       container: jsonText(s, "container_extension") ?? "",
       userAgent: null,
       referrer: null,
+      ...xtreamCatchup(jsonU64(s, "tv_archive"), jsonU64(s, "tv_archive_duration"), kind),
     });
     if (out.length >= MAX_CHANNELS) break;
   }

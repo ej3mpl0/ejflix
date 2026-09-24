@@ -21,6 +21,7 @@ import type {
   IptvSourceInput,
   IptvStatus,
   Programme,
+  Reminder,
   XtreamAccount,
   HomeData,
   UpdateCheck,
@@ -184,6 +185,15 @@ export const api = {
   iptvFavorite: (id: string, on: boolean): Promise<string[]> => iptv.iptvFavorite(id, on),
   iptvPlay: (id: string): Promise<PlayerState> => engine.iptvPlay(id),
   onIptvChanged: (handler: () => void): Promise<() => void> => listen("iptv://changed", () => handler()),
+  iptvReminders: (): Promise<Reminder[]> => iptv.iptvReminders(),
+  iptvReminderSet: (reminder: Reminder): Promise<Reminder[]> => iptv.iptvReminderSet(reminder),
+  iptvReminderRemove: (channelId: string, start: number): Promise<Reminder[]> => iptv.iptvReminderRemove(channelId, start),
+  /** Reminders that go off now; each one is returned once. */
+  iptvDueReminders: (): Promise<Reminder[]> => iptv.iptvDueReminders(),
+  onIptvReminders: (handler: () => void): Promise<() => void> => listen("iptv://reminders", () => handler()),
+  /** Plays a past programme from the archive of a channel with catch-up. */
+  iptvPlayCatchup: (id: string, start: number, stop: number, title: string): Promise<PlayerState> =>
+    engine.iptvPlayCatchup(id, start, stop, title),
   updateInfo: (): Promise<{ current: string; showNotes: boolean }> => updates.updateInfo(),
   updateCheck: (force = false): Promise<UpdateCheck> => updates.updateCheck(force),
   updatePrefs: (): Promise<UpdatePrefs> => updates.updatePrefs(),

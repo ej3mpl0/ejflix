@@ -65,6 +65,7 @@ export const KEYS = {
   iptv: (userId: string) => `iptv.${userId}`,
   iptvFavorites: (userId: string) => `iptvFavorites.${userId}`,
   iptvRecent: (userId: string) => `iptvRecent.${userId}`,
+  iptvReminders: (userId: string) => `iptvReminders.${userId}`,
   locale: "locale",
   lastSeenVersion: "lastSeenVersion",
   updateAuto: "updateAuto",

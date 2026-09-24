@@ -525,6 +525,23 @@ const es = {
   serverHelpDashboard: "En Jellyfin la tienes en Panel de control › Redes, o en la barra del navegador cuando entras a su web.",
   serverHelpSamePcMobile: "Mismo Wi-Fi que el servidor: usa la IP del equipo, no localhost (localhost es el propio móvil).",
   note9: "Nuevo en esta versión: eliges tema, idioma y subtítulos al crear un perfil y traes tus addons de Stremio (o pegando las URLs de Nuvio y otras apps); Mi lista y visto para títulos online; menú en Continuar viendo; Ver todo en las filas; tráileres y reparto con su filmografía; subtítulos desde archivo con tamaño, color y retraso; ordenar fuentes; guía de TV en rejilla; y buscador en Ajustes.",
+  // --- livetv ---
+  remindMe: "Recordármelo",
+  reminderCancel: "Quitar recordatorio",
+  reminderSet: "Te avisaremos cuando empiece «{title}»",
+  reminderRemoved: "Recordatorio quitado",
+  reminders: "Recordatorios",
+  remindersEmpty: "No tienes recordatorios",
+  remindersEmptyHint: "En la guía, toca un programa que aún no ha empezado y elige «Recordármelo». El aviso aparece con la app abierta.",
+  reminderSoon: "Empieza en un minuto",
+  reminderNow: "Ya ha empezado",
+  watchNow: "Ver ahora",
+  watchLive: "Ver en directo",
+  catchup: "Diferido",
+  catchupWatch: "Ver desde el principio",
+  catchupAvailable: "Disponible en diferido",
+  programmeUpcoming: "Próximamente",
+  programmeEnded: "Ya emitido",
 };
 
 const en: typeof es = {
@@ -1052,6 +1069,23 @@ const en: typeof es = {
   serverHelpDashboard: "In Jellyfin it is under Dashboard › Networking, or in the browser address bar when you open its website.",
   serverHelpSamePcMobile: "Same Wi-Fi as the server: use the IP of the computer, not localhost (localhost is the phone itself).",
   note9: "New in this version: pick theme, language and subtitles when creating a profile and bring your addons from Stremio (or by pasting URLs from Nuvio and other apps); My list and watched for online titles; a menu in Continue watching; See all on rows; trailers and cast with their filmography; subtitles from a file with size, colour and delay; source sorting; a TV guide grid; and a search box in Settings.",
+  // --- livetv ---
+  remindMe: "Remind me",
+  reminderCancel: "Cancel reminder",
+  reminderSet: "We'll let you know when “{title}” starts",
+  reminderRemoved: "Reminder removed",
+  reminders: "Reminders",
+  remindersEmpty: "No reminders",
+  remindersEmptyHint: "In the guide, tap a programme that hasn't started yet and choose Remind me. The alert shows while the app is open.",
+  reminderSoon: "Starts in a minute",
+  reminderNow: "Already started",
+  watchNow: "Watch now",
+  watchLive: "Watch live",
+  catchup: "Catch-up",
+  catchupWatch: "Watch from the start",
+  catchupAvailable: "Available on catch-up",
+  programmeUpcoming: "Coming up",
+  programmeEnded: "Already aired",
 };
 
 export const dictionaries = { es, en };

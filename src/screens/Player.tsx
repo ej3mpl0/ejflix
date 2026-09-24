@@ -606,7 +606,7 @@ export function Player({
   }, [overlay, live?.channelId]);
 
   const playChannel = (channel: Channel) => {
-    if (!live || nextSent.current || channel.id === live.channelId) return;
+    if (!live || nextSent.current || (channel.id === live.channelId && !live.catchup && !live.multiview?.length)) return;
     nextSent.current = true;
     setPanel(false);
     void api.playNext(channelToMovie(channel, live.sourceName));
