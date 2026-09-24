@@ -1024,7 +1024,7 @@ pub fn set_library_flags(
     watched: Option<bool>,
 ) -> Result<Vec<LibraryEntry>, String> {
     if entry.key.is_empty() {
-        return Err("La entrada no tiene identificador".into());
+        return Err(crate::errors::code("listItemNoKey"));
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     let mut list = load_library(app, user_id);
