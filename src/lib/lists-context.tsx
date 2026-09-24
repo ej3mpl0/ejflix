@@ -12,6 +12,7 @@ import { api } from "./api";
 import { emptyMovie, libraryToMovie } from "./addons";
 import type { CustomList, ListItem, Movie } from "./types";
 import { ListPickerDialog } from "../components/ListPickerDialog";
+import { useParental } from "./parental";
 
 /** Identity of a title inside a custom list; null for what cannot be listed (channels). */
 export function listKeyOf(movie: Movie): string | null {
@@ -102,6 +103,9 @@ export function CustomListsProvider({
   const [lists, setLists] = useState<CustomList[]>([]);
   /** Fresh Jellyfin items by id; missing ones fall back to what the list stored. */
   const [resolved, setResolved] = useState<Record<string, Movie>>({});
+  /** Ids the server was asked about: one it did not return is gone or above the age limit. */
+  const [asked, setAsked] = useState<Set<string>>(() => new Set());
+  const parental = useParental();
   const [picker, setPicker] = useState<Movie | null>(null);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
@@ -140,7 +144,9 @@ export function CustomListsProvider({
     api
       .getItemsByIds(jellyfinIds)
       .then((items) => {
-        if (alive) setResolved(Object.fromEntries(items.map((movie) => [movie.id, movie])));
+        if (!alive) return;
+        setResolved(Object.fromEntries(items.map((movie) => [movie.id, movie])));
+        setAsked(new Set(jellyfinIds));
       })
       .catch(() => undefined);
     return () => {
@@ -164,7 +170,16 @@ export function CustomListsProvider({
     () => ({
       lists,
       moviesOf: (list) =>
-        list.items.map((item) => (item.itemId && resolved[item.itemId]) || snapshotMovie(item)),
+        list.items.flatMap((item) => {
+          // A restricted profile sees what the rest of the app lets it see: server items the
+          // server filtered out stay hidden, and online entries (no rating) follow "hide unrated".
+          if (parental?.active) {
+            if (item.source === "online" ? parental.hideUnrated : item.itemId && asked.has(item.itemId) && !resolved[item.itemId]) {
+              return [];
+            }
+          }
+          return [(item.itemId && resolved[item.itemId]) || snapshotMovie(item)];
+        }),
       listsWith: (movie) => {
         const key = listKeyOf(movie);
         return key ? lists.filter((list) => list.items.some((item) => item.key === key)).map((list) => list.id) : [];
@@ -188,7 +203,7 @@ export function CustomListsProvider({
       },
       openPicker: setPicker,
     }),
-    [lists, resolved, run],
+    [lists, resolved, asked, parental, run],
   );
 
   return (

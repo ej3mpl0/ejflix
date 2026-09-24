@@ -189,9 +189,17 @@ export function useCalendar(hasServer: boolean, userId: string) {
   }, []);
 
   const reload = useCallback(() => {
-    cache = null;
+    invalidateCalendar();
     setTick((n) => n + 1);
   }, []);
+
+  // A new parental limit changes which series and episodes the profile may see.
+  useEffect(() => {
+    const unlisten = api.onParentalChanged(reload);
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [reload]);
 
   /** Aired since the last visit to the calendar (at most a week back) and not watched. */
   const isNew = useCallback(

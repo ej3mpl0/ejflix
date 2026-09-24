@@ -190,7 +190,14 @@ export function PosterCard({
         <PosterPreview
           movie={movie}
           anchor={preview}
-          onPlay={onPlay}
+          onPlay={
+            onPlay &&
+            ((m) => {
+              // It lives in a portal: Home hiding for the player would leave it on screen.
+              setPreview(null);
+              onPlay(m);
+            })
+          }
           onOpen={(m) => {
             setPreview(null);
             onOpen(m);

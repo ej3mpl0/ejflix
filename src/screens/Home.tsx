@@ -399,7 +399,9 @@ export function Home({
       }
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      if (e.key === "?" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
+      // Not over a dialog: its Escape would close both.
+      const modal = document.querySelector('[role="dialog"][aria-modal="true"]');
+      if (e.key === "?" && !typing && !modal && !e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
         e.preventDefault();
         setShortcuts(true);
       }
@@ -503,10 +505,10 @@ export function Home({
     </>
   );
 
-  // Muted trailers: none while the player runs; the hero's also stops under a page, a grid
-  // or the sources sheet.
+  // Muted trailers: none while the player runs, the sources sheet or the palette is up;
+  // the hero's also stops under a page or a grid.
   const trailerGate = useMemo(
-    () => ({ hero: !hidden && !hasStack && !seeAll && !picker && !palette, pages: !hidden }),
+    () => ({ hero: !hidden && !hasStack && !seeAll && !picker && !palette, pages: !hidden && !picker && !palette }),
     [hidden, hasStack, seeAll, picker, palette],
   );
 

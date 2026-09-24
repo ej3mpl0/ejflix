@@ -236,7 +236,9 @@ export function Player({
           if (movie.live?.multiview?.length) {
             // Multi-view: the overlay only lists the channels that could be opened.
             const cells = movie.live.multiview;
-            const started = await api.iptvMultiview(cells.map((c) => c.channelId));
+            const request = api.iptvMultiview(cells.map((c) => c.channelId));
+            starting = request;
+            const started = await request;
             if (cancelled) return;
             const shown = started.ids.flatMap((id) => cells.filter((c) => c.channelId === id));
             void api.openPlayer({ ...movie, live: { ...movie.live, multiview: shown } });
@@ -246,7 +248,9 @@ export function Player({
           if (movie.live?.catchup) {
             // A past programme from the channel's archive.
             const { start: from, stop, title: programme } = movie.live.catchup;
-            const next = await api.iptvPlayCatchup(movie.live.channelId, from, stop, programme);
+            const request = api.iptvPlayCatchup(movie.live.channelId, from, stop, programme);
+            starting = request;
+            const next = await request;
             if (cancelled) return;
             void api.openPlayer(movie);
             setState(next);

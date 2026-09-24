@@ -153,6 +153,8 @@ export function GlassHeader({
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
       if (e.key !== "/" || typing || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
+      // A dialog keeps the keyboard: the search box sits behind it.
+      if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       e.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();
