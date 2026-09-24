@@ -13,6 +13,7 @@ import {
   Keyboard,
   Moon,
   Palette,
+  PartyPopper,
   Play,
   Puzzle,
   Search,
@@ -118,6 +119,7 @@ export function CommandPalette({
   onSearch,
   onSwitchProfile,
   onShortcuts,
+  onParty,
 }: {
   userId: string;
   hasServer: boolean;
@@ -130,6 +132,8 @@ export function CommandPalette({
   onSearch: (query: string) => void;
   onSwitchProfile: () => void;
   onShortcuts: () => void;
+  /** Watch party dialog (join with a code, or the party in progress). */
+  onParty?: () => void;
 }) {
   const { t } = useI18n();
   const { settings, update } = useSettings();
@@ -297,6 +301,18 @@ export function CommandPalette({
         keywords: "atajos shortcuts teclado keyboard mando gamepad",
         run: onShortcuts,
       },
+      ...(onParty
+        ? [
+            {
+              id: "action:party",
+              group: "actions" as const,
+              label: t("partyJoinTitle"),
+              icon: <PartyPopper size={16} />,
+              keywords: "party watch together grupo juntos sesión código code unirse join",
+              run: onParty,
+            },
+          ]
+        : []),
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, settings.appearance, hasServer, hasTv]);

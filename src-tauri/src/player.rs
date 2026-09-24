@@ -758,6 +758,13 @@ impl Player {
         Ok(())
     }
 
+    /// Pauses or resumes outright: a watch party guest follows the host's state, and a
+    /// toggle racing a state event could end up inverted.
+    pub async fn set_pause(&self, paused: bool) -> Result<(), String> {
+        self.command(json!(["set_property", "pause", paused]), false).await?;
+        Ok(())
+    }
+
     /// `fast` uses a keyframe seek (cheap, used while scrubbing); otherwise the
     /// seek is exact thanks to `--hr-seek=yes`.
     pub async fn seek(&self, seconds: f64, relative: bool, fast: bool) -> Result<(), String> {

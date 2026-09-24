@@ -30,6 +30,11 @@ import { StartCover } from "../components/StartCover";
 import { StatsPanel } from "../components/StatsPanel";
 import { MiniPlayerControls } from "../components/MiniPlayerControls";
 import { SubtitleSearch } from "../components/SubtitleSearch";
+import { PartyPanel } from "../components/PartyPanel";
+import { PartyReactions } from "../components/PartyReactions";
+import { useParty } from "../hooks/useParty";
+import { usePartySync } from "../hooks/usePartySync";
+import { partyErrorKey, type PartyStatus } from "../lib/party";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -55,6 +60,9 @@ const emptyState: PlayerState = {
 const OSD_MS = 1400;
 
 const LOCK_HINT_MS = 2000;
+
+/** Parties whose panel already opened by itself (once per party, not per episode). */
+const partyPanelShown = new Set<string>();
 
 type Flash = "play" | "pause" | "back" | "fwd";
 
@@ -96,6 +104,9 @@ export function Player({
   const setFullscreen = onFullscreenChange ?? setOwnFullscreen;
   const [menu, setMenu] = useState<PlayerMenu>(null);
   const [panel, setPanel] = useState(false);
+  /** Watch party side panel (code, people, chat). */
+  const [partyPanel, setPartyPanel] = useState(false);
+  const party = useParty();
   const [locked, setLocked] = useState(false);
   const [lockHint, setLockHint] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -408,6 +419,38 @@ export function Player({
     void api.playerSetDelay(kind, value).catch(() => undefined);
   };
 
+  // Watch party: the host's player reports, a guest's follows (overlay only; not live TV).
+  const partySync = usePartySync({
+    enabled: overlay && !live,
+    movie,
+    state,
+    party,
+    onNotice: (event, name) =>
+      showOsd(t(event === "paused" ? "partyPaused" : event === "resumed" ? "partyResumed" : "partySeeked", { name: name || "?" })),
+  });
+  /** A guest without the host's permission: say so instead of acting. */
+  const partyLocked = () => {
+    if (!partySync.locked) return false;
+    showOsd(t("partyHostControls"));
+    return true;
+  };
+
+  // A party that ends while watching says why (the main window's toast is behind us).
+  const partyBefore = useRef<PartyStatus | null>(null);
+  useEffect(() => {
+    const before = partyBefore.current;
+    partyBefore.current = party;
+    if (!overlay || !party) return;
+    if (before?.active && !party.active && party.error) showOsd(t(partyErrorKey(party.error)));
+    // A party just started from here or a details page: show its code to share, once.
+    if (party.active && party.host && party.members.length <= 1 && !live && !partyPanelShown.has(party.code)) {
+      partyPanelShown.add(party.code);
+      setPartyPanel(true);
+      setPanel(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [party, overlay]);
+
   const toggleNight = () => {
     const on = !stateRef.current.night;
     setState((current) => ({ ...current, night: on }));
@@ -526,17 +569,29 @@ export function Player({
   };
 
   const togglePause = async () => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: stateRef.current.paused ? "play" : "pause" });
     showFlash(stateRef.current.paused ? "play" : "pause");
     await api.playerTogglePause();
   };
 
   const seekBy = (delta: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, stateRef.current.time + delta) });
     showFlash(delta < 0 ? "back" : "fwd");
     void api.playerSeek(delta, true);
   };
 
   const seekTo = (seconds: number) => {
+    if (partyLocked()) return;
+    if (partySync.guest) partySync.request({ action: "seek", pos: Math.max(0, seconds) });
     void api.playerSeek(seconds, false);
+  };
+
+  /** Dragging the timeline: quiet while locked (the release lands in seekTo, which says why). */
+  const scrub = (seconds: number) => {
+    if (partySync.locked) return;
+    void api.playerSeek(seconds, false, true);
   };
 
   const currentVolume = () => volTarget.current ?? stateRef.current.volume;
@@ -566,6 +621,11 @@ export function Player({
   };
 
   const setSpeed = (speed: number) => {
+    // The host's speed is the party's speed.
+    if (partySync.guest) {
+      showOsd(t("partyHostControls"));
+      return;
+    }
     void api.playerSetSpeed(speed);
     if (settings.playback.rememberSpeed) void updateSettings({ playback: { lastSpeed: speed } });
   };
@@ -583,6 +643,10 @@ export function Player({
   };
 
   const playNext = () => {
+    if (partySync.guest) {
+      showOsd(t("partyHostPicks"));
+      return;
+    }
     if (!nextEpisode || nextSent.current) return;
     nextSent.current = true;
     void api.playNext(nextEpisode);
@@ -646,7 +710,9 @@ export function Player({
     else void changeVolume(currentVolume() + (deltaY < 0 ? 5 : -5));
   };
 
-  // Skip intro / recap / credits and the next-episode card (overlay only).
+  // Skip intro / recap / credits and the next-episode card (overlay only). A party guest
+  // does not chain on its own: the host's next title arrives through the party.
+  const chainNext = partySync.guest ? null : nextEpisode;
   const segments = useSegments(movie, state.duration, overlay && !live);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
   // Stopping inside the credits marks the title watched (decided in Rust on stop).
@@ -662,13 +728,13 @@ export function Player({
     ready: overlay && ready,
     settings,
     controlsVisible: visible,
-    nextEpisode,
+    nextEpisode: chainNext,
     onSeekTo: seekTo,
     onPlayNext: playNext,
   });
   revealRef.current = skipPrompt.reveal;
   const nextCard = useNextEpisodeCard({
-    nextEpisode,
+    nextEpisode: chainNext,
     outro,
     time: state.time,
     duration: state.duration,
@@ -682,10 +748,10 @@ export function Player({
   // End of file without anything to chain into (or the card dismissed there): leave the
   // player. With a next episode the card decides whether and when to continue.
   useEffect(() => {
-    if (!overlay || !state.eof || (nextEpisode && !nextCard.closed)) return;
+    if (!overlay || !state.eof || (chainNext && !nextCard.closed)) return;
     onExit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlay, state.eof, nextEpisode, nextCard.closed]);
+  }, [overlay, state.eof, chainNext, nextCard.closed]);
 
   const pauseInfo = usePauseInfo(state.paused, visible);
 
@@ -701,6 +767,7 @@ export function Player({
   const escape = () => {
     if (help) setHelp(false);
     else if (subSearch) setSubSearch(false);
+    else if (partyPanel) setPartyPanel(false);
     else if (panel) setPanel(false);
     else if (menu) setMenu(null);
     else if (stateRef.current.mini) void toggleMini();
@@ -710,11 +777,18 @@ export function Player({
 
   // A panel closed under the pointer never sends its mouseleave: stop holding the controls.
   useEffect(() => {
-    if (!panel) overUi.current = false;
-  }, [panel]);
+    if (!panel && !partyPanel) overUi.current = false;
+  }, [panel, partyPanel]);
 
   const togglePanel = () => {
     setPanel((open) => !open);
+    setPartyPanel(false);
+    setMenu(null);
+  };
+
+  const togglePartyPanel = () => {
+    setPartyPanel((open) => !open);
+    setPanel(false);
     setMenu(null);
   };
 
@@ -724,6 +798,7 @@ export function Player({
     setLocked(true);
     setMenu(null);
     setPanel(false);
+    setPartyPanel(false);
     setVisible(false);
     window.clearTimeout(hideTimer.current);
     showLockHint();
@@ -744,6 +819,10 @@ export function Player({
   };
 
   const playFromPanel = (target: Movie) => {
+    if (partySync.guest) {
+      showOsd(t("partyHostPicks"));
+      return;
+    }
     if (nextSent.current) return;
     nextSent.current = true;
     setPanel(false);
@@ -752,8 +831,9 @@ export function Player({
 
   const onVideoClick = () => {
     window.clearTimeout(clickTimer.current);
-    if (panel) {
+    if (panel || partyPanel) {
       setPanel(false);
+      setPartyPanel(false);
       return;
     }
     if (menu) {
@@ -918,6 +998,10 @@ export function Player({
       case "I":
         setStats((open) => !open);
         break;
+      case "w":
+      case "W":
+        if (!live) togglePartyPanel();
+        break;
       case "?":
         setHelp((open) => !open);
         setMenu(null);
@@ -1024,9 +1108,9 @@ export function Player({
       {!locked && !mini && !live && pauseInfo && !splash && !menu && !panel ? (
         <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
-      {locked || mini ? null : nextEpisode && nextCard.visible ? (
+      {locked || mini ? null : chainNext && nextCard.visible ? (
         <NextEpisodeCard
-          episode={nextEpisode}
+          episode={chainNext}
           countdown={nextCard.countdown}
           onPlay={playNext}
           onDismiss={nextCard.dismiss}
@@ -1102,7 +1186,7 @@ export function Player({
           onVideoDoubleClick={onVideoDoubleClick}
           onSeek={seekBy}
           onSeekTo={seekTo}
-          onScrub={(seconds) => void api.playerSeek(seconds, false, true)}
+          onScrub={scrub}
           onVolume={(value) => void changeVolume(value)}
           onMute={() => void api.playerSetMute(!state.mute)}
           onTrack={(kind, id) => void api.playerSetTrack(kind, id)}
@@ -1118,8 +1202,12 @@ export function Player({
           onNight={toggleNight}
           onMini={() => void toggleMini()}
           onSearchSubs={() => setSubSearch(true)}
+          party={party?.active ? { count: party.members.length } : null}
+          partyOpen={partyPanel}
+          onParty={live ? undefined : togglePartyPanel}
         />
       )}
+      {overlay && !live && !mini ? <PartyReactions showChat={!partyPanel && !locked} /> : null}
       {overlay && live?.multiview?.length && !locked && !mini ? (
         <MultiviewBar cells={live.multiview} visible={visible} onHoldUi={holdUi} />
       ) : null}
@@ -1128,6 +1216,9 @@ export function Player({
           enabled={!locked && !mini}
           onWatch={(reminder) => void api.playNext(channelToMovie(reminderChannel(reminder), live?.sourceName ?? ""))}
         />
+      ) : null}
+      {partyPanel && !locked && !mini && !live ? (
+        <PartyPanel status={party} onClose={() => setPartyPanel(false)} onHoldUi={holdUi} onNotice={showOsd} />
       ) : null}
       {panel && !locked && !mini && live ? (
         <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />

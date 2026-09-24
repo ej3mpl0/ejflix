@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronDown, LogOut, Search, Settings as SettingsIcon, Users, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Logo";
@@ -90,6 +90,7 @@ export function GlassHeader({
   hidden = false,
   onSwitchProfile,
   onLogout,
+  actions,
 }: {
   userName: string;
   avatarUrl?: string | null;
@@ -115,6 +116,8 @@ export function GlassHeader({
   hidden?: boolean;
   onSwitchProfile: () => void;
   onLogout: () => void;
+  /** Extra buttons before the downloads (the watch party). */
+  actions?: ReactNode;
 }) {
   const { t } = useI18n();
   const [menu, setMenu] = useState(false);
@@ -376,6 +379,7 @@ export function GlassHeader({
         </nav>
       </div>
       <div className="flex h-full items-center gap-1 pr-1">
+        {actions}
         <DownloadsButton />
         <form
           role="search"

@@ -8,6 +8,7 @@ import {
   Maximize,
   Minimize,
   Moon,
+  PartyPopper,
   Pause,
   PictureInPicture2,
   Play,
@@ -110,6 +111,9 @@ export function PlayerControls({
   onNight,
   onMini,
   onSearchSubs,
+  party = null,
+  partyOpen = false,
+  onParty,
 }: {
   movie: Movie;
   /** Movie with trickplay/chapter detail for the timeline (may be a fuller copy). */
@@ -151,6 +155,11 @@ export function PlayerControls({
   onMini: () => void;
   /** Opens the OpenSubtitles search. */
   onSearchSubs: () => void;
+  /** Watch party in progress: how many are in (the button shows it). */
+  party?: { count: number } | null;
+  partyOpen?: boolean;
+  /** Opens the watch party panel; no button without it (live TV). */
+  onParty?: () => void;
 }) {
   const { t, locale } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
@@ -248,6 +257,27 @@ export function PlayerControls({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-1">
+            {onParty ? (
+              <button
+                type="button"
+                className={cn(
+                  "icon-hit relative grid h-10 w-10 place-items-center rounded-full text-white/85",
+                  partyOpen && "bg-white/15 text-white",
+                  party && "text-accent",
+                )}
+                onClick={onParty}
+                aria-label={t("partyTitle")}
+                title={`${t("partyTitle")} (W)`}
+                aria-pressed={partyOpen}
+              >
+                <PartyPopper size={19} />
+                {party && party.count > 0 ? (
+                  <span className="absolute top-0.5 right-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-bold text-on-accent tabular">
+                    {party.count}
+                  </span>
+                ) : null}
+              </button>
+            ) : null}
             <button
               type="button"
               className="icon-hit grid h-10 w-10 place-items-center text-white/85"

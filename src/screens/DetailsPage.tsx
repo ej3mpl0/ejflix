@@ -32,6 +32,7 @@ import { useTrailerGate } from "../lib/trailer-autoplay";
 import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
+import { WatchTogetherButton } from "../components/PartyButton";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -299,6 +300,7 @@ export function DetailsPage({
                   >
                     {playLabel}
                   </Pill>
+                  <WatchTogetherButton onPlay={play} disabled={isSeries && !startEpisode} />
                   {resume ? (
                     <Pill
                       variant="tonal"

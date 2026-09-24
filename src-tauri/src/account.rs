@@ -320,7 +320,7 @@ impl AccountState {
     }
 
     /// Access token of the active profile, refreshed when about to expire.
-    async fn access_token(&self, app: &tauri::AppHandle) -> Result<String, String> {
+    pub(crate) async fn access_token(&self, app: &tauri::AppHandle) -> Result<String, String> {
         let uid = self.user_id().await?;
         let mut account = self.account().await?;
         self.fresh_token(app, &uid, &mut account).await
