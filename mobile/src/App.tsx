@@ -11,6 +11,7 @@ import { SettingsProvider, useSettings } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
 import { ToastProvider, useToast } from "./lib/toast-context";
 import { StreamPickerProvider } from "./lib/stream-picker-context";
+import { PartyProvider } from "./lib/party-context";
 import { UpdateProvider, useUpdate } from "./lib/update-context";
 import { ThemeProvider } from "./theme/ThemeProvider";
 import type { ThemePrefs } from "./theme/tokens";
@@ -88,7 +89,10 @@ function Shell() {
       <NavigationContainer ref={navigationRef} theme={navTheme} onStateChange={onStateChange}>
         {/* One stream picker for the whole app: Home, the item menus and both details pages open it. */}
         <StreamPickerProvider>
-          <RootNavigator />
+          {/* Watch party (guest): the join sheet and the host's titles opened here. */}
+          <PartyProvider>
+            <RootNavigator />
+          </PartyProvider>
         </StreamPickerProvider>
       </NavigationContainer>
       <Overlays playing={playing} />

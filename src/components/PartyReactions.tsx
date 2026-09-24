@@ -20,10 +20,11 @@ export function PartyReactions({ showChat }: { showChat: boolean }) {
   }, [last]);
 
   return (
-    <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden" aria-hidden={!showChat}>
+    <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
       {reactions.map((reaction) => (
         <span
           key={reaction.id}
+          aria-hidden
           className="party-float absolute bottom-[120px] flex flex-col items-center"
           style={{ right: `${reaction.x}%` }}
         >

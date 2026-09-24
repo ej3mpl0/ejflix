@@ -1,7 +1,7 @@
 import React from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { CloudDownload, LogOut, Settings as SettingsIcon, Users } from "lucide-react-native";
+import { CloudDownload, LogOut, PartyPopper, Settings as SettingsIcon, Users } from "lucide-react-native";
 import { sessionAvatar } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
 import { useSession } from "../../lib/session-context";
@@ -9,6 +9,7 @@ import type { TabsParamList } from "../../navigation/types";
 import { Avatar } from "../ui/Avatar";
 import { ActionSheet, type SheetAction } from "../ui/ActionSheet";
 import { navigationRef } from "../../navigation/navigationRef";
+import { useParty } from "../../lib/party-context";
 
 /**
  * Account menu behind the header avatar (desktop `GlassHeader` dropdown): settings,
@@ -18,6 +19,7 @@ export function AccountSheet({ visible, onClose }: { visible: boolean; onClose: 
   const { t } = useI18n();
   const { session, switchProfile, logoutServer } = useSession();
   const navigation = useNavigation<BottomTabNavigationProp<TabsParamList>>();
+  const party = useParty();
 
   const actions: SheetAction[] = [
     {
@@ -33,6 +35,13 @@ export function AccountSheet({ visible, onClose }: { visible: boolean; onClose: 
       onPress: () => {
         if (navigationRef.isReady()) navigationRef.navigate("Main", { screen: "SettingsSection", params: { section: "downloads" } });
       },
+    },
+    {
+      key: "party",
+      label: t("partyTitle"),
+      icon: PartyPopper,
+      // After this sheet has slid away: two modals cannot come up at once on iOS.
+      onPress: () => setTimeout(party.openSheet, 350),
     },
     {
       key: "switch",
