@@ -19,6 +19,7 @@ import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { isSeriesEpisode, nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
@@ -353,7 +354,11 @@ export function Player({
           // Tauri commands reject with the Rust message as a plain string.
           const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
           setStartError(
-            isParentalBlocked(err) ? tRef.current("parentalBlockedTitle") : message || tRef.current("playerStartError"),
+            isParentalBlocked(err)
+              ? tRef.current("parentalBlockedTitle")
+              : message
+                ? errorText(tRef.current, message)
+                : tRef.current("playerStartError"),
           );
         }
       };

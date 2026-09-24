@@ -4,6 +4,7 @@ import type { SubBackground } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 
 const COLORS = ["#FFFFFF", "#FFE45C", "#7DF9FF", "#9CFF8A"];
@@ -259,7 +260,7 @@ export function SubtitleTools({
             .arrayBuffer()
             .then(decodeSubtitle)
             .then((content) => api.playerSubAddText(picked.name, content))
-            .catch((err) => setLoadError(err instanceof Error ? err.message : String(err)));
+            .catch((err) => setLoadError(errorText(t, err)));
         }}
       />
     </div>

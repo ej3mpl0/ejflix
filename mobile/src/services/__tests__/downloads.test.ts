@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   canDownload,
+  downloadAllowed,
   extensionFor,
   fileNameFor,
   isDownloadableStream,
@@ -36,6 +37,7 @@ function entry(id: string, patch: Partial<DownloadEntry> = {}): DownloadEntry {
     positionSeconds: 0,
     durationSeconds: 0,
     pendingSync: false,
+    rating: null,
     ...patch,
   };
 }
@@ -162,5 +164,23 @@ describe("files and sources", () => {
     expect(offlineStartSeconds({ positionSeconds: 0, durationSeconds: 3600 }, 100)).toBe(100);
     expect(offlineStartSeconds({ positionSeconds: 3500, durationSeconds: 3600 }, 0)).toBe(0);
     expect(offlineStartSeconds({ positionSeconds: 3, durationSeconds: 0 }, 0)).toBe(0);
+  });
+});
+
+describe("downloadAllowed", () => {
+  it("judges the stored rating with the profile's current rule", () => {
+    const kids = { maxAge: 7, hideUnrated: false };
+    expect(downloadAllowed({ rating: "R" }, null)).toBe(true);
+    expect(downloadAllowed({ rating: "R" }, kids)).toBe(false);
+    expect(downloadAllowed({ rating: "TV-Y7" }, kids)).toBe(true);
+    expect(downloadAllowed({ rating: null }, kids)).toBe(true);
+    expect(downloadAllowed({ rating: null }, { maxAge: 7, hideUnrated: true })).toBe(false);
+  });
+
+  it("falls back to the snapshot's rating for entries stored before it existed", () => {
+    const [old] = sanitizeDownloads([{ id: "a", url: "https://x/a.mp4", fileName: "a.mp4", movie: { ...movie, officialRating: "PG-13" } }]);
+    expect(old.rating).toBe("PG-13");
+    const [kept] = sanitizeDownloads([{ id: "b", url: "https://x/b.mp4", fileName: "b.mp4", movie, rating: "TV-MA" }]);
+    expect(kept.rating).toBe("TV-MA");
   });
 });

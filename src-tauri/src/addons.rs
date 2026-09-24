@@ -1041,7 +1041,7 @@ pub fn set_library_flags(
         library_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(list)
 }
 
@@ -1069,7 +1069,7 @@ pub fn upsert_progress(app: &tauri::AppHandle, user_id: &str, entry: ResumeEntry
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Result<(), String> {
@@ -1080,7 +1080,7 @@ pub fn remove_progress(app: &tauri::AppHandle, user_id: &str, key: &str) -> Resu
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Replaces the whole list with what the account holds (newest first).
@@ -1095,7 +1095,7 @@ pub fn replace_library(app: &tauri::AppHandle, user_id: &str, mut list: Vec<Libr
         library_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Replaces every remembered position with the merged set from the account.
@@ -1110,7 +1110,7 @@ pub fn replace_progress(app: &tauri::AppHandle, user_id: &str, mut list: Vec<Res
         progress_key(user_id),
         serde_json::to_value(&list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn now_ms() -> u64 {

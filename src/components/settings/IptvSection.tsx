@@ -16,6 +16,7 @@ import { api } from "../../lib/api";
 import { cn } from "../../lib/format";
 import { formatAgo } from "../../lib/iptv";
 import { useI18n } from "../../lib/locale-context";
+import { errorText } from "../../lib/errors";
 import { useSettings } from "../../lib/settings-context";
 import { SegmentedControl } from "./SegmentedControl";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
@@ -81,10 +82,6 @@ function formOf(source: IptvSource): Form {
     fileText: null,
     fileName: source.imported ? source.path : "",
   };
-}
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
 }
 
 /** Settings › IPTV: playlists (M3U by URL or file), Xtream Codes accounts, guide and preferences. */
@@ -165,7 +162,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       onToast(t("iptvSaved", { name: saved.name }));
       void load();
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -179,7 +176,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
     try {
       setAccount(await api.iptvXtreamCheck({ url: form.url, username: form.username, password: form.password, userAgent: form.userAgent }));
     } catch (err) {
-      setError(errorText(err));
+      setError(errorText(t, err));
     } finally {
       setChecking(false);
     }
@@ -192,12 +189,12 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       if (form?.id === source.id) setForm(null);
       void load();
     } catch (err) {
-      onToast(errorText(err));
+      onToast(errorText(t, err));
     }
   };
 
   const refresh = (source: IptvSource) => {
-    api.iptvRefresh(source.id).catch((err) => onToast(errorText(err)));
+    api.iptvRefresh(source.id).catch((err) => onToast(errorText(t, err)));
   };
 
   const kindLabel = (kind: IptvSourceKind) =>
@@ -230,7 +227,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       return (
         <span className="flex items-center gap-1.5 text-danger">
           <AlertCircle size={12} />
-          {source.error}
+          {errorText(t, source.error)}
         </span>
       );
     }

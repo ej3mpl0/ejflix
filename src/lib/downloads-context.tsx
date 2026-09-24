@@ -10,6 +10,7 @@ import {
 } from "react";
 import { api } from "./api";
 import { useI18n } from "./locale-context";
+import { errorText } from "./errors";
 import type { DownloadItem, DownloadRequest } from "./types";
 
 type DownloadsValue = {
@@ -80,7 +81,7 @@ export function DownloadsProvider({
     try {
       await job;
     } catch (err) {
-      onToastRef.current(err instanceof Error ? err.message : String(err));
+      onToastRef.current(errorText(tRef.current, err));
     }
   }, []);
 
@@ -89,7 +90,7 @@ export function DownloadsProvider({
       const item = await api.downloadStream(request);
       onToastRef.current(tRef.current("downloadStarted", { name: item.name }));
     } catch (err) {
-      onToastRef.current(err instanceof Error ? err.message : String(err));
+      onToastRef.current(errorText(tRef.current, err));
     }
   }, []);
 

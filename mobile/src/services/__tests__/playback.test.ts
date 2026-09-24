@@ -153,12 +153,18 @@ describe("parsePlaybackInfo", () => {
     };
     expect(keyOf({ ErrorCode: "NoCompatibleStream" })).toBe("playErrServerCannotPlay");
     expect(keyOf({ ErrorCode: "NotAllowed" })).toBe("playErrNotAllowed");
-    expect(keyOf({ ErrorCode: "Weird" })).toBeNull();
+    expect(keyOf({ ErrorCode: "Weird" })).toBe("playErrServerCode");
     expect(keyOf({ MediaSources: [] })).toBe("playErrServerCannotPlay");
     expect(keyOf({ MediaSources: [{ Id: "s" }] })).toBe("playErrServerCannotPlay");
     expect(keyOf(null)).toBe("playErrBadResponse");
     expect(playbackErrorKey("RateLimitExceeded")).toBe("playErrRateLimit");
-    expect(playbackErrorKey("Weird")).toBeNull();
+    expect(playbackErrorKey("Weird")).toBe("playErrServerCode");
+    // The unknown code travels as the detail shown under the sentence.
+    try {
+      parsePlaybackInfo({ ErrorCode: "Weird" }, options);
+    } catch (error) {
+      expect(error instanceof PlaybackError ? error.detail : null).toBe("Weird");
+    }
   });
 
   it("drops streams without an index", () => {

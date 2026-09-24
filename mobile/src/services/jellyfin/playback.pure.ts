@@ -82,8 +82,8 @@ export function playbackErrorMessage(code: string): string {
   }
 }
 
-/** Translation key for a known `PlaybackErrorCode` (null: the Spanish text is all there is). */
-export function playbackErrorKey(code: string): MessageKey | null {
+/** Translation key for a `PlaybackErrorCode` (an unknown one gets a generic sentence plus the code). */
+export function playbackErrorKey(code: string): MessageKey {
   switch (code) {
     case "NoCompatibleStream":
       return "playErrServerCannotPlay";
@@ -92,14 +92,13 @@ export function playbackErrorKey(code: string): MessageKey | null {
     case "RateLimitExceeded":
       return "playErrRateLimit";
     default:
-      return null;
+      return "playErrServerCode";
   }
 }
 
 function playbackFailure(code: string): Error {
   const key = playbackErrorKey(code);
-  const message = playbackErrorMessage(code);
-  return key ? new PlaybackError(key, message) : new Error(message);
+  return new PlaybackError(key, playbackErrorMessage(code), key === "playErrServerCode" ? code : "");
 }
 
 export function parseMediaStreams(value: unknown): JellyfinMediaStream[] {

@@ -9,6 +9,7 @@ import { chapterImageUrl, hasChapterImages } from "../lib/trickplay";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { isParentalBlocked } from "../lib/parental";
 import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
@@ -99,7 +100,7 @@ export function DetailsPage({
       })
       .catch((err) => {
         if (alive && isParentalBlocked(err)) setBlocked(true);
-        else if (alive && !route.seed) setError(err instanceof Error ? err.message : String(err));
+        else if (alive && !route.seed) setError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -118,7 +119,7 @@ export function DetailsPage({
         setSeasonId((current) => current ?? next?.seasonId ?? list[0]?.id ?? null);
       })
       .catch((err) => {
-        if (alive) setListError(err instanceof Error ? err.message : String(err));
+        if (alive) setListError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -140,7 +141,7 @@ export function DetailsPage({
         setEpisodes(list);
       })
       .catch((err) => {
-        if (alive) setListError(err instanceof Error ? err.message : String(err));
+        if (alive) setListError(errorText(t, err));
       });
     return () => {
       alive = false;
@@ -197,7 +198,7 @@ export function DetailsPage({
             else setStartError(t("noEpisodes"));
           });
     job
-      .catch((err) => setStartError(err instanceof Error ? err.message : String(err)))
+      .catch((err) => setStartError(errorText(t, err)))
       .finally(() => setStarting(null));
   };
 

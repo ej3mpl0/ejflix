@@ -10,6 +10,7 @@ import { text } from "../theme/typography";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
 import { useSession } from "../lib/session-context";
+import { errorText } from "../services/errors";
 import type { LocalProfile, PublicUser } from "../lib/types";
 import { GrainBackdrop } from "../components/ui/GrainBackdrop";
 import { Spinner } from "../components/ui/Spinner";
@@ -94,7 +95,7 @@ export function ProfilesScreen({ navigation }: AuthScreenProps<"Profiles">) {
     try {
       setSession(await api.login(server.serverUrl, name.trim(), pw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, tr));
     } finally {
       setSigning(false);
     }

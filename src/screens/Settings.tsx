@@ -30,6 +30,7 @@ import { hasServer as sessionHasServer, type SavedServer, type Session, type Ski
 import { api } from "../lib/api";
 import { cn, sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { Avatar } from "../components/Avatar";
 import { LanguageSelect } from "../components/LanguageSelect";
@@ -110,7 +111,7 @@ function LocalAccount({
       onSessionChange(await api.linkServer(url, username.trim(), password));
       setPassword("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -137,7 +138,7 @@ function LocalAccount({
     try {
       onSessionChange(await api.unlinkServer());
     } catch (err) {
-      onToast(err instanceof Error ? err.message : String(err));
+      onToast(errorText(t, err));
     } finally {
       setBusy(false);
     }

@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import { CloudDownload, Ellipsis, HardDrive, Pause, Play, RotateCcw } from "lucide-react-native";
+import { CloudDownload, Ellipsis, HardDrive, Lock, Pause, Play, RotateCcw } from "lucide-react-native";
 import type { Movie } from "../../lib/types";
 import { api } from "../../lib/api";
 import { formatSize } from "../../lib/addons";
 import { episodeCode } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
+import { useParental } from "../../lib/parental";
 import { useDownloads } from "../../lib/use-downloads";
 import { openPlayer } from "../../navigation/navigationRef";
 import { progressOf, sortForDisplay, storageUsed, type DownloadEntry } from "../../services/downloads/downloads.pure";
@@ -25,11 +26,21 @@ function titleOf(movie: Movie, pattern: string): { title: string; subtitle: stri
   return { title: movie.seriesName ?? movie.name, subtitle: [code, movie.name].filter(Boolean).join(" · ") };
 }
 
-function DownloadRow({ entry, onMenu }: { entry: DownloadEntry; onMenu: (entry: DownloadEntry) => void }) {
+function DownloadRow({
+  entry,
+  blocked,
+  onMenu,
+}: {
+  entry: DownloadEntry;
+  /** Above the open profile's parental limit: locked, only deletable. */
+  blocked: boolean;
+  onMenu: (entry: DownloadEntry) => void;
+}) {
   const s = useStyles();
   const t = useTheme();
   const { t: tr } = useI18n();
-  const label = useDownloadLabel()(entry);
+  const downloadLabel = useDownloadLabel()(entry);
+  const label = blocked ? tr("parentalBlockedTitle") : downloadLabel;
   const { title, subtitle } = titleOf(entry.movie, tr("episodeCode"));
   const fraction = progressOf(entry);
   const done = entry.status === "done";
@@ -42,7 +53,8 @@ function DownloadRow({ entry, onMenu }: { entry: DownloadEntry; onMenu: (entry: 
   const watched = done && entry.durationSeconds > 0 ? Math.min(1, entry.positionSeconds / entry.durationSeconds) : 0;
 
   const primary = () => {
-    if (done) openPlayer(entry.movie);
+    if (blocked) onMenu(entry);
+    else if (done) openPlayer(entry.movie);
     else if (active) api.downloadPause(entry.id);
     else api.downloadResume(entry.id);
   };
@@ -51,11 +63,11 @@ function DownloadRow({ entry, onMenu }: { entry: DownloadEntry; onMenu: (entry: 
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`${title}, ${label}`}
-      onPress={() => (done ? openPlayer(entry.movie) : onMenu(entry))}
+      onPress={() => (done && !blocked ? openPlayer(entry.movie) : onMenu(entry))}
       onLongPress={() => onMenu(entry)}
       style={({ pressed }) => [s.row, pressed ? s.rowPressed : null]}
     >
-      <View style={s.thumb}>
+      <View style={[s.thumb, blocked ? s.thumbBlocked : null]}>
         {image ? <Image source={{ uri: image }} contentFit="cover" cachePolicy="memory-disk" style={StyleSheet.absoluteFill} /> : null}
         {watched > 0.01 ? <ProgressBar value={watched} height={3} animated={false} style={s.thumbProgress} /> : null}
       </View>
@@ -79,8 +91,8 @@ function DownloadRow({ entry, onMenu }: { entry: DownloadEntry; onMenu: (entry: 
         ) : null}
       </View>
       <IconButton
-        icon={done ? Play : active ? Pause : RotateCcw}
-        label={done ? tr("playOffline") : active ? tr("downloadPause") : entry.status === "error" ? tr("downloadRetry") : tr("downloadResume")}
+        icon={blocked ? Lock : done ? Play : active ? Pause : RotateCcw}
+        label={blocked ? tr("parentalBlockedTitle") : done ? tr("playOffline") : active ? tr("downloadPause") : entry.status === "error" ? tr("downloadRetry") : tr("downloadResume")}
         onPress={primary}
         size={19}
         color={t.colors.text}
@@ -99,6 +111,8 @@ export function DownloadsSection() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const list = useDownloads();
+  // Re-judged whenever the profile's limit changes in Settings.
+  const parental = useParental();
   const sorted = useMemo(() => sortForDisplay(list), [list]);
   const [menu, setMenu] = useState<DownloadEntry | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -143,7 +157,12 @@ export function DownloadsSection() {
       {sorted.length ? (
         <SettingsSection title={tr("downloadsTitle")} description={tr("downloadsHint")}>
           {sorted.map((entry) => (
-            <DownloadRow key={entry.id} entry={entry} onMenu={openMenu} />
+            <DownloadRow
+              key={entry.id}
+              entry={entry}
+              blocked={parental?.active === true && entry.status === "done" && !api.downloadPlayable(entry)}
+              onMenu={openMenu}
+            />
           ))}
         </SettingsSection>
       ) : (
@@ -167,6 +186,7 @@ const useStyles = makeStyles((t) => ({
   row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderRadius: 12 },
   rowPressed: { backgroundColor: t.white(0.05) },
   thumb: { width: 96, height: 54, borderRadius: t.radii.poster, backgroundColor: t.colors.panel, overflow: "hidden" },
+  thumbBlocked: { opacity: 0.35 },
   thumbProgress: { position: "absolute", left: 0, right: 0, bottom: 0, borderRadius: 0 },
   body: { flex: 1, minWidth: 0 },
   title: { ...text(14, "medium"), color: t.colors.text },

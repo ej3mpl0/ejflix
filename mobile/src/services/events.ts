@@ -23,6 +23,8 @@ export class PlaybackError extends Error {
   constructor(
     readonly key: MessageKey,
     message: string,
+    /** Raw text shown small under the translated sentence (e.g. an unknown server code). */
+    readonly detail: string = "",
   ) {
     super(message);
     this.name = "PlaybackError";

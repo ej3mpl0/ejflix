@@ -397,7 +397,7 @@ fn save_sources(app: &tauri::AppHandle, user_id: &str, list: &[IptvSource]) -> R
         sources_key(user_id),
         serde_json::to_value(list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
@@ -413,7 +413,7 @@ fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
 fn save_ids(app: &tauri::AppHandle, key: &str, ids: &[String]) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(key, serde_json::to_value(ids).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn favorites(app: &tauri::AppHandle, user_id: &str) -> Vec<String> {
@@ -494,7 +494,7 @@ fn load_reminders(app: &tauri::AppHandle, user_id: &str) -> Vec<Reminder> {
 fn save_reminders(app: &tauri::AppHandle, user_id: &str, list: &[Reminder]) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(reminders_key(user_id), serde_json::to_value(list).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Pending reminders of a profile, soonest first. Programmes that started a while ago
@@ -511,15 +511,15 @@ pub fn reminders(app: &tauri::AppHandle, user_id: &str, now: u64) -> Vec<Reminde
 
 pub fn set_reminder(app: &tauri::AppHandle, user_id: &str, reminder: Reminder, now: u64) -> Result<Vec<Reminder>, String> {
     if source_of(&reminder.channel_id).is_none() {
-        return Err("Canal no válido".into());
+        return Err(crate::errors::code("invalidChannel"));
     }
     if reminder.start <= now {
-        return Err("El programa ya ha empezado".into());
+        return Err(crate::errors::code("programmeStarted"));
     }
     let mut list = reminders(app, user_id, now);
     list.retain(|r| !(r.channel_id == reminder.channel_id && r.start == reminder.start));
     if list.len() >= MAX_REMINDERS {
-        return Err("Hay demasiados recordatorios".into());
+        return Err(crate::errors::code("tooManyReminders"));
     }
     let mut reminder = reminder;
     reminder.notified = false;
@@ -684,7 +684,7 @@ pub fn delete_profile_data(app: &tauri::AppHandle, user_id: &str) {
         store.delete(favorites_key(user_id));
         store.delete(recent_key(user_id));
         store.delete(reminders_key(user_id));
-        let _ = store.save();
+        let _ = crate::save_store(&store);
     }
 }
 
@@ -705,7 +705,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
         .as_deref()
         .and_then(|id| list.iter().find(|s| s.id == id).cloned());
     if existing.is_none() && list.len() >= MAX_SOURCES {
-        return Err(format!("Máximo {MAX_SOURCES} listas IPTV"));
+        return Err(crate::errors::detail("iptvMaxSources", MAX_SOURCES));
     }
     let mut source = existing.clone().unwrap_or_else(|| IptvSource {
         id: uuid::Uuid::new_v4().to_string(),
@@ -724,7 +724,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
     source.username = input.username.trim().chars().take(200).collect();
     if let Some(password) = input.password.filter(|p| !p.is_empty()) {
         if password.len() > 200 {
-            return Err("Contraseña demasiado larga".into());
+            return Err(crate::errors::code("passwordTooLong"));
         }
         let sealed = crate::protect::protect(password.as_bytes())?;
         source.password = crate::protect::to_hex(&sealed);
@@ -739,11 +739,11 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
             let path = input.path.trim();
             if path.is_empty() {
                 if !source.imported || !imported_file(app, &source.id).exists() {
-                    return Err("Elige un archivo M3U o escribe su ruta".into());
+                    return Err(crate::errors::code("m3uPick"));
                 }
             } else if !source.imported || source.path != path {
                 if !std::path::Path::new(path).is_file() {
-                    return Err("No se encuentra el archivo".into());
+                    return Err(crate::errors::code("fileNotFound"));
                 }
                 source.path = path.to_string();
                 source.imported = false;
@@ -763,7 +763,7 @@ pub fn save_source(app: &tauri::AppHandle, user_id: &str, input: IptvSourceInput
                 }
             }
             if source.username.is_empty() || source.password.is_empty() {
-                return Err("Xtream Codes necesita usuario y contraseña".into());
+                return Err(crate::errors::code("xtreamLogin"));
             }
         }
     }
@@ -788,15 +788,15 @@ pub fn import_playlist(
     text: &str,
 ) -> Result<IptvSource, String> {
     if text.len() > MAX_PLAYLIST_BYTES {
-        return Err("El archivo es demasiado grande".into());
+        return Err(crate::errors::code("fileTooLarge"));
     }
     if !text.trim_start().starts_with("#EXTM3U") && !text.contains("#EXTINF") {
-        return Err("El archivo no parece una lista M3U".into());
+        return Err(crate::errors::code("notM3u"));
     }
     let mut list = list_sources(app, user_id);
     let existing = id.and_then(|id| list.iter().find(|s| s.id == id).cloned());
     if existing.is_none() && list.len() >= MAX_SOURCES {
-        return Err(format!("Máximo {MAX_SOURCES} listas IPTV"));
+        return Err(crate::errors::detail("iptvMaxSources", MAX_SOURCES));
     }
     let mut source = existing.unwrap_or_else(|| IptvSource {
         id: uuid::Uuid::new_v4().to_string(),
@@ -826,7 +826,7 @@ pub fn import_playlist(
 pub fn remove_source(app: &tauri::AppHandle, user_id: &str, id: &str) -> Result<(), String> {
     // The id becomes a file name below: never let it walk out of the cache folder.
     if !valid_source_id(id) {
-        return Err("Lista IPTV no válida".into());
+        return Err(crate::errors::code("invalidList"));
     }
     let mut list = list_sources(app, user_id);
     list.retain(|s| s.id != id);
@@ -864,10 +864,10 @@ fn host_of(url: &str) -> Option<String> {
 pub fn normalize_http_url(raw: &str) -> Result<String, String> {
     let url = raw.trim();
     if url.is_empty() || url.len() > 4096 {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     if url.chars().any(|c| c.is_control() || c.is_whitespace()) {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     let url = if url.contains("://") {
         url.to_string()
@@ -875,7 +875,7 @@ pub fn normalize_http_url(raw: &str) -> Result<String, String> {
         format!("http://{url}")
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Solo se permiten URLs http o https".into());
+        return Err(crate::errors::code("httpOnlyUrl"));
     }
     Ok(url)
 }
@@ -884,13 +884,13 @@ pub fn normalize_http_url(raw: &str) -> Result<String, String> {
 /// playlist link and returns the server base plus the credentials it carried.
 pub fn parse_xtream_url(raw: &str) -> Result<(String, Option<String>, Option<String>), String> {
     let url = normalize_http_url(raw)?;
-    let (scheme, rest) = url.split_once("://").ok_or("URL no válida")?;
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| crate::errors::code("invalidUrl"))?;
     let (authority, tail) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, ""),
     };
     if authority.is_empty() {
-        return Err("Falta el servidor".into());
+        return Err(crate::errors::code("missingServer"));
     }
     let base = format!("{scheme}://{authority}");
     let query = tail.split_once('?').map(|(_, q)| q).unwrap_or("");
@@ -950,7 +950,7 @@ pub fn stream_for(source: &IptvSource, channel: &Channel) -> Result<(String, Vec
         SourceKind::Xtream => {
             let password = source.password_plain();
             if channel.stream_id.is_empty() || password.is_empty() {
-                return Err("Canal no disponible".into());
+                return Err(crate::errors::code("channelUnavailable"));
             }
             let (folder, ext) = if channel.kind == "movie" {
                 ("movie", if channel.container.is_empty() { "mp4".to_string() } else { channel.container.clone() })
@@ -968,7 +968,7 @@ pub fn stream_for(source: &IptvSource, channel: &Channel) -> Result<(String, Vec
         _ => channel.url.clone(),
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Solo se pueden reproducir canales http o https".into());
+        return Err(crate::errors::code("channelHttpOnly"));
     }
     let mut headers = Vec::new();
     if let Some(ua) = channel.user_agent.as_deref().or(source.user_agent()) {
@@ -1119,16 +1119,16 @@ fn fill_catchup(template: &str, start: u64, stop: u64, now: u64) -> String {
 pub fn catchup_url(source: &IptvSource, channel: &Channel, start: u64, stop: u64, now: u64, offset: i64) -> Result<String, String> {
     let days = channel.catchup_window();
     if days == 0 {
-        return Err("Este canal no permite ver programas anteriores".into());
+        return Err(crate::errors::code("catchupUnsupported"));
     }
     if stop <= start || start >= now || start + u64::from(days) * 86_400 < now {
-        return Err("Este programa no está disponible en diferido".into());
+        return Err(crate::errors::code("catchupUnavailable"));
     }
     let url = match channel.catchup.as_str() {
         "xtream" => {
             let password = source.password_plain();
             if channel.stream_id.is_empty() || password.is_empty() {
-                return Err("Canal no disponible".into());
+                return Err(crate::errors::code("channelUnavailable"));
             }
             let minutes = (stop - start).div_ceil(60).max(1);
             format!(
@@ -1146,10 +1146,10 @@ pub fn catchup_url(source: &IptvSource, channel: &Channel, start: u64, stop: u64
             let sep = if channel.url.contains('?') { '&' } else { '?' };
             format!("{}{sep}utc={start}&lutc={now}", channel.url)
         }
-        _ => return Err("Este canal no permite ver programas anteriores".into()),
+        _ => return Err(crate::errors::code("catchupUnsupported")),
     };
     if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("Solo se pueden reproducir canales http o https".into());
+        return Err(crate::errors::code("channelHttpOnly"));
     }
     Ok(url)
 }
@@ -1178,18 +1178,18 @@ impl IptvState {
         let mut res = req
             .send()
             .await
-            .map_err(|e| format!("No se pudo conectar: {}", short_error(&e)))?;
+            .map_err(|e| crate::errors::detail("unreachable", short_error(&e)))?;
         if !res.status().is_success() {
-            return Err(format!("El servidor respondió {}", res.status().as_u16()));
+            return Err(crate::errors::detail("serverStatus", res.status().as_u16()));
         }
         if res.content_length().unwrap_or(0) as usize > max {
-            return Err("La respuesta es demasiado grande".into());
+            return Err(crate::errors::code("responseTooLarge"));
         }
         let mut out = Vec::new();
-        while let Some(chunk) = res.chunk().await.map_err(|e| format!("Descarga interrumpida: {}", short_error(&e)))? {
+        while let Some(chunk) = res.chunk().await.map_err(|e| crate::errors::detail("downloadInterrupted", short_error(&e)))? {
             out.extend_from_slice(&chunk);
             if out.len() > max {
-                return Err("La respuesta es demasiado grande".into());
+                return Err(crate::errors::code("responseTooLarge"));
             }
         }
         Ok(out)
@@ -1217,7 +1217,7 @@ impl IptvState {
             url.push_str(action);
         }
         let bytes = self.fetch(&url, source.user_agent(), MAX_JSON_BYTES).await?;
-        serde_json::from_slice(&bytes).map_err(|_| "El servidor no respondió como Xtream Codes".to_string())
+        serde_json::from_slice(&bytes).map_err(|_| crate::errors::code("notXtream"))
     }
 
     /// Signs in to an Xtream account and describes it (used by "Check" in Settings).
@@ -1306,9 +1306,9 @@ impl IptvState {
                 } else {
                     PathBuf::from(&source.path)
                 };
-                let bytes = std::fs::read(&path).map_err(|_| "No se pudo leer el archivo M3U".to_string())?;
+                let bytes = std::fs::read(&path).map_err(|_| crate::errors::code("m3uUnreadable"))?;
                 if bytes.len() > MAX_PLAYLIST_BYTES {
-                    return Err("El archivo es demasiado grande".into());
+                    return Err(crate::errors::code("fileTooLarge"));
                 }
                 let text = String::from_utf8_lossy(&bytes);
                 let parsed = parse_m3u(&text, &source.id);
@@ -1332,7 +1332,7 @@ impl IptvState {
             }
         }
         if catalog.channels.is_empty() {
-            return Err("La lista no contiene canales".into());
+            return Err(crate::errors::code("noChannels"));
         }
         catalog.channels.truncate(MAX_CHANNELS);
         if epg {
@@ -1658,7 +1658,7 @@ fn parse_account(value: &Value) -> Result<XtreamAccount, String> {
     let info = value
         .get("user_info")
         .filter(|v| v.is_object())
-        .ok_or_else(|| "El servidor no respondió como Xtream Codes".to_string())?;
+        .ok_or_else(|| crate::errors::code("notXtream"))?;
     let auth = match info.get("auth") {
         Some(Value::Number(n)) => n.as_i64() == Some(1),
         Some(Value::String(s)) => s == "1" || s.eq_ignore_ascii_case("true"),

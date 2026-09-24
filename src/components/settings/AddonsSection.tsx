@@ -4,6 +4,7 @@ import type { AddonInfo, TorrentCacheInfo } from "../../lib/types";
 import { api } from "../../lib/api";
 import { formatSize } from "../../lib/addons";
 import { useI18n } from "../../lib/locale-context";
+import { errorText } from "../../lib/errors";
 import { useSettings } from "../../lib/settings-context";
 import { Select } from "../Select";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
@@ -68,7 +69,7 @@ export function AddonsSection({
       setCache(await api.torrentCacheClear());
       onToast(t("torrentsCacheCleared"));
     } catch (err) {
-      onToast(err instanceof Error ? err.message : String(err));
+      onToast(errorText(t, err));
     }
   };
 
@@ -110,7 +111,7 @@ export function AddonsSection({
       setUrl("");
       onToast(t("addonAdded", { name: info.name }));
     } catch (err) {
-      onToast(err instanceof Error ? err.message : String(err));
+      onToast(errorText(t, err));
     } finally {
       setBusy(false);
     }
@@ -129,11 +130,11 @@ export function AddonsSection({
             .then(() => {
               if (wasOff) void update({ addons: { disabled: [...settings.addons.disabled.filter((u) => u !== addon.url), addon.url] } });
             })
-            .catch((err) => onToast(err instanceof Error ? err.message : String(err)));
+            .catch((err) => onToast(errorText(t, err)));
         },
       });
     } catch (err) {
-      onToast(err instanceof Error ? err.message : String(err));
+      onToast(errorText(t, err));
     }
   };
 

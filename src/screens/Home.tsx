@@ -23,6 +23,7 @@ import {
 } from "../lib/types";
 import { sessionAvatar } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
 import { useBackNavigation } from "../lib/use-back";
@@ -50,10 +51,6 @@ const PAGE_EXIT_MS = 250;
 
 /** Home without a server: every row comes from the addons. */
 const EMPTY_HOME: HomeData = { featured: [], resume: [], nextUp: [], latest: [], genres: [], all: [] };
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 const HISTORY_MAX = 10;
 
@@ -172,7 +169,7 @@ export function Home({
       setData(await api.getHome());
       if (silent) setError("");
     } catch (err) {
-      if (!silent) setError(errorText(err));
+      if (!silent) setError(errorText(t, err));
     } finally {
       if (!silent) setLoading(false);
     }
@@ -204,7 +201,7 @@ export function Home({
       const next = await api.getHome(library);
       setLibData((map) => ({ ...map, [library.id]: next }));
     } catch (err) {
-      if (!silent) setLibError(errorText(err));
+      if (!silent) setLibError(errorText(t, err));
     } finally {
       if (!silent) setLibLoading((current) => (current === library.id ? null : current));
     }
@@ -468,7 +465,7 @@ export function Home({
           if (episode) onPlay(episode);
           else onToast(t("noEpisodes"));
         })
-        .catch((err) => onToast(errorText(err)));
+        .catch((err) => onToast(errorText(t, err)));
       return;
     }
     onPlay(movie);

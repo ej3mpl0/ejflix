@@ -12,10 +12,12 @@ import { emit } from "../events";
 import { KEYS, store } from "../store";
 import { settingsUser } from "../settings";
 import { registerSessionCleanup } from "../session";
+import { currentRule } from "../parental";
 import { jellyfin, authHeaders } from "../jellyfin/client";
 import { mediaSourceContainer } from "../jellyfin/items";
 import { ticksFromSeconds, validItemId } from "../util";
 import {
+  downloadAllowed,
   extensionFor,
   fileNameFor,
   isDownloadableStream,
@@ -271,7 +273,15 @@ export function playableDownload(movie: Pick<Movie, "id" | "mediaSourceId">): Do
   return downloadFileUri(entry.id) ? entry : null;
 }
 
-function newEntry(movie: Movie, fields: Pick<DownloadEntry, "source" | "url" | "headers" | "fileName" | "mediaSourceId">): DownloadEntry {
+/** Whether the open profile's parental rule lets this download play (checked on every play). */
+export function downloadPlayable(entry: Pick<DownloadEntry, "rating">): boolean {
+  return downloadAllowed(entry, currentRule());
+}
+
+function newEntry(
+  movie: Movie,
+  fields: Pick<DownloadEntry, "source" | "url" | "headers" | "fileName" | "mediaSourceId" | "rating">,
+): DownloadEntry {
   const now = Date.now();
   // The snapshot drops what only makes sense online (the chosen stream is kept for addons).
   const snapshot: Movie = { ...movie, trickplay: null, cast: [] };
@@ -308,6 +318,16 @@ export async function downloadJellyfin(movie: Movie): Promise<DownloadEntry> {
   } catch {
     /* the URL decides the extension */
   }
+  // An episode without a rating is judged by its series' one, as online.
+  let rating = movie.officialRating;
+  if (!rating && movie.seriesId && validItemId(movie.seriesId)) {
+    try {
+      const series = await jellyfin.get<{ OfficialRating?: unknown }>(`/Users/${session.userId}/Items/${movie.seriesId}`);
+      if (typeof series?.OfficialRating === "string" && series.OfficialRating.trim()) rating = series.OfficialRating;
+    } catch {
+      /* judged as unrated */
+    }
+  }
   const query = mediaSourceId ? `?mediaSourceId=${encodeURIComponent(mediaSourceId)}` : "";
   const url = `${session.serverUrl}/Items/${movie.id}/Download${query}`;
   const entry = newEntry(movie, {
@@ -316,6 +336,7 @@ export async function downloadJellyfin(movie: Movie): Promise<DownloadEntry> {
     headers: {},
     fileName: fileNameFor(movie.id, extensionFor(url, container)),
     mediaSourceId,
+    rating: rating ?? null,
   });
   dispatch(profile, { type: "add", entry });
   pump(profile);
@@ -342,6 +363,7 @@ export function downloadAddon(movie: Movie, stream: AddonStream): DownloadEntry 
     headers,
     fileName: fileNameFor(movie.id, extensionFor(stream.filename ? `x/${stream.filename}` : stream.url, null)),
     mediaSourceId: null,
+    rating: movie.officialRating ?? null,
   });
   dispatch(profile, { type: "add", entry });
   pump(profile);

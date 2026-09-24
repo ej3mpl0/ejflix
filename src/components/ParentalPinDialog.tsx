@@ -3,6 +3,7 @@ import { ShieldCheck } from "lucide-react";
 import { Dialog } from "./Dialog";
 import { PinInput } from "./PinInput";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import type { MessageKey } from "../lib/i18n";
 import { parentalErrorKey } from "../lib/parental";
 
@@ -65,7 +66,7 @@ export function ParentalPinDialog({
       await onSubmit(nextPins);
     } catch (err) {
       const key = parentalErrorKey(err);
-      fail(key ? t(key) : err instanceof Error ? err.message : String(err), 0);
+      fail(key ? t(key) : errorText(t, err), 0);
     } finally {
       setBusy(false);
     }

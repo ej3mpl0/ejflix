@@ -3,6 +3,7 @@ import { Check, ExternalLink } from "lucide-react";
 import type { Settings } from "../../lib/types";
 import { api } from "../../lib/api";
 import { useI18n } from "../../lib/locale-context";
+import { errorText } from "../../lib/errors";
 import { useSettings } from "../../lib/settings-context";
 import { fieldClass as field } from "../../lib/ui";
 import { Select } from "../Select";
@@ -182,7 +183,7 @@ export function OpenSubtitlesSection() {
         setPassword("");
         setSaved(Boolean(value));
       })
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+      .catch((err) => setError(errorText(t, err)));
   };
 
   return (

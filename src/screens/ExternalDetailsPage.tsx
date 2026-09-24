@@ -8,6 +8,7 @@ import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { isParentalBlocked } from "../lib/parental";
 import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
@@ -90,7 +91,7 @@ export function ExternalDetailsPage({
       })
       .catch((err) => {
         if (alive && isParentalBlocked(err)) setBlocked(true);
-        else if (alive) setError(err instanceof Error ? err.message : String(err));
+        else if (alive) setError(errorText(t, err));
       });
     return () => {
       alive = false;
