@@ -28,24 +28,31 @@ function open(): SQLiteDatabase {
     );`,
   );
   handle.execSync("CREATE INDEX IF NOT EXISTS programme_lookup ON programme(source_id, xmltv_id, stop);");
+  // Staging rows left by a guide import the app did not live to finish.
+  handle.runSync("DELETE FROM programme WHERE source_id LIKE '%#new%'");
   db = handle;
   return handle;
 }
 
-function stageOf(sourceId: string): string {
+let stageSeq = 0;
+
+/** Staging prefix of a source; every writer gets its own id under it. */
+function stagePrefix(sourceId: string): string {
   return `${sourceId}#new`;
 }
 
 /**
- * Replaces the programmes of a source: rows are staged under `<id>#new` while the guide
+ * Replaces the programmes of a source: rows are staged under `<id>#new#<n>` while the guide
  * streams in, then swapped in one transaction so readers never see a half-written guide.
+ * The stage is per writer so an abandoned import cannot delete the rows of a newer one.
  */
 export class EpgWriter {
   private readonly stage: string;
 
   constructor(private readonly sourceId: string) {
-    this.stage = stageOf(sourceId);
-    open().runSync("DELETE FROM programme WHERE source_id = ?", this.stage);
+    stageSeq += 1;
+    this.stage = `${stagePrefix(sourceId)}#${stageSeq}`;
+    open();
   }
 
   insert(rows: ProgrammeRow[]): void {
@@ -88,7 +95,12 @@ export class EpgWriter {
 export function deleteProgrammes(sourceId: string): void {
   try {
     const handle = open();
-    handle.runSync("DELETE FROM programme WHERE source_id = ? OR source_id = ?", sourceId, stageOf(sourceId));
+    // Source ids are `[A-Za-z0-9-]` only, so the LIKE pattern has no wildcards of its own.
+    handle.runSync(
+      "DELETE FROM programme WHERE source_id = ? OR source_id LIKE ?",
+      sourceId,
+      `${stagePrefix(sourceId)}#%`,
+    );
   } catch {
     /* no database yet */
   }

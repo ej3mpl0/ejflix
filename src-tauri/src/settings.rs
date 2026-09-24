@@ -158,6 +158,11 @@ pub struct Appearance {
     pub theme: String,
     pub amoled: bool,
     pub poster_size: PosterSize,
+    /// Muted trailers play behind the Home hero and the details backdrop
+    /// (a missing field takes the struct default: on).
+    pub autoplay_trailers: bool,
+    /// The accent follows the artwork on screen instead of `theme`.
+    pub auto_accent: bool,
 }
 
 impl Default for Appearance {
@@ -166,6 +171,8 @@ impl Default for Appearance {
             theme: DEFAULT_THEME.to_string(),
             amoled: false,
             poster_size: PosterSize::Medium,
+            autoplay_trailers: true,
+            auto_accent: false,
         }
     }
 }
@@ -213,6 +220,40 @@ pub struct Playback {
     pub sub_background: String,
     /// Seconds the arrow keys and the seek buttons jump: 5, 10, 15 or 30.
     pub seek_step: u32,
+    /// Percentage of the runtime past which stopping marks the title watched
+    /// (80, 85, 90 or 95); stopping inside the detected credits counts too.
+    #[serde(default = "default_watched_threshold")]
+    pub watched_threshold: u32,
+    /// Night mode (dynamic range compression) on when playback starts.
+    #[serde(default)]
+    pub night_mode: bool,
+    /// Vertical subtitle position (mpv sub-pos): 100 = bottom, lower = higher up.
+    #[serde(default = "default_sub_pos")]
+    pub sub_pos: f64,
+    /// Subtitle outline thickness (mpv sub-outline-size), 0 to 6.
+    #[serde(default = "default_sub_outline")]
+    pub sub_outline: f64,
+    /// Apply the look to styled (ASS/SSA) subtitles as well.
+    #[serde(default)]
+    pub sub_ass_override: bool,
+    /// OpenSubtitles.com API key for the online subtitle search ("" = not set).
+    #[serde(default)]
+    pub opensubtitles_api_key: String,
+    /// Optional OpenSubtitles.com username (the password is kept apart, encrypted).
+    #[serde(default)]
+    pub opensubtitles_user: String,
+}
+
+fn default_watched_threshold() -> u32 {
+    90
+}
+
+fn default_sub_pos() -> f64 {
+    100.0
+}
+
+fn default_sub_outline() -> f64 {
+    3.0
 }
 
 impl Default for Playback {
@@ -231,6 +272,13 @@ impl Default for Playback {
             sub_color: "#FFFFFF".into(),
             sub_background: "outline".into(),
             seek_step: 10,
+            watched_threshold: default_watched_threshold(),
+            night_mode: false,
+            sub_pos: default_sub_pos(),
+            sub_outline: default_sub_outline(),
+            sub_ass_override: false,
+            opensubtitles_api_key: String::new(),
+            opensubtitles_user: String::new(),
         }
     }
 }
@@ -272,6 +320,27 @@ impl Settings {
         if !["outline", "shadow", "box"].contains(&self.playback.sub_background.as_str()) {
             self.playback.sub_background = "outline".into();
         }
+        if ![80, 85, 90, 95].contains(&self.playback.watched_threshold) {
+            self.playback.watched_threshold = default_watched_threshold();
+        }
+        self.playback.sub_pos = if self.playback.sub_pos.is_finite() {
+            self.playback.sub_pos.clamp(50.0, 100.0).round()
+        } else {
+            default_sub_pos()
+        };
+        self.playback.sub_outline = if self.playback.sub_outline.is_finite() {
+            self.playback.sub_outline.clamp(0.0, 6.0)
+        } else {
+            default_sub_outline()
+        };
+        // API keys are short alphanumeric tokens; anything else is a paste accident.
+        let key = self.playback.opensubtitles_api_key.trim();
+        self.playback.opensubtitles_api_key = if key.len() <= 128 && key.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            key.to_string()
+        } else {
+            String::new()
+        };
+        self.playback.opensubtitles_user = self.playback.opensubtitles_user.trim().chars().take(100).collect();
         self.library.pinned.retain(|id| crate::jellyfin::valid_item_id(id));
         let mut seen = std::collections::HashSet::new();
         self.library.pinned.retain(|id| seen.insert(id.clone()));
@@ -334,9 +403,26 @@ pub fn load(app: &tauri::AppHandle, user_id: &str) -> Result<Settings, String> {
     let Some(value) = store.get(key(user_id)) else {
         return Ok(Settings::default());
     };
-    let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_default();
-    legacy_done(&value, &mut settings);
-    Ok(settings.sanitized())
+    Ok(from_stored(&value).sanitized())
+}
+
+/// The stored object as `Settings`. A section that no longer reads (hand-edited, or a
+/// field whose type changed) falls back to its defaults alone instead of taking every
+/// other section with it.
+fn from_stored(value: &Value) -> Settings {
+    let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_else(|_| {
+        let mut kept = serde_json::Map::new();
+        for (key, section) in value.as_object().into_iter().flatten() {
+            let mut probe = serde_json::Map::new();
+            probe.insert(key.clone(), section.clone());
+            if serde_json::from_value::<Settings>(Value::Object(probe)).is_ok() {
+                kept.insert(key.clone(), section.clone());
+            }
+        }
+        serde_json::from_value(Value::Object(kept)).unwrap_or_default()
+    });
+    legacy_done(value, &mut settings);
+    settings
 }
 
 /// Deep-merges `patch` into the stored object, validates and saves. Returns the result.
@@ -352,16 +438,12 @@ pub fn merge_and_save(
         return Err("Ajustes demasiado grandes".into());
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
-    // Start from what the store holds as the app reads it (a damaged file falls back
-    // to the defaults, as `load` does), then apply the patch; one it cannot read is
-    // refused rather than resetting every setting.
+    // Start from what the store holds as the app reads it (a damaged section falls back
+    // to its defaults, as `load` does), then apply the patch; a patch the app cannot
+    // read is refused.
     let stored: Settings = store
         .get(key(user_id))
-        .and_then(|v| {
-            let mut settings: Settings = serde_json::from_value(v.clone()).ok()?;
-            legacy_done(&v, &mut settings);
-            Some(settings)
-        })
+        .map(|v| from_stored(&v))
         .unwrap_or_default();
     let mut current = serde_json::to_value(&stored).map_err(|e| e.to_string())?;
     deep_merge(&mut current, patch);

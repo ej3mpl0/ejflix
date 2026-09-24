@@ -84,11 +84,24 @@ export function UserDataProvider({
       void load();
       setVersion((n) => n + 1);
     });
+    // The player marked something watched on stop (past the threshold or in the credits).
+    const watched = api.onPlayerWatched((target) => {
+      if (target.key) void load();
+      const itemId = target.itemId;
+      if (itemId) {
+        setOverrides((current) => ({
+          ...current,
+          [itemId]: { ...(current[itemId] ?? {}), played: true, playedPercentage: 0, playbackPositionTicks: 0 },
+        }));
+      }
+      setVersion((n) => n + 1);
+    });
     return () => {
       alive = false;
       void unlisten.then((fn) => fn());
       void unlistenTrakt.then((fn) => fn());
       void unlistenParental.then((fn) => fn());
+      void watched.then((fn) => fn());
     };
   }, []);
 

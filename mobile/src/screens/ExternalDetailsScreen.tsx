@@ -29,6 +29,7 @@ import { FloatingTitleBar } from "../components/shell";
 import { useUserData } from "../lib/userdata-context";
 import { FavoriteButton } from "../components/media/FavoriteButton";
 import { WatchedButton } from "../components/media/WatchedButton";
+import { DownloadButton } from "../components/media/DownloadButton";
 
 /** Height of the tint → base gradient under the backdrop (desktop 720 px). */
 const BODY_TINT_H = 720;
@@ -97,6 +98,23 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
       alive = false;
     };
   }, [ext?.type, ext?.metaId, reload]);
+
+  // Back from the player: the resume position and the next episode moved.
+  useEffect(() => {
+    let alive = true;
+    const unlisten = api.onPlayerClose(() => {
+      api
+        .addonProgressList()
+        .then((list) => {
+          if (alive) setProgress(list);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn()).catch(() => undefined);
+    };
+  }, []);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasonNumbers = useMemo(() => {
@@ -282,6 +300,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
             ) : null}
             <FavoriteButton movie={movie} pill size="lg" />
             <WatchedButton movie={movie} pill size="lg" />
+            <DownloadButton movie={movie} />
             {trailer ? (
               <Pill
                 variant="tonal"

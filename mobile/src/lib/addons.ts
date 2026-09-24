@@ -145,6 +145,7 @@ export function videoToMovie(meta: AddonMetaFull, video: AddonVideo): Movie {
     thumbUrl: video.thumbnail,
     overview: video.overview,
     year: video.released ? Number(video.released.slice(0, 4)) || null : meta.year,
+    premiereDate: video.released,
     posterUrl: meta.poster,
     backdropUrl: meta.background ?? meta.poster,
     logoUrl: meta.logo,

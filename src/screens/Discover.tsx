@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Compass, X } from "lucide-react";
+import { Compass, Download, SearchX, X } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -7,7 +7,7 @@ import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
 import { Select } from "../components/Select";
-import { Shimmer } from "../components/Shimmer";
+import { PosterGridItemsSkeleton } from "../components/Skeletons";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
@@ -55,11 +55,14 @@ export function Discover({
   onOpen,
   onPlay,
   onError,
+  onImportAddons,
 }: {
   hasServer: boolean;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
   onError: (message: string) => void;
+  /** Settings › Addons with the import panel up (offered when there is nothing to browse). */
+  onImportAddons?: () => void;
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
@@ -80,6 +83,8 @@ export function Discover({
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const request = useRef(0);
   const page = useRef(0);
   const onErrorRef = useRef(onError);
@@ -89,8 +94,11 @@ export function Discover({
   const catalogDone = useRef<Record<string, boolean>>({});
 
   const hasAddons = (addons?.length ?? 0) > 0;
-  const useServer = hasServer && source !== "online";
-  const useOnline = hasAddons && source !== "server";
+  // The source switch only shows with both sources; without it (another profile, the
+  // server unlinked) a remembered "server"/"online" would leave nothing to browse.
+  const activeSource: Source = hasServer && hasAddons ? source : "all";
+  const useServer = hasServer && activeSource !== "online";
+  const useOnline = hasAddons && activeSource !== "server";
 
   useEffect(() => {
     let alive = true;
@@ -173,6 +181,8 @@ export function Discover({
 
   const fetchPage = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of new filters loads would land on the old list.
+      if (!first && loadingRef.current) return;
       const id = ++request.current;
       if (first) {
         page.current = 0;
@@ -190,10 +200,14 @@ export function Discover({
           api
             .browseItems({ type: kind, genre, year, sort, start: current * SERVER_PAGE, limit: SERVER_PAGE })
             .then((list) => {
-              if (list.length === 0 || (list.length < SERVER_PAGE && !restricted.current)) serverDone.current = true;
+              // A superseded request must not touch the paging state of the current one.
+              if (id === request.current && (list.length === 0 || (list.length < SERVER_PAGE && !restricted.current))) {
+                serverDone.current = true;
+              }
               return list;
             })
             .catch((err) => {
+              if (id !== request.current) return [];
               serverDone.current = true;
               onErrorRef.current(err instanceof Error ? err.message : String(err));
               return [];
@@ -209,12 +223,13 @@ export function Discover({
         return api
           .addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, genre: matched, skip: catalogSkip.current[key] ?? 0 })
           .then((metas) => {
+            if (id !== request.current) return [];
             catalogSkip.current[key] = (catalogSkip.current[key] ?? 0) + metas.length;
             if (!metas.length) catalogDone.current[key] = true;
             return metas.filter((m) => year == null || m.year === year).map(metaToMovie);
           })
           .catch(() => {
-            catalogDone.current[key] = true;
+            if (id === request.current) catalogDone.current[key] = true;
             return [];
           });
       });
@@ -349,9 +364,7 @@ export function Discover({
       {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
       {loading && !visible.length ? (
         <div className={grid}>
-          {Array.from({ length: 18 }).map((_, i) => (
-            <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
-          ))}
+          <PosterGridItemsSkeleton count={18} />
         </div>
       ) : visible.length ? (
         <>
@@ -366,13 +379,32 @@ export function Discover({
                 delay={Math.min(i, 24) * 20}
               />
             ))}
+            {loadingMore ? <PosterGridItemsSkeleton count={6} /> : null}
           </div>
           {more ? (
-            <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
+            <LoadMoreButton loading={loading || loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (
-        <EmptyState title={t("noDiscoverResults")} hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined} />
+        <EmptyState
+          icon={<SearchX size={26} />}
+          title={t("noDiscoverResults")}
+          hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined}
+          action={
+            !hasServer && !hasAddons && onImportAddons
+              ? { label: t("importAddons"), icon: <Download size={16} />, onClick: onImportAddons }
+              : genre != null || year != null
+                ? {
+                    label: t("clearFilters"),
+                    icon: <X size={16} />,
+                    onClick: () => {
+                      setGenre(null);
+                      setYear(null);
+                    },
+                  }
+                : undefined
+          }
+        />
       )}
     </div>
   );

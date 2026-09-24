@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Plus, Puzzle, Settings2, Trash2 } from "lucide-react";
 import type { AddonInfo, TorrentCacheInfo } from "../../lib/types";
 import { api } from "../../lib/api";
@@ -12,6 +12,8 @@ import { ConfirmButton } from "../ConfirmButton";
 import { fieldClass } from "../../lib/ui";
 import { cn } from "../../lib/format";
 import { AddonImport } from "../AddonImport";
+import { ListRowsSkeleton } from "../Skeletons";
+import { useSettingsIntent } from "../../lib/settings-intent";
 
 /** Disk the torrent cache may take, in GB. */
 const CACHE_SIZES = [2, 5, 10, 20, 50, 100];
@@ -38,6 +40,15 @@ export function AddonsSection({
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [cache, setCache] = useState<TorrentCacheInfo | null>(null);
+  const importRef = useRef<HTMLDivElement>(null);
+
+  // "Import addons" from an empty screen or the palette: bring the import panel up.
+  useSettingsIntent("addons-import", () => {
+    const panel = importRef.current;
+    if (!panel) return;
+    panel.scrollIntoView({ block: "center", behavior: "smooth" });
+    panel.querySelector<HTMLElement>("input, textarea, button")?.focus({ preventScroll: true });
+  });
 
   useEffect(() => {
     let alive = true;
@@ -153,7 +164,7 @@ export function AddonsSection({
           </button>
         </form>
         {addons == null ? (
-          <p className="py-4 text-[13px] text-dim">{t("loading")}…</p>
+          <ListRowsSkeleton />
         ) : addons.length ? (
           addons.map((addon) => (
             <div key={addon.url} className={`flex items-center gap-4 py-3 ${addon.enabled ? "" : "opacity-60"}`}>
@@ -214,7 +225,7 @@ export function AddonsSection({
         )}
       </SettingsSection>
       <SettingsSection title={t("importAddons")} description={t("importAddonsHint")}>
-        <div className="max-w-[520px] py-4">
+        <div ref={importRef} className="max-w-[520px] py-4">
           <AddonImport />
         </div>
       </SettingsSection>

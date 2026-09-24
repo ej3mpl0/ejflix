@@ -34,6 +34,7 @@ import { ProductionInfo } from "../components/media/ProductionInfo";
 import { SeasonChips, type SeasonChip } from "../components/media/SeasonChips";
 import { SimilarRail } from "../components/media/SimilarRail";
 import { WatchedButton } from "../components/media/WatchedButton";
+import { DownloadButton } from "../components/media/DownloadButton";
 import { FloatingTitleBar } from "../components/shell";
 
 /** Position over which an item is considered "in progress" (30 s). */
@@ -74,6 +75,8 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const [error, setError] = useState("");
   /** Above the open profile's age limit. */
   const [blocked, setBlocked] = useState(false);
+  /** Bumped when the player closes: position, played state and next up changed. */
+  const [playedToken, setPlayedToken] = useState(0);
   const loadedSeason = useRef<string | null>(null);
   const scrollY = useSharedValue(0);
   const isSeries = route.kind === "Series";
@@ -82,6 +85,13 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const onScroll = useAnimatedScrollHandler((e) => {
     scrollY.value = e.contentOffset.y;
   });
+
+  useEffect(() => {
+    const unlisten = api.onPlayerClose(() => setPlayedToken((n) => n + 1));
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -109,7 +119,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
     return () => {
       alive = false;
     };
-  }, [route.id, route.seed, isSeries]);
+  }, [route.id, route.seed, isSeries, playedToken]);
 
   useEffect(() => {
     if (!isSeries || !seasonId) return undefined;
@@ -130,7 +140,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
     return () => {
       alive = false;
     };
-  }, [isSeries, route.id, seasonId, userDataVersion]);
+  }, [isSeries, route.id, seasonId, userDataVersion, playedToken]);
 
   const movie = detail;
   const heading = movie?.name ?? route.seed?.name ?? "";
@@ -315,6 +325,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
             ) : null}
             <FavoriteButton movie={movie} pill size="lg" />
             <WatchedButton movie={movie} pill size="lg" />
+            <DownloadButton movie={movie} />
             {onlineRef ? (
               <Pill variant="tonal" pill size="lg" icon={Globe} label={tr("onlineSources")} onPress={() => openOnline(movie)} />
             ) : null}

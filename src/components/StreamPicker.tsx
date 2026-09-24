@@ -59,6 +59,8 @@ function readPreferred(metaId: string): Preferred | null {
 function savePreferred(metaId: string, stream: AddonStream) {
   try {
     const all = JSON.parse(localStorage.getItem(PREFERRED_KEY) ?? "{}") as Record<string, Preferred>;
+    // Re-inserted, so a title played again moves to the recent end.
+    delete all[metaId];
     all[metaId] = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
     // Keep the most recent 300 titles.
     const entries = Object.entries(all).slice(-300);

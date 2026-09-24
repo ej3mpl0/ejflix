@@ -6,6 +6,7 @@ import { PosterCard } from "../components/PosterCard";
 import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { handlePosterArrows } from "../lib/poster-nav";
+import { PosterGridItemsSkeleton } from "../components/Skeletons";
 
 /** A Home row as a full grid, over Home (which keeps its scroll); pages in more when it can. */
 export function SeeAllPage({
@@ -54,6 +55,8 @@ export function SeeAllPage({
             {items.map((movie, i) => (
               <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} layout="grid" delay={Math.min(i, 24) * 20} />
             ))}
+            {/* The next page's slots, so the grid grows in place instead of jumping. */}
+            {loading ? <PosterGridItemsSkeleton count={6} titles /> : null}
           </div>
           {!done ? <LoadMoreButton loading={loading} onLoad={() => void more()} /> : null}
         </div>

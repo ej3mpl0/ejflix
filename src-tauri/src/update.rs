@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use tauri::Emitter;
 use tokio::sync::Mutex;
 
@@ -40,6 +41,9 @@ pub struct UpdateCheck {
     pub asset_url: Option<String>,
     pub asset_name: Option<String>,
     pub asset_size: Option<u64>,
+    /// SHA-256 GitHub reports for the installer (lowercase hex), when it has one.
+    #[serde(skip)]
+    pub asset_sha256: Option<String>,
     pub published_at: Option<String>,
     pub checked_at_ms: u64,
 }
@@ -91,10 +95,17 @@ pub fn parse_version(raw: &str) -> Option<(u64, u64, u64)> {
     Some((major, minor, patch))
 }
 
+/// `0.4.0-beta.2` (a pre-release comes before the release of the same number).
+fn is_prerelease(raw: &str) -> bool {
+    raw.find(|c: char| c.is_ascii_digit())
+        .map(|start| raw[start..].split(['+', ' ']).next().unwrap_or("").contains('-'))
+        .unwrap_or(false)
+}
+
 /// `latest` is strictly newer than `current`. Unparseable input never reports an update.
 pub fn is_newer(latest: &str, current: &str) -> bool {
     match (parse_version(latest), parse_version(current)) {
-        (Some(l), Some(c)) => l > c,
+        (Some(l), Some(c)) => l > c || (l == c && is_prerelease(current) && !is_prerelease(latest)),
         _ => false,
     }
 }
@@ -125,6 +136,20 @@ fn pick_asset(assets: &[serde_json::Value]) -> Option<(String, String, u64)> {
     // Prefer the x64 build if several installers are attached.
     candidates.sort_by_key(|(name, _, _)| !name.to_ascii_lowercase().contains("x64"));
     candidates.into_iter().next()
+}
+
+/// `sha256:<hex>` digest GitHub lists for the asset called `name` (assets uploaded
+/// before GitHub started computing digests have none).
+fn asset_digest(assets: &[serde_json::Value], name: &str) -> Option<String> {
+    let asset = assets
+        .iter()
+        .find(|a| a.get("name").and_then(|n| n.as_str()) == Some(name))?;
+    let hex = asset.get("digest")?.as_str()?.strip_prefix("sha256:")?.to_ascii_lowercase();
+    (hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit())).then_some(hex)
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    crate::protect::to_hex(&Sha256::digest(bytes))
 }
 
 impl Updater {
@@ -217,6 +242,7 @@ impl Updater {
             asset_url: asset.as_ref().map(|a| a.1.clone()),
             asset_name: asset.as_ref().map(|a| a.0.clone()),
             asset_size: asset.as_ref().map(|a| a.2).filter(|s| *s > 0),
+            asset_sha256: asset.as_ref().and_then(|a| asset_digest(&assets, &a.0)),
             published_at: body
                 .get("published_at")
                 .and_then(|v| v.as_str())
@@ -264,9 +290,13 @@ impl Updater {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
         }
-        // Already downloaded and complete: reuse it.
+        // Already downloaded and complete (and, when GitHub gives a digest, intact): reuse it.
         if let (Ok(meta), Some(size)) = (std::fs::metadata(&path), check.asset_size) {
-            if meta.len() == size {
+            let intact = match &check.asset_sha256 {
+                Some(expected) => std::fs::read(&path).is_ok_and(|bytes| &sha256_hex(&bytes) == expected),
+                None => true,
+            };
+            if meta.len() == size && intact {
                 let _ = app.emit(PROGRESS_EVENT, serde_json::json!({ "received": size, "total": size }));
                 return Ok(Downloaded { path: path.to_string_lossy().into_owned(), size });
             }
@@ -288,9 +318,11 @@ impl Updater {
         let total = resp.content_length().or(check.asset_size).unwrap_or(0);
         let mut file = std::fs::File::create(&partial).map_err(|e| e.to_string())?;
         let mut received: u64 = 0;
+        let mut hasher = Sha256::new();
         let mut last_emit = Instant::now() - Duration::from_secs(1);
         while let Some(chunk) = resp.chunk().await.map_err(|e| e.to_string())? {
             file.write_all(&chunk).map_err(|e| e.to_string())?;
+            hasher.update(&chunk);
             received += chunk.len() as u64;
             if last_emit.elapsed() >= Duration::from_millis(150) {
                 last_emit = Instant::now();
@@ -303,6 +335,12 @@ impl Updater {
             if received != size {
                 let _ = std::fs::remove_file(&partial);
                 return Err(format!("Descarga incompleta ({received} de {size} bytes)"));
+            }
+        }
+        if let Some(expected) = &check.asset_sha256 {
+            if &crate::protect::to_hex(&hasher.finalize()) != expected {
+                let _ = std::fs::remove_file(&partial);
+                return Err("El instalador descargado no coincide con el publicado".into());
             }
         }
         std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
@@ -351,5 +389,8 @@ mod tests {
         assert!(!is_newer("0.3.0", "0.3.0"));
         assert!(!is_newer("0.2.9", "0.3.0"));
         assert!(!is_newer("nope", "0.3.0"));
+        assert!(is_newer("0.4.0", "0.4.0-beta.1"));
+        assert!(!is_newer("0.4.0-beta.2", "0.4.0-beta.1"));
+        assert!(!is_newer("0.4.0", "0.4.0"));
     }
 }

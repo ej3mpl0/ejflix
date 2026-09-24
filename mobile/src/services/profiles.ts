@@ -125,11 +125,8 @@ export async function localProfileDelete(
   session.writeLocalProfiles(session.readLocalProfiles().filter((p) => p.id !== id));
   await session.clearLinkedSession(id);
   await secrets.remove(SECRET.pin(id));
-  store.remove(KEYS.settings(id));
-  store.remove(KEYS.addonProgress(id));
-  store.remove(KEYS.iptv(id));
-  store.remove(KEYS.iptvFavorites(id));
-  store.remove(KEYS.iptvRecent(id));
+  // Hooks first: the IPTV one reads the profile's source list to purge its passwords,
+  // files and guide rows, so that list must still be there.
   for (const hook of Array.from(deleteHooks)) {
     try {
       await hook(id);
@@ -137,6 +134,11 @@ export async function localProfileDelete(
       console.warn("[profiles] delete hook failed", error);
     }
   }
+  store.remove(KEYS.settings(id));
+  store.remove(KEYS.addonProgress(id));
+  store.remove(KEYS.iptv(id));
+  store.remove(KEYS.iptvFavorites(id));
+  store.remove(KEYS.iptvRecent(id));
   if (store.get<string>(KEYS.activeLocalProfile) === id) store.remove(KEYS.activeLocalProfile);
 }
 

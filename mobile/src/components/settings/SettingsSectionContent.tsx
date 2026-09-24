@@ -1,11 +1,12 @@
 import React from "react";
 import { View } from "react-native";
 import type { LucideIcon } from "lucide-react-native";
-import { Palette, Play, Puzzle, RefreshCw, ShieldCheck, Tv, UserRound } from "lucide-react-native";
+import { CloudDownload, Palette, Play, Puzzle, RefreshCw, ShieldCheck, Tv, UserRound } from "lucide-react-native";
 import type { MessageKey } from "../../lib/i18n";
 import { AccountSection } from "./AccountSection";
 import { AddonsSection } from "./AddonsSection";
 import { AppearanceSection } from "./AppearanceSection";
+import { DownloadsSection } from "./DownloadsSection";
 import { IptvSection } from "./IptvSection";
 import { LanguageSection } from "./LanguageSection";
 import { PlaybackSection } from "./PlaybackSection";
@@ -13,12 +14,22 @@ import { UpdatesSection } from "./UpdatesSection";
 import { ParentalSection } from "./ParentalSection";
 
 /** "language" stays a valid id (old links) but now lives inside General ("appearance"). */
-export type SettingsSectionId = "appearance" | "playback" | "addons" | "iptv" | "language" | "account" | "updates" | "parental";
+export type SettingsSectionId =
+  | "appearance"
+  | "playback"
+  | "downloads"
+  | "addons"
+  | "iptv"
+  | "language"
+  | "account"
+  | "updates"
+  | "parental";
 
 /** The settings sections in display order (Discord is desktop-only). */
 export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; icon: LucideIcon; labelKey: MessageKey; hintKey: MessageKey }> = [
   { id: "appearance", icon: Palette, labelKey: "general", hintKey: "generalHint" },
   { id: "playback", icon: Play, labelKey: "playback", hintKey: "playbackHint" },
+  { id: "downloads", icon: CloudDownload, labelKey: "downloadsTitle", hintKey: "downloadsHint" },
   { id: "addons", icon: Puzzle, labelKey: "addons", hintKey: "addonsShortHint" },
   { id: "iptv", icon: Tv, labelKey: "iptv", hintKey: "iptvShortHint" },
   { id: "account", icon: UserRound, labelKey: "account", hintKey: "accountHint" },
@@ -29,7 +40,8 @@ export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; icon: Luc
 /** Titles and row labels of each section, for the settings search. */
 export const SETTINGS_SEARCH: Record<Exclude<SettingsSectionId, "language">, MessageKey[]> = {
   appearance: ["language", "appLanguage", "theme", "amoled", "posterSize"],
-  playback: ["seekStep", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining"],
+  playback: ["seekStep", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining", "subPosition", "pipTitle", "autoPip", "backgroundAudio", "hapticsSetting"],
+  downloads: ["downloadsTitle", "downloadsStorageTitle"],
   addons: ["addons", "importAddons", "cinemetaRow"],
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled"],
   account: ["account", "switchProfile", "jellyfinServer"],
@@ -54,6 +66,8 @@ export function SettingsSectionContent({ section }: { section: SettingsSectionId
       );
     case "playback":
       return <PlaybackSection />;
+    case "downloads":
+      return <DownloadsSection />;
     case "addons":
       return <AddonsSection />;
     case "iptv":

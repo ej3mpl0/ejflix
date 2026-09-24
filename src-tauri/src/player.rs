@@ -140,6 +140,13 @@ pub struct PlayerState {
     pub speed: f64,
     /// "auto" | "16:9" | "4:3" | "2.35:1" | "fill"
     pub aspect: String,
+    /// Subtitle / audio delay in seconds (as mpv reports them).
+    pub sub_delay: f64,
+    pub audio_delay: f64,
+    /// Night mode: the dynamic range compressor is on.
+    pub night: bool,
+    /// The main window is the small always-on-top mini player.
+    pub mini: bool,
 }
 
 impl Default for PlayerState {
@@ -159,6 +166,10 @@ impl Default for PlayerState {
             cache_time: 0.0,
             speed: 1.0,
             aspect: "auto".to_string(),
+            sub_delay: 0.0,
+            audio_delay: 0.0,
+            night: false,
+            mini: false,
         }
     }
 }
@@ -185,6 +196,18 @@ pub struct PlaybackContext {
     pub presence: crate::discord::PresenceInfo,
 }
 
+impl PlaybackSource {
+    /// What per-title data (sync offsets) is filed under: the Jellyfin item id or the
+    /// Stremio video id. Live channels keep nothing.
+    pub fn title_key(&self) -> Option<String> {
+        match self {
+            PlaybackSource::Jellyfin { item_id, .. } => Some(item_id.clone()),
+            PlaybackSource::Addon { entry } => Some(entry.key.clone()).filter(|k| !k.is_empty()),
+            PlaybackSource::Live { .. } => None,
+        }
+    }
+}
+
 /// Per-profile playback preferences applied before every `loadfile`.
 #[derive(Clone, Default)]
 pub struct PlaybackPrefs {
@@ -198,6 +221,65 @@ pub struct PlaybackPrefs {
     pub sub_scale: f64,
     pub sub_color: String,
     pub sub_background: String,
+    /// mpv sub-pos (100 = bottom) and outline thickness.
+    pub sub_pos: f64,
+    pub sub_outline: f64,
+    /// Force the look onto styled (ASS/SSA) subtitles too.
+    pub sub_ass_override: bool,
+    pub night_mode: bool,
+    /// Sync offsets remembered for this title.
+    pub sub_delay: f64,
+    pub audio_delay: f64,
+}
+
+impl PlaybackPrefs {
+    pub fn from_settings(playback: &crate::settings::Playback) -> Self {
+        Self {
+            audio_language: playback.audio_language.clone(),
+            subtitle_language: playback.subtitle_language.clone(),
+            remember_speed: playback.remember_speed,
+            last_speed: playback.last_speed,
+            sub_scale: playback.sub_scale,
+            sub_color: playback.sub_color.clone(),
+            sub_background: playback.sub_background.clone(),
+            sub_pos: playback.sub_pos,
+            sub_outline: playback.sub_outline,
+            sub_ass_override: playback.sub_ass_override,
+            night_mode: playback.night_mode,
+            sub_delay: 0.0,
+            audio_delay: 0.0,
+        }
+    }
+}
+
+/// Night mode: dynamic range compression plus loudness levelling, so dialogue and
+/// explosions end up closer in volume. `af` is a player option, so it survives loadfile.
+const NIGHT_FILTER: &str = "lavfi=[dynaudnorm=f=75:g=25:p=0.55]";
+
+/// Size of the mini player (logical pixels, 16:9) and its gap to the screen edges.
+const MINI_WIDTH: f64 = 480.0;
+const MINI_HEIGHT: f64 = 270.0;
+const MINI_MARGIN: f64 = 24.0;
+
+/// Where the main window was before it became the mini player.
+struct MiniRestore {
+    position: tauri::PhysicalPosition<i32>,
+    size: tauri::PhysicalSize<u32>,
+    maximized: bool,
+    fullscreen: bool,
+}
+
+/// Whether playback that stopped at `time` counts as watched: past `threshold_pct`
+/// of the runtime, or inside the credits (only trusted in the second half of the file:
+/// a misdetected segment near the start must not mark anything).
+pub fn counts_as_watched(time: f64, duration: f64, threshold_pct: u32, credits_start: Option<f64>) -> bool {
+    if !(duration.is_finite() && duration > 0.0 && time.is_finite()) {
+        return false;
+    }
+    if time >= duration * f64::from(threshold_pct.clamp(50, 100)) / 100.0 {
+        return true;
+    }
+    matches!(credits_start, Some(start) if start.is_finite() && start >= duration * 0.5 && time >= start)
 }
 
 /// mpv properties the UI may set while playing (delays, subtitle look).
@@ -229,7 +311,24 @@ const READABLE: &[&str] = &[
     "sub-delay",
     "audio-delay",
     "file-format",
+    "container-fps",
+    "video-params/pixelformat",
+    "audio-params/channel-count",
+    "audio-params/samplerate",
+    "audio-out-params/channel-count",
 ];
+
+/// mpv renamed sub-border-size to sub-outline-size (0.38); set both, the unknown one fails quietly.
+const OUTLINE_PROPS: [&str; 2] = ["sub-outline-size", "sub-border-size"];
+
+/// `sub-ass-override`: "force" restyles ASS/SSA too, "scale" (mpv's default) keeps their styles.
+fn ass_override(force: bool) -> &'static str {
+    if force {
+        "force"
+    } else {
+        "scale"
+    }
+}
 
 /// The properties behind a subtitle background choice.
 fn sub_background_props(kind: &str) -> Vec<(&'static str, Value)> {
@@ -314,6 +413,9 @@ pub struct Player {
     overlay_guard: Arc<AtomicBool>,
     overlay_gen: Arc<AtomicU64>,
     request_id: AtomicU64,
+    /// Start of the credits of the current file, as the overlay detected it.
+    credits_start: Mutex<Option<f64>>,
+    mini: Mutex<Option<MiniRestore>>,
 }
 
 impl Player {
@@ -329,6 +431,8 @@ impl Player {
             overlay_guard: Arc::new(AtomicBool::new(false)),
             overlay_gen: Arc::new(AtomicU64::new(0)),
             request_id: AtomicU64::new(1),
+            credits_start: Mutex::new(None),
+            mini: Mutex::new(None),
         }
     }
 
@@ -449,11 +553,16 @@ impl Player {
                 // time so an immediate stop does not report position 0 to Jellyfin.
                 time: start_seconds.max(0.0),
                 speed,
+                sub_delay: clamp_delay(prefs.sub_delay),
+                audio_delay: clamp_delay(prefs.audio_delay),
+                night: prefs.night_mode,
+                mini: state.mini,
                 ..PlayerState::default()
             };
             state.title = title.to_string();
         }
         *self.context.write().await = Some(context);
+        *self.credits_start.lock().unwrap() = None;
         self.show_video(true);
         let header_lines: Vec<String> = headers
             .iter()
@@ -509,8 +618,25 @@ impl Player {
         for (name, value) in sub_background_props(&prefs.sub_background) {
             let _ = self.command(json!(["set_property", name, value]), false).await;
         }
-        let _ = self.command(json!(["set_property", "sub-delay", 0.0]), false).await;
-        let _ = self.command(json!(["set_property", "audio-delay", 0.0]), false).await;
+        let pos = if prefs.sub_pos.is_finite() { prefs.sub_pos.clamp(50.0, 100.0) } else { 100.0 };
+        let _ = self.command(json!(["set_property", "sub-pos", pos]), false).await;
+        let outline = if prefs.sub_outline.is_finite() { prefs.sub_outline.clamp(0.0, 6.0) } else { 3.0 };
+        for name in OUTLINE_PROPS {
+            let _ = self.command(json!(["set_property", name, outline]), false).await;
+        }
+        let _ = self
+            .command(json!(["set_property", "sub-ass-override", ass_override(prefs.sub_ass_override)]), false)
+            .await;
+        let _ = self
+            .command(json!(["set_property", "af", if prefs.night_mode { NIGHT_FILTER } else { "" }]), false)
+            .await;
+        // Delays: the offsets remembered for this title, else zero.
+        let _ = self
+            .command(json!(["set_property", "sub-delay", clamp_delay(prefs.sub_delay)]), false)
+            .await;
+        let _ = self
+            .command(json!(["set_property", "audio-delay", clamp_delay(prefs.audio_delay)]), false)
+            .await;
         // Every file starts with its own aspect ratio.
         let _ = self
             .command(json!(["set_property", "video-aspect-override", -1]), false)
@@ -617,8 +743,22 @@ impl Player {
         Ok(())
     }
 
-    /// Sets one of `SETTABLE`; `sub-background` is a shortcut for its three properties.
+    /// Sets one of `SETTABLE`; `sub-background` is a shortcut for its three properties,
+    /// `sub-outline` for the outline size under both its names, `sub-ass-override` takes a bool.
     pub async fn set_prop(&self, name: &str, value: Value) -> Result<(), String> {
+        if name == "sub-outline" {
+            let size = value.as_f64().filter(|v| v.is_finite()).unwrap_or(3.0).clamp(0.0, 6.0);
+            for prop in OUTLINE_PROPS {
+                let _ = self.command(json!(["set_property", prop, size]), false).await;
+            }
+            return Ok(());
+        }
+        if name == "sub-ass-override" {
+            let force = value.as_bool().unwrap_or(false);
+            self.command(json!(["set_property", name, ass_override(force)]), false)
+                .await?;
+            return Ok(());
+        }
         if name == "sub-background" {
             for (prop, v) in sub_background_props(value.as_str().unwrap_or("outline")) {
                 self.command(json!(["set_property", prop, v]), false).await?;
@@ -630,6 +770,144 @@ impl Player {
         }
         self.command(json!(["set_property", name, value]), false).await?;
         Ok(())
+    }
+
+    /// Subtitle ("sub") or audio delay in seconds; returns the value applied.
+    pub async fn set_delay(&self, kind: &str, seconds: f64) -> Result<f64, String> {
+        let prop = match kind {
+            "sub" => "sub-delay",
+            "audio" => "audio-delay",
+            _ => return Err("Retraso no válido".into()),
+        };
+        let value = clamp_delay(seconds);
+        self.command(json!(["set_property", prop, value]), false)
+            .await?;
+        let mut state = self.state.write().await;
+        if kind == "sub" {
+            state.sub_delay = value;
+        } else {
+            state.audio_delay = value;
+        }
+        Ok(value)
+    }
+
+    /// Night mode on or off, live.
+    pub async fn set_night(&self, on: bool) -> Result<(), String> {
+        self.command(json!(["set_property", "af", if on { NIGHT_FILTER } else { "" }]), false)
+            .await?;
+        self.state.write().await.night = on;
+        Ok(())
+    }
+
+    /// Start of the credits (seconds) of the file playing, for the "watched" rule.
+    pub fn set_credits_start(&self, start: Option<f64>) {
+        *self.credits_start.lock().unwrap() = start.filter(|s| s.is_finite() && *s > 0.0);
+    }
+
+    pub fn credits_start(&self) -> Option<f64> {
+        *self.credits_start.lock().unwrap()
+    }
+
+    /// Turns the main window into a small always-on-top player in the bottom-right
+    /// corner of its screen. The video and the overlay already follow the window
+    /// (resize / move events), so only the window itself changes.
+    pub async fn enter_mini(&self, app: &AppHandle) -> Result<(), String> {
+        if self.mini.lock().unwrap().is_some() {
+            return Ok(());
+        }
+        let main = app
+            .get_webview_window("main")
+            .ok_or_else(|| "Ventana no disponible".to_string())?;
+        let fullscreen = main.is_fullscreen().unwrap_or(false);
+        if fullscreen {
+            crate::set_main_fullscreen(&main, false)?;
+            // Leaving fullscreen brings the previous placement back asynchronously.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let maximized = main.is_maximized().unwrap_or(false);
+        if maximized {
+            let _ = main.unmaximize();
+            tokio::time::sleep(Duration::from_millis(150)).await;
+        }
+        let position = main.outer_position().map_err(|e| e.to_string())?;
+        let size = main.inner_size().map_err(|e| e.to_string())?;
+        *self.mini.lock().unwrap() = Some(MiniRestore {
+            position,
+            size,
+            maximized,
+            fullscreen,
+        });
+        let scale = main.scale_factor().unwrap_or(1.0);
+        let width = (MINI_WIDTH * scale).round() as i32;
+        let height = (MINI_HEIGHT * scale).round() as i32;
+        let margin = (MINI_MARGIN * scale).round() as i32;
+        let monitor = main
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| main.primary_monitor().ok().flatten());
+        let (x, y) = match monitor {
+            Some(monitor) => {
+                let area = monitor.work_area();
+                (
+                    area.position.x + area.size.width as i32 - width - margin,
+                    area.position.y + area.size.height as i32 - height - margin,
+                )
+            }
+            None => (position.x, position.y),
+        };
+        let _ = main.set_min_size(None::<tauri::Size>);
+        let _ = main.set_size(tauri::PhysicalSize::new(width as u32, height as u32));
+        let _ = main.set_position(tauri::PhysicalPosition::new(x, y));
+        let _ = main.set_always_on_top(true);
+        if let Some(overlay) = app.get_webview_window("player-overlay") {
+            let _ = overlay.set_always_on_top(true);
+        }
+        self.resize();
+        crate::sync_player_overlay(app);
+        let snapshot = {
+            let mut state = self.state.write().await;
+            state.mini = true;
+            state.clone()
+        };
+        let _ = app.emit("player://state", snapshot);
+        Ok(())
+    }
+
+    /// Back from the mini player to where the window was. With `restore_fullscreen`
+    /// false (the player is closing) a window that was fullscreen comes back windowed.
+    /// Returns whether the window is fullscreen again.
+    pub async fn exit_mini(&self, app: &AppHandle, restore_fullscreen: bool) -> Result<bool, String> {
+        let Some(restore) = self.mini.lock().unwrap().take() else {
+            return Ok(false);
+        };
+        let snapshot = {
+            let mut state = self.state.write().await;
+            state.mini = false;
+            state.clone()
+        };
+        let main = app
+            .get_webview_window("main")
+            .ok_or_else(|| "Ventana no disponible".to_string())?;
+        let _ = main.set_always_on_top(false);
+        if let Some(overlay) = app.get_webview_window("player-overlay") {
+            let _ = overlay.set_always_on_top(false);
+        }
+        // Same minimum as tauri.conf.json.
+        let _ = main.set_min_size(Some(tauri::LogicalSize::new(1024.0, 640.0)));
+        let _ = main.set_size(restore.size);
+        let _ = main.set_position(restore.position);
+        if restore.maximized {
+            let _ = main.maximize();
+        }
+        let fullscreen = restore.fullscreen && restore_fullscreen;
+        if fullscreen {
+            crate::set_main_fullscreen(&main, true)?;
+        }
+        self.resize();
+        crate::sync_player_overlay(app);
+        let _ = app.emit("player://state", snapshot);
+        Ok(fullscreen)
     }
 
     /// Current values of the `READABLE` properties (missing ones are null).
@@ -749,6 +1027,8 @@ impl Player {
             "sid",
             "demuxer-cache-time",
             "speed",
+            "sub-delay",
+            "audio-delay",
         ];
         for (i, name) in observes.iter().enumerate() {
             let _ = self
@@ -897,6 +1177,8 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
         "sid" => state.sid = parse_track_id(data),
         "demuxer-cache-time" => state.cache_time = data.and_then(|v| v.as_f64()).unwrap_or(0.0),
         "speed" => state.speed = data.and_then(|v| v.as_f64()).unwrap_or(state.speed),
+        "sub-delay" => state.sub_delay = data.and_then(|v| v.as_f64()).unwrap_or(state.sub_delay),
+        "audio-delay" => state.audio_delay = data.and_then(|v| v.as_f64()).unwrap_or(state.audio_delay),
         "track-list" => {
             if let Some(list) = data.and_then(|v| v.as_array()) {
                 state.tracks = list
@@ -913,7 +1195,8 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
                                 .get("title")
                                 .and_then(|v| v.as_str())
                                 .or_else(|| t.get("lang").and_then(|v| v.as_str()))
-                                .unwrap_or("Pista")
+                                // No name: the UI shows a translated "Track N".
+                                .unwrap_or("")
                                 .to_string(),
                             lang: t.get("lang").and_then(|v| v.as_str()).map(|s| s.to_string()),
                             selected: t.get("selected").and_then(|v| v.as_bool()).unwrap_or(false),
@@ -925,6 +1208,80 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
         }
         _ => {}
     }
+}
+
+/// Delays are kept in tenths of a second, within ±30 s.
+fn clamp_delay(seconds: f64) -> f64 {
+    if !seconds.is_finite() {
+        return 0.0;
+    }
+    (seconds.clamp(-30.0, 30.0) * 10.0).round() / 10.0
+}
+
+// ---- sync offsets remembered per title ----
+
+/// Delays set for one title, reapplied the next time it plays.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SyncOffset {
+    pub sub: f64,
+    pub audio: f64,
+    pub updated_ms: u64,
+}
+
+const MAX_SYNC_OFFSETS: usize = 400;
+
+fn offsets_key(user_id: &str) -> String {
+    format!("syncOffsets.{user_id}")
+}
+
+fn load_offsets(app: &AppHandle, user_id: &str) -> serde_json::Map<String, Value> {
+    use tauri_plugin_store::StoreExt;
+    app.store(crate::store_path())
+        .ok()
+        .and_then(|store| store.get(offsets_key(user_id)))
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+pub fn load_offset(app: &AppHandle, user_id: &str, key: &str) -> Option<SyncOffset> {
+    load_offsets(app, user_id)
+        .get(key)
+        .and_then(|v| serde_json::from_value::<SyncOffset>(v.clone()).ok())
+}
+
+/// Saves the delays of one title; both at zero forgets it. The oldest entries go
+/// first once the list is full.
+pub fn save_offset(app: &AppHandle, user_id: &str, key: &str, sub: f64, audio: f64) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+    if key.is_empty() || key.len() > 200 {
+        return Err("Título no válido".into());
+    }
+    let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
+    let mut map = load_offsets(app, user_id);
+    map.remove(key);
+    let (sub, audio) = (clamp_delay(sub), clamp_delay(audio));
+    if sub != 0.0 || audio != 0.0 {
+        let entry = SyncOffset {
+            sub,
+            audio,
+            updated_ms: crate::addons::now_ms(),
+        };
+        map.insert(key.to_string(), serde_json::to_value(entry).map_err(|e| e.to_string())?);
+    }
+    if map.len() > MAX_SYNC_OFFSETS {
+        let mut ages: Vec<(String, u64)> = map
+            .iter()
+            .map(|(k, v)| (k.clone(), v.get("updatedMs").and_then(|t| t.as_u64()).unwrap_or(0)))
+            .collect();
+        ages.sort_by_key(|(_, t)| *t);
+        let excess = map.len() - MAX_SYNC_OFFSETS;
+        for (k, _) in ages.into_iter().take(excess) {
+            map.remove(&k);
+        }
+    }
+    store.set(offsets_key(user_id), Value::Object(map));
+    store.save().map_err(|e| e.to_string())
 }
 
 fn parse_track_id(data: Option<&Value>) -> i64 {
@@ -1097,5 +1454,38 @@ fn parent_hwnd(window: &tauri::WebviewWindow) -> Result<isize, String> {
     match handle.as_raw() {
         RawWindowHandle::Win32(win) => Ok(win.hwnd.get()),
         _ => Err("HWND no disponible".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn watched_past_threshold() {
+        assert!(counts_as_watched(91.0, 100.0, 90, None));
+        assert!(!counts_as_watched(89.0, 100.0, 90, None));
+        assert!(counts_as_watched(80.0, 100.0, 80, None));
+    }
+
+    #[test]
+    fn watched_inside_credits() {
+        assert!(counts_as_watched(85.0, 100.0, 90, Some(84.0)));
+        assert!(!counts_as_watched(83.0, 100.0, 90, Some(84.0)));
+        // Credits "detected" in the first half are not trusted.
+        assert!(!counts_as_watched(30.0, 100.0, 90, Some(20.0)));
+    }
+
+    #[test]
+    fn nothing_without_duration() {
+        assert!(!counts_as_watched(10.0, 0.0, 90, Some(5.0)));
+        assert!(!counts_as_watched(f64::NAN, 100.0, 90, None));
+    }
+
+    #[test]
+    fn delays_are_kept_in_tenths() {
+        assert_eq!(clamp_delay(0.123), 0.1);
+        assert_eq!(clamp_delay(-45.0), -30.0);
+        assert_eq!(clamp_delay(f64::INFINITY), 0.0);
     }
 }

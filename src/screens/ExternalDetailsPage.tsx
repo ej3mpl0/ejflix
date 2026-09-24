@@ -23,6 +23,9 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { SeasonChips } from "../components/SeasonChips";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { useUserData } from "../lib/userdata-context";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
+import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useArtworkAccent } from "../lib/auto-accent";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -31,12 +34,15 @@ import { useUserData } from "../lib/userdata-context";
 export function ExternalDetailsPage({
   route,
   top,
+  refreshToken = 0,
   onBack,
   onOpen,
   onPlay,
 }: {
   route: DetailsRoute;
   top: boolean;
+  /** Bumped after playback: the remembered positions moved. */
+  refreshToken?: number;
   onBack: () => void;
   /** Opening another title from the "more like this" rail. */
   onOpen: (movie: Movie) => void;
@@ -61,6 +67,10 @@ export function ExternalDetailsPage({
   const movie = meta ? metaFullToMovie(meta) : seed;
   const tint = useDominantColor(movie?.backdropUrl);
   const tintValue = settings.appearance.amoled ? null : tint;
+  const trailerGate = useTrailerGate();
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  useArtworkAccent(`details:${route.key}`, route.leaving ? null : movie?.backdropUrl);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -77,6 +87,14 @@ export function ExternalDetailsPage({
         if (alive && isParentalBlocked(err)) setBlocked(true);
         else if (alive) setError(err instanceof Error ? err.message : String(err));
       });
+    return () => {
+      alive = false;
+    };
+  }, [ext?.type, ext?.metaId, reload]);
+
+  useEffect(() => {
+    if (!ext) return;
+    let alive = true;
     api
       .addonProgressList()
       .then((list) => {
@@ -86,7 +104,7 @@ export function ExternalDetailsPage({
     return () => {
       alive = false;
     };
-  }, [ext?.type, ext?.metaId, reload]);
+  }, [ext?.metaId, reload, refreshToken]);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasons = useMemo(() => {
@@ -155,7 +173,9 @@ export function ExternalDetailsPage({
     );
   }
 
-  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
+  // Addons send release dates as UTC midnight: read them in UTC, or west of Greenwich
+  // every episode would come out a day early.
+  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const releaseLabel = (iso: string) => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : releaseFormat.format(date);
@@ -213,6 +233,13 @@ export function ExternalDetailsPage({
                 ) : (
                   <div className="absolute inset-0 bg-surface" />
                 )}
+                <TrailerBackdrop
+                  url={trailer}
+                  active={top && !route.leaving && !showTrailer && trailerGate.pages}
+                  muted={trailerMuted}
+                  loop
+                  onPhase={setTrailerPhase}
+                />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
               <div
@@ -267,6 +294,13 @@ export function ExternalDetailsPage({
                   ) : null}
                 </div>
               </div>
+              {trailerPhase === "playing" ? (
+                <TrailerMuteButton
+                  muted={trailerMuted}
+                  onToggle={() => setTrailerMuted((v) => !v)}
+                  className="absolute right-page bottom-8"
+                />
+              ) : null}
             </section>
 
             <div

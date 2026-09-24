@@ -2,6 +2,8 @@
  * Parsing of `POST /Items/{id}/PlaybackInfo` answers into something the player can
  * open. Pure module: no network, no React Native imports.
  */
+import type { MessageKey } from "../../lib/i18n";
+import { PlaybackError } from "../events";
 
 export type PlayMethod = "DirectPlay" | "DirectStream" | "Transcode";
 
@@ -80,6 +82,26 @@ export function playbackErrorMessage(code: string): string {
   }
 }
 
+/** Translation key for a known `PlaybackErrorCode` (null: the Spanish text is all there is). */
+export function playbackErrorKey(code: string): MessageKey | null {
+  switch (code) {
+    case "NoCompatibleStream":
+      return "playErrServerCannotPlay";
+    case "NotAllowed":
+      return "playErrNotAllowed";
+    case "RateLimitExceeded":
+      return "playErrRateLimit";
+    default:
+      return null;
+  }
+}
+
+function playbackFailure(code: string): Error {
+  const key = playbackErrorKey(code);
+  const message = playbackErrorMessage(code);
+  return key ? new PlaybackError(key, message) : new Error(message);
+}
+
 export function parseMediaStreams(value: unknown): JellyfinMediaStream[] {
   if (!Array.isArray(value)) return [];
   const out: JellyfinMediaStream[] = [];
@@ -114,11 +136,11 @@ export function parseMediaStreams(value: unknown): JellyfinMediaStream[] {
  */
 export function parsePlaybackInfo(response: unknown, options: ParseOptions): ResolvedPlayback {
   const body = obj(response);
-  if (!body) throw new Error("Respuesta inválida del servidor");
+  if (!body) throw new PlaybackError("playErrBadResponse", "Respuesta inválida del servidor");
   const errorCode = str(body, "ErrorCode");
-  if (errorCode) throw new Error(playbackErrorMessage(errorCode));
+  if (errorCode) throw playbackFailure(errorCode);
   const sources = Array.isArray(body.MediaSources) ? body.MediaSources.map(obj).filter((s): s is Json => s != null) : [];
-  if (sources.length === 0) throw new Error("El servidor no puede reproducir este archivo");
+  if (sources.length === 0) throw new PlaybackError("playErrServerCannotPlay", "El servidor no puede reproducir este archivo");
   const requested = options.requestedMediaSourceId ?? null;
   const source = (requested && sources.find((s) => str(s, "Id") === requested)) || sources[0];
   const mediaSourceId = str(source, "Id") ?? requested ?? "";
@@ -160,7 +182,7 @@ export function parsePlaybackInfo(response: unknown, options: ParseOptions): Res
   }
 
   const transcodingUrl = str(source, "TranscodingUrl");
-  if (!transcodingUrl) throw new Error("El servidor no puede reproducir este archivo");
+  if (!transcodingUrl) throw new PlaybackError("playErrServerCannotPlay", "El servidor no puede reproducir este archivo");
   const protocol = (str(source, "TranscodingSubProtocol") ?? "").toLowerCase();
   const url = /^https?:\/\//i.test(transcodingUrl)
     ? transcodingUrl

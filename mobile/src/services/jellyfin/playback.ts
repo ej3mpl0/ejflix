@@ -4,6 +4,7 @@
  */
 import { Platform } from "react-native";
 import { validItemId } from "../util";
+import { PlaybackError } from "../events";
 import { jellyfin } from "./client";
 import { deviceProfileFor, MAX_STREAMING_BITRATE, pickStreamIndex, type DeviceProfile } from "./profile";
 import { parsePlaybackInfo, type JellyfinMediaStream, type PlayMethod, type ResolvedPlayback } from "./playback.pure";
@@ -77,7 +78,7 @@ async function playbackInfo(
   if (subtitleStreamIndex != null) body.SubtitleStreamIndex = subtitleStreamIndex;
   const response = await jellyfin.request("POST", `/Items/${itemId}/PlaybackInfo`, body, { query: { UserId: userId } });
   if (!response.ok) {
-    if (response.status === 404) throw new Error("No se encontró la película");
+    if (response.status === 404) throw new PlaybackError("playErrNotFound", "No se encontró la película");
     throw new Error(`Jellyfin PlaybackInfo: ${response.status}`);
   }
   return response.json();
@@ -90,8 +91,8 @@ async function playbackInfo(
  */
 export async function resolvePlayback(args: ResolveArgs): Promise<ResolvedPlayback> {
   const session = jellyfin.session;
-  if (!session) throw new Error("Sin servidor");
-  if (!validItemId(args.itemId)) throw new Error("Ítem no válido");
+  if (!session) throw new PlaybackError("playErrNoServer", "Sin servidor");
+  if (!validItemId(args.itemId)) throw new PlaybackError("playErrInvalidItem", "Ítem no válido");
   const force = args.forceTranscode === true;
   const requestedSource = args.mediaSourceId ?? null;
   const explicit = args.audioStreamIndex != null || args.subtitleStreamIndex != null;

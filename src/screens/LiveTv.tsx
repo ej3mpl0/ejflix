@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Clock, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
+import { Clock, Plus, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
 import type { Channel, ChannelGroup, IptvSource, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
@@ -32,6 +32,7 @@ export function LiveTv({
   onPlay,
   onError,
   onSettings,
+  onAddSource,
 }: {
   sources: IptvSource[];
   /** Bumped after playback: reloads the page (the Recent list changed). */
@@ -40,6 +41,8 @@ export function LiveTv({
   onError: (message: string) => void;
   /** Opens Settings › IPTV. */
   onSettings: () => void;
+  /** Opens Settings › IPTV with the "add a list" form up. */
+  onAddSource?: () => void;
 }) {
   const { t } = useI18n();
   const enabled = useMemo(() => sources.filter((s) => s.enabled), [sources]);
@@ -83,6 +86,8 @@ export function LiveTv({
 
   const loadChannels = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of a new filter loads would land on the old list.
+      if (!first && loading) return;
       const id = ++request.current;
       if (first) setLoading(true);
       else setLoadingMore(true);
@@ -109,7 +114,7 @@ export function LiveTv({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection, sourceId, query, items.length],
+    [selection, sourceId, query, items.length, loading],
   );
 
   // Reload when the playlists change (refresh finished) or the filters do.
@@ -186,7 +191,7 @@ export function LiveTv({
           icon={<Tv size={26} />}
           title={t("iptvNoSources")}
           hint={t("iptvNoSourcesHint")}
-          action={{ label: t("iptvGoToSettings"), onClick: onSettings }}
+          action={{ label: t("iptvAddList"), icon: <Plus size={16} />, onClick: onAddSource ?? onSettings }}
         />
       </div>
     );
@@ -203,7 +208,7 @@ export function LiveTv({
           <p className="mt-1 text-[13px] text-dim">
             {anyLoading && !ready
               ? t("iptvLoading")
-              : `${t("iptvChannels", { n: channelTotal })} · ${t("iptvGroups", { n: groupTotal })}`}
+              : `${channelTotal === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: channelTotal })} · ${groupTotal === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: groupTotal })}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -290,7 +295,14 @@ export function LiveTv({
             {sideButton(t("favorites"), selection.type === "favorites", () => setSelection({ type: "favorites" }), undefined, <Star size={15} />)}
             {sideButton(t("recent"), selection.type === "recent", () => setSelection({ type: "recent" }), undefined, <Clock size={15} />)}
           </div>
-          {groups.length ? (
+          {!groups.length && (loading || (anyLoading && !ready)) ? (
+            <div className="mt-5 space-y-1.5 px-3" aria-hidden>
+              <Shimmer className="mb-3 h-3 w-20 rounded" />
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Shimmer key={i} className="h-7 rounded-btn" delay={i * 60} />
+              ))}
+            </div>
+          ) : groups.length ? (
             <>
               <p className="mt-5 mb-2 px-3 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("iptvGroupsLabel")}</p>
               {groups.length > 20 ? (
@@ -319,7 +331,7 @@ export function LiveTv({
         </nav>
 
         <div className="min-w-0">
-          {loading && !items.length ? (
+          {(loading || (anyLoading && selection.type === "all" && !query)) && !items.length ? (
             <div className={grid}>
               {Array.from({ length: 12 }).map((_, i) => (
                 <div key={i}>
@@ -333,7 +345,7 @@ export function LiveTv({
               <EpgGuide channels={items} onPlay={play} />
               {items.length < total ? (
                 <LoadMoreButton
-                  loading={loadingMore}
+                  loading={loading || loadingMore}
                   onLoad={() => void loadChannels(false)}
                   remaining={total - items.length}
                 />
@@ -355,7 +367,7 @@ export function LiveTv({
               </div>
               {items.length < total ? (
                 <LoadMoreButton
-                  loading={loadingMore}
+                  loading={loading || loadingMore}
                   onLoad={() => void loadChannels(false)}
                   remaining={total - items.length}
                 />

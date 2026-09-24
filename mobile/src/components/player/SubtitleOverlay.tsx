@@ -1,7 +1,8 @@
 import React from "react";
 import { StyleSheet, Text, View } from "react-native";
-import type { SubBackground } from "../../lib/types";
+import type { SubBackground, SubPosition } from "../../lib/types";
 import { cueTextAt, type Cue } from "../../lib/subtitles";
+import { subtitlePlacement, subtitleTextStyle } from "../../lib/subtitle-style";
 
 /**
  * Subtitles the app draws itself, over the video, for files loaded from the device. The
@@ -14,6 +15,9 @@ export function SubtitleOverlay({
   scale,
   color,
   background,
+  position = "bottom",
+  frameHeight = 0,
+  topInset = 24,
   bottom,
 }: {
   cues: Cue[];
@@ -22,29 +26,19 @@ export function SubtitleOverlay({
   scale: number;
   color: string;
   background: SubBackground;
+  position?: SubPosition;
+  /** Height of the video frame, for the raised position. */
+  frameHeight?: number;
+  /** Distance from the top edge for the top position. */
+  topInset?: number;
   /** Distance from the bottom edge (higher while the controls are on screen). */
   bottom: number;
 }) {
   const line = cueTextAt(cues, time - delay);
   if (!line) return null;
-  const box = background === "box";
   return (
-    <View pointerEvents="none" style={[styles.wrap, { bottom }]}>
-      <Text
-        style={[
-          styles.text,
-          {
-            color,
-            fontSize: Math.round(22 * scale),
-            lineHeight: Math.round(29 * scale),
-            backgroundColor: box ? "rgba(0,0,0,0.7)" : "transparent",
-            textShadowRadius: box ? 0 : background === "shadow" ? 6 : 3,
-            textShadowOffset: background === "shadow" ? { width: 2, height: 2 } : { width: 0, height: 0 },
-          },
-        ]}
-      >
-        {line}
-      </Text>
+    <View pointerEvents="none" style={[styles.wrap, subtitlePlacement(position, frameHeight, bottom, topInset)]}>
+      <Text style={[styles.text, subtitleTextStyle({ scale, color, background }, 22)]}>{line}</Text>
     </View>
   );
 }

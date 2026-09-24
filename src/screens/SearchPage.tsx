@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe, History, LoaderCircle, SearchX, Server, X } from "lucide-react";
+import { Compass, Globe, History, Search, SearchX, Server, X } from "lucide-react";
 import type { AddonCatalog, GenreRow, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
@@ -13,7 +13,7 @@ import {
 } from "../lib/search-history";
 import { PosterCard } from "../components/PosterCard";
 import { Chip } from "../components/Chip";
-import { Shimmer } from "../components/Shimmer";
+import { PosterGridItemsSkeleton } from "../components/Skeletons";
 import { metaToMovie } from "../lib/addons";
 import { EmptyState } from "../components/EmptyState";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
@@ -64,6 +64,7 @@ export function SearchPage({
   onOpen,
   onPlay,
   onError,
+  onDiscover,
 }: {
   userId: string;
   /** What the header's search box holds. */
@@ -74,6 +75,8 @@ export function SearchPage({
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
   onError: (message: string) => void;
+  /** Browse Discover instead (offered when a search finds nothing). */
+  onDiscover?: () => void;
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
@@ -90,6 +93,7 @@ export function SearchPage({
   const request = useRef(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const lastError = useRef("");
 
   // Searchable addon catalogs, resolved once instead of on every keystroke.
   useEffect(() => {
@@ -128,10 +132,19 @@ export function SearchPage({
     setLoading(true);
     const handle = window.setTimeout(async () => {
       const serverJob = hasServer
-        ? api.searchItems(trimmed).catch((err) => {
-            onErrorRef.current(err instanceof Error ? err.message : String(err));
-            return [] as Movie[];
-          })
+        ? api
+            .searchItems(trimmed)
+            .then((list) => {
+              lastError.current = "";
+              return list;
+            })
+            .catch((err) => {
+              // Once per failure streak, not on every keystroke.
+              const message = err instanceof Error ? err.message : String(err);
+              if (message !== lastError.current) onErrorRef.current(message);
+              lastError.current = message;
+              return [] as Movie[];
+            })
         : Promise.resolve([] as Movie[]);
       const onlineJob = Promise.all(
         catalogs.map((c) =>
@@ -185,12 +198,33 @@ export function SearchPage({
   const active = genre ? genres.find((row) => row.id === genre) : null;
   const showDiscover = query.trim().length < 2;
   const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail";
-  const nothing = searched && !loading && !results.length && !online.length;
-  const ofKind = (list: Movie[]) => (kind === "all" ? list : list.filter((movie) => movie.kind === kind));
-  const shownResults = ofKind(results);
-  const shownOnline = ofKind(online);
   const kinds = new Set([...results, ...online].map((movie) => movie.kind));
   const canFilter = kinds.has("Movie") && kinds.has("Series");
+  // The filter only applies while it is on screen: a query with one kind shows everything.
+  const shownKind = canFilter ? kind : "all";
+  const ofKind = (list: Movie[]) => (shownKind === "all" ? list : list.filter((movie) => movie.kind === shownKind));
+  const shownResults = ofKind(results);
+  const shownOnline = ofKind(online);
+  const nothing = searched && !loading && !shownResults.length && !shownOnline.length;
+  // Nothing found: earlier searches, a shorter query and the genres to try instead.
+  const shorter = searched.split(/\s+/).length > 1 ? searched.split(/\s+/).slice(0, -1).join(" ") : "";
+  const suggestions = nothing
+    ? [
+        ...(shorter.length >= 2 ? [{ label: shorter, icon: <Search size={13} />, run: () => onQuery(shorter) }] : []),
+        ...history
+          .filter((item) => item.toLowerCase() !== searched.toLowerCase() && item !== shorter)
+          .slice(0, 4)
+          .map((item) => ({ label: item, icon: <History size={13} />, run: () => onQuery(item) })),
+        ...genres.slice(0, 5).map((row) => ({
+          label: row.name,
+          icon: undefined,
+          run: () => {
+            onQuery("");
+            setGenre(row.id);
+          },
+        })),
+      ]
+    : [];
 
   return (
     <div className="page-enter px-page pt-24 pb-16">
@@ -199,7 +233,9 @@ export function SearchPage({
       ) : (
         <h1 className="mb-6 flex items-center gap-3 text-[22px] font-semibold tracking-[-0.01em]">
           <span className="truncate">{t("resultsFor", { query: searched || query })}</span>
-          {loading ? <LoaderCircle size={17} className="shrink-0 animate-spin text-dim" aria-label={t("searching")} /> : null}
+          {loading ? (
+            <span role="status" aria-label={t("searching")} className="shimmer relative h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-white/10" />
+          ) : null}
         </h1>
       )}
       {showDiscover ? (
@@ -267,7 +303,7 @@ export function SearchPage({
         <section className={cn("transition-opacity duration-200", loading && searched && "opacity-70")}>
           {/* Announced to screen readers once a search settles. */}
           <p className="sr-only" role="status" aria-live="polite">
-            {searched && !loading ? t("resultsCount", { n: results.length + online.length }) : ""}
+            {searched && !loading ? (shownResults.length + shownOnline.length === 1 ? t("resultsCountOne") : t("resultsCount", { n: shownResults.length + shownOnline.length })) : ""}
           </p>
           {canFilter ? (
             <div className="mb-6">
@@ -285,9 +321,7 @@ export function SearchPage({
           ) : null}
           {!searched && loading ? (
             <div className={grid}>
-              {Array.from({ length: 12 }).map((_, i) => (
-                <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 60} />
-              ))}
+              <PosterGridItemsSkeleton count={12} titles />
             </div>
           ) : null}
           {shownResults.length ? (
@@ -319,7 +353,26 @@ export function SearchPage({
             </>
           ) : null}
           {nothing ? (
-            <EmptyState icon={<SearchX size={26} />} title={t("noResults")} hint={t("noResultsHint")} large />
+            <EmptyState
+              icon={<SearchX size={26} />}
+              title={t("noResults")}
+              hint={t("noResultsHint")}
+              large
+              action={onDiscover ? { label: t("exploreAction"), icon: <Compass size={16} />, onClick: onDiscover } : undefined}
+            >
+              {suggestions.length ? (
+                <div className="mt-6">
+                  <p className="mb-2 text-[12px] font-semibold tracking-[0.08em] text-dim uppercase">{t("searchSuggestions")}</p>
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {suggestions.map((item) => (
+                      <Chip key={item.label} icon={item.icon} onClick={item.run}>
+                        {item.label}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </EmptyState>
           ) : null}
         </section>
       )}

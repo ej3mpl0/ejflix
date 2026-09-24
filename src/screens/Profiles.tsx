@@ -113,8 +113,8 @@ export function Profiles({
     setSelected(user);
   };
 
-  const enterLocal = async (profile: LocalProfile, pin?: string) => {
-    if (editing) {
+  const enterLocal = async (profile: LocalProfile, pin?: string, force = false) => {
+    if (editing && !force) {
       // A protected profile is only edited with its PIN: otherwise anyone could remove
       // it here and walk into the profile (or out of a parental restriction).
       if (profile.hasPin && pin == null) {
@@ -219,7 +219,11 @@ export function Profiles({
               onSaved={(profile, pin) => {
                 setEditor(null);
                 void loadLocals();
-                if (!initial) void enterLocal(profile, pin ?? undefined);
+                if (!initial) {
+                  // Created from edit mode too: enter it, not its editor.
+                  setEditing(false);
+                  void enterLocal(profile, pin ?? undefined, true);
+                }
               }}
               onDeleted={() => {
                 setEditor(null);

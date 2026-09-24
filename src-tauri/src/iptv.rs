@@ -695,6 +695,10 @@ pub fn import_playlist(
 }
 
 pub fn remove_source(app: &tauri::AppHandle, user_id: &str, id: &str) -> Result<(), String> {
+    // The id becomes a file name below: never let it walk out of the cache folder.
+    if !valid_source_id(id) {
+        return Err("Lista IPTV no válida".into());
+    }
     let mut list = list_sources(app, user_id);
     list.retain(|s| s.id != id);
     save_sources(app, user_id, &list)?;
@@ -1061,7 +1065,9 @@ impl IptvState {
 
     pub async fn forget(&self, app: &tauri::AppHandle, source_id: &str) {
         self.entries.write().await.remove(source_id);
-        let _ = std::fs::remove_file(cache_file(app, source_id));
+        if valid_source_id(source_id) {
+            let _ = std::fs::remove_file(cache_file(app, source_id));
+        }
     }
 
     pub async fn clear(&self) {
@@ -1847,7 +1853,8 @@ fn parse_xmltv_time(raw: &str) -> Option<u64> {
     let mut ts = days * 86_400 + hour * 3600 + minute * 60 + second;
     if let Some(zone) = zone.filter(|z| z.len() >= 5) {
         let sign = if zone.starts_with('-') { -1 } else { 1 };
-        let body = &zone[1..];
+        // A zone is ASCII (`+0100`); anything else must not be sliced by bytes.
+        let body = zone.get(1..).unwrap_or("");
         if body.len() >= 4 && body.bytes().all(|b| b.is_ascii_digit()) {
             let zh: i64 = body[0..2].parse().unwrap_or(0);
             let zm: i64 = body[2..4].parse().unwrap_or(0);
