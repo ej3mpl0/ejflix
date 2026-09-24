@@ -100,6 +100,8 @@ export function Home({
   /** The header owns the search box; the search view only renders what it types. */
   const [search, setSearch] = useState("");
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>(undefined);
+  /** Counts deep links into Settings (palette, empty screens), even to the section already asked for. */
+  const [settingsRequest, setSettingsRequest] = useState(0);
   /** IPTV lists of the profile (the TV tab shows up when there is at least one). */
   const [tvSources, setTvSources] = useState<IptvSource[]>([]);
   const history = useRef<NavView[]>([]);
@@ -358,6 +360,7 @@ export function Home({
   /** Settings opened on a given section (e.g. the TV tab's "configure IPTV"). */
   const openSettings = (section: SettingsSectionId) => {
     setSettingsSection(section);
+    setSettingsRequest((n) => n + 1);
     if (view === "settings") return;
     remember();
     setSeeAll(null);
@@ -575,6 +578,7 @@ export function Home({
             server={server}
             version={version}
             initialSection={settingsSection}
+            sectionRequest={settingsRequest}
             onSessionChange={onSessionChange}
             onSwitchProfile={onSwitchProfile}
             onLogout={onLogout}

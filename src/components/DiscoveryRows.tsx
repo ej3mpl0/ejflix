@@ -70,6 +70,15 @@ const REASONS: Record<string, { title: MessageKey; caption: MessageKey }> = {
 export function RecommendationRows({ hasServer, onOpen, onPlay }: PersonalProps) {
   const { t } = useI18n();
   const [rows, setRows] = useState<RecommendationRow[]>([]);
+  /** Bumped when the age limit changes: the server filters these rows by it. */
+  const [limitVersion, setLimitVersion] = useState(0);
+
+  useEffect(() => {
+    const unlisten = api.onParentalChanged(() => setLimitVersion((n) => n + 1));
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasServer) {
@@ -86,7 +95,7 @@ export function RecommendationRows({ hasServer, onOpen, onPlay }: PersonalProps)
     return () => {
       alive = false;
     };
-  }, [hasServer]);
+  }, [hasServer, limitVersion]);
 
   return (
     <>

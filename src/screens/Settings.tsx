@@ -267,6 +267,7 @@ export function Settings({
   server,
   version,
   initialSection,
+  sectionRequest = 0,
   onSessionChange,
   onSwitchProfile,
   onLogout,
@@ -278,6 +279,8 @@ export function Settings({
   version: string | null;
   /** Section to open first (defaults to Appearance). */
   initialSection?: SettingsSectionId;
+  /** Bumped by every deep link, so the same section can be asked for again after moving away. */
+  sectionRequest?: number;
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
@@ -315,7 +318,7 @@ export function Settings({
 
   useEffect(() => {
     if (initialSection) setSection(initialSection);
-  }, [initialSection]);
+  }, [initialSection, sectionRequest]);
 
   const skipOptions: { value: SkipMode; label: string }[] = [
     { value: "ask", label: t("skipAsk") },
