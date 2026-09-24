@@ -35,6 +35,7 @@ export function HeroCarousel({
   const [paused, setPaused] = useState(false);
   const dragStart = useRef<number | null>(null);
   const dragged = useRef(false);
+  const root = useRef<HTMLElement>(null);
   const reduced = useRef(
     typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -66,7 +67,8 @@ export function HeroCarousel({
   useEffect(() => {
     if (count < 2 || hover || focused || paused || reduced.current) return;
     const handle = window.setInterval(() => {
-      if (document.hidden) return;
+      // Also still while Home sits invisible behind the player or the first-run setup.
+      if (document.hidden || (root.current && getComputedStyle(root.current).visibility === "hidden")) return;
       go(1);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(handle);
@@ -82,6 +84,7 @@ export function HeroCarousel({
 
   return (
     <section
+      ref={root}
       className="group/hero relative h-[min(78vh,720px)] min-h-[min(480px,70vh)] w-full overflow-hidden rounded-b-[var(--radius-hero)] bg-surface outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       tabIndex={0}
       aria-roledescription="carousel"

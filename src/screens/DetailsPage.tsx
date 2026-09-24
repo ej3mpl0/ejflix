@@ -35,6 +35,7 @@ import { startShuffle } from "../lib/play-queue";
 export function DetailsPage({
   route,
   top,
+  refreshToken = 0,
   onBack,
   onPush,
   onPlay,
@@ -43,6 +44,8 @@ export function DetailsPage({
   route: DetailsRoute;
   /** Only the topmost page reacts to back navigation. */
   top: boolean;
+  /** Bumped after playback: the resume point and the next episode moved. */
+  refreshToken?: number;
   onBack: () => void;
   onPush: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
@@ -88,7 +91,7 @@ export function DetailsPage({
     return () => {
       alive = false;
     };
-  }, [route.id, route.seed]);
+  }, [route.id, route.seed, refreshToken]);
 
   useEffect(() => {
     if (!isSeries) return;
@@ -107,7 +110,7 @@ export function DetailsPage({
     return () => {
       alive = false;
     };
-  }, [route.id, isSeries, reload]);
+  }, [route.id, isSeries, reload, refreshToken]);
 
   useEffect(() => {
     if (!isSeries || !seasonId) return;
@@ -129,7 +132,7 @@ export function DetailsPage({
     return () => {
       alive = false;
     };
-  }, [isSeries, route.id, seasonId, userDataVersion, reload]);
+  }, [isSeries, route.id, seasonId, userDataVersion, reload, refreshToken]);
 
   const movie = detail;
   const heading = movie?.name ?? route.seed?.name ?? "";

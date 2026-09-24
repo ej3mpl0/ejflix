@@ -13,7 +13,7 @@ import { File } from "expo-file-system";
 import { api } from "../lib/api";
 import { engine } from "../services/player/engine";
 import type { Channel, EpgNow, MediaSegment, Movie, PlayerState } from "../lib/types";
-import type { PlayerError } from "../services/events";
+import { PlaybackError, type PlayerError } from "../services/events";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { channelToMovie } from "../lib/iptv";
@@ -261,7 +261,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           let stream = ext.stream ?? null;
           if (!stream) stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null);
           if (cancelled) return;
-          if (!stream?.url) throw new Error(tRef.current("noStreams"));
+          if (!stream?.url) throw new PlaybackError("noStreams", "No streams");
           const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
           let nextMovie: Movie | null = null;
           if (ext.type === "series") {
@@ -280,7 +280,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           if (cancelled) return;
           const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
           const entry = resumeEntryOf(full);
-          if (!entry) throw new Error(tRef.current("playerStartError"));
+          if (!entry) throw new PlaybackError("playerStartError", "No resume entry");
           const next = await api.playerStartUrl({
             url: stream.url,
             title,
@@ -303,13 +303,18 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         setState(next);
       } catch (err) {
         if (cancelled) return;
-        // Stay on the player with the error, a retry and (online) another source.
-        setPlayError({
-          message: err instanceof Error ? err.message : tRef.current("playerStartError"),
-          detail: "",
-          code: "unknown",
-          url: null,
-        });
+        // Stay on the player with the error, a retry and (online) another source. The
+        // engine already reported its own failures (with their code and URL): keep those.
+        const failure: PlayerError =
+          err instanceof PlaybackError
+            ? { message: err.message, detail: "", code: "unknown", url: null, key: err.key }
+            : {
+                message: tRef.current("playerStartError"),
+                detail: err instanceof Error ? err.message : "",
+                code: "unknown",
+                url: null,
+              };
+        setPlayError((current) => current ?? failure);
       }
     };
 
@@ -377,6 +382,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       return;
     }
     let alive = true;
+    // Never chain into the previous item's successor while this one is looked up.
+    setNextEpisode(null);
     api
       .getNextEpisode(movie.seriesId, movie.id)
       .then((next) => {
@@ -484,7 +491,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         try {
           const current = await Brightness.getBrightnessAsync();
           if (!alive) return;
-          brightness.current = current;
+          // A swipe that came first already owns the current value.
+          if (!brightnessTaken.current) brightness.current = current;
           brightnessOnEntry.current = current;
           brightnessTaken.current = true;
         } catch {
@@ -659,6 +667,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     showHud(side === "left" ? "brightness" : "volume", pct);
     if (side === "left") {
       brightness.current = value;
+      // Changed before the entry value was read: still hand it back on the way out.
+      brightnessTaken.current = true;
       void Brightness.setBrightnessAsync(value).catch(() => undefined);
     } else {
       void api.playerSetVolume(pct);
@@ -835,11 +845,13 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           <View style={s.errorCard}>
             <Text style={s.errorTitle}>{t("playbackFailed")}</Text>
             <Text style={s.errorBody}>
-              {playError.code === "decoder"
-                ? t("playbackFailedDecoder")
-                : playError.code === "network"
-                  ? t("playbackFailedNetwork")
-                  : playError.message}
+              {playError.key
+                ? t(playError.key)
+                : playError.code === "decoder"
+                  ? t("playbackFailedDecoder")
+                  : playError.code === "network"
+                    ? t("playbackFailedNetwork")
+                    : t("playerStartError")}
             </Text>
             {playError.detail ? (
               <Text style={s.errorDetail} numberOfLines={3}>

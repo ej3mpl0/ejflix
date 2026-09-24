@@ -1,4 +1,5 @@
 import type { Movie, PlayerState, Settings, UpdateProgress } from "../lib/types";
+import type { MessageKey } from "../lib/i18n";
 
 /** What went wrong, so the UI can offer the right way out. */
 export type PlayerErrorCode = "decoder" | "network" | "unknown";
@@ -11,7 +12,20 @@ export type PlayerError = {
   code: PlayerErrorCode;
   /** Stream URL when it can be handed to another app. */
   url: string | null;
+  /** Translated sentence for a known failure (the UI prefers it over `message`). */
+  key?: MessageKey;
 };
+
+/** Playback failure the UI can translate: `message` stays for logs, `key` is shown. */
+export class PlaybackError extends Error {
+  constructor(
+    readonly key: MessageKey,
+    message: string,
+  ) {
+    super(message);
+    this.name = "PlaybackError";
+  }
+}
 
 /** Events that replaced the Tauri `listen()` channels of the desktop app. */
 export type EventMap = {

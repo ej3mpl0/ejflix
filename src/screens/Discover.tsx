@@ -78,9 +78,7 @@ export function Discover({
   const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [serverGenres, setServerGenres] = useState<string[]>([]);
-  // What survived from the last visit may not apply any more (the server was unlinked):
-  // the server-only filters go with it.
-  const [source, setSource] = useState<Source>(hasServer ? lastFilters.source : "all");
+  const [source, setSource] = useState<Source>(lastFilters.source);
   const [kind, setKind] = useState<Kind>(lastFilters.kind);
   const [genre, setGenre] = useState<string | null>(lastFilters.genre);
   const [year, setYear] = useState<number | null>(lastFilters.year);
@@ -88,6 +86,7 @@ export function Discover({
     !hasServer && lastFilters.sort === "newest" ? "popular" : lastFilters.sort,
   );
   const [minRating, setMinRating] = useState<number | null>(lastFilters.minRating);
+  // A person only applies to the library: without the server it is not carried over.
   const [person, setPerson] = useState<{ id: string; name: string } | null>(
     hasServer && lastFilters.source !== "online" ? lastFilters.person : null,
   );
@@ -96,6 +95,8 @@ export function Discover({
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const request = useRef(0);
   const page = useRef(0);
   const onErrorRef = useRef(onError);
@@ -105,10 +106,13 @@ export function Discover({
   const catalogDone = useRef<Record<string, boolean>>({});
 
   const hasAddons = (addons?.length ?? 0) > 0;
-  const useServer = hasServer && source !== "online";
+  // The source switch only shows with both sources; without it (another profile, the
+  // server unlinked) a remembered "server"/"online" would leave nothing to browse.
+  const activeSource: Source = hasServer && hasAddons ? source : "all";
+  const useServer = hasServer && activeSource !== "online";
   // Addon catalogs cannot filter by a person: with one chosen, only the library answers.
-  const useOnline = hasAddons && source !== "server" && !person;
-  const personFilter = hasServer && source !== "online";
+  const useOnline = hasAddons && activeSource !== "server" && !person;
+  const personFilter = hasServer && activeSource !== "online";
 
   useEffect(() => {
     let alive = true;
@@ -199,6 +203,8 @@ export function Discover({
 
   const fetchPage = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of new filters loads would land on the old list.
+      if (!first && loadingRef.current) return;
       const id = ++request.current;
       if (first) {
         page.current = 0;
@@ -225,10 +231,12 @@ export function Discover({
               limit: SERVER_PAGE,
             })
             .then((list) => {
-              if (list.length < SERVER_PAGE) serverDone.current = true;
+              // A superseded request must not touch the paging state of the current one.
+              if (id === request.current && list.length < SERVER_PAGE) serverDone.current = true;
               return list;
             })
             .catch((err) => {
+              if (id !== request.current) return [];
               serverDone.current = true;
               onErrorRef.current(err instanceof Error ? err.message : String(err));
               return [];
@@ -244,6 +252,7 @@ export function Discover({
         return api
           .addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, genre: matched, skip: catalogSkip.current[key] ?? 0 })
           .then((metas) => {
+            if (id !== request.current) return [];
             catalogSkip.current[key] = (catalogSkip.current[key] ?? 0) + metas.length;
             if (!metas.length) catalogDone.current[key] = true;
             return metas
@@ -252,7 +261,7 @@ export function Discover({
               .map(metaToMovie);
           })
           .catch(() => {
-            catalogDone.current[key] = true;
+            if (id === request.current) catalogDone.current[key] = true;
             return [];
           });
       });
@@ -393,7 +402,7 @@ export function Discover({
           </button>
         ) : null}
       </div>
-      {person && hasAddons && source === "all" ? <p className="-mt-3 mb-5 text-[12px] text-dim">{t("personServerOnly")}</p> : null}
+      {person && hasAddons && activeSource === "all" ? <p className="-mt-3 mb-5 text-[12px] text-dim">{t("personServerOnly")}</p> : null}
 
       {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
       {loading && !visible.length ? (
@@ -417,7 +426,7 @@ export function Discover({
             ))}
           </div>
           {more ? (
-            <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
+            <LoadMoreButton loading={loading || loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (

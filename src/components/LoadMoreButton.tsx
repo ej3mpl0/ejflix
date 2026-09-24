@@ -37,6 +37,23 @@ export function LoadMoreButton({
     return () => observer.disconnect();
   }, []);
 
+  // The observer only speaks on a change: when a short page leaves the button in reach,
+  // nothing would load the next one. Look again once each load is over.
+  const wasLoading = useRef(loading);
+  useEffect(() => {
+    const finished = wasLoading.current && !loading;
+    wasLoading.current = loading;
+    const el = ref.current;
+    if (!finished || !el) return;
+    const handle = window.requestAnimationFrame(() => {
+      const rect = el.getBoundingClientRect();
+      if (rect.height && rect.top < window.innerHeight + 600 && rect.bottom > -600 && !loadingRef.current) {
+        onLoadRef.current();
+      }
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [loading]);
+
   return (
     <div ref={ref} className="mt-10 flex justify-center">
       <Pill

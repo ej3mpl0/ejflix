@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ArrowLeft, CheckCircle2, ChevronDown, LoaderCircle, Wifi } from "lucide-react";
 import { Logo } from "../components/Logo";
 import { WindowControls } from "../components/WindowControls";
@@ -24,16 +24,20 @@ export function Login({
   const [testing, setTesting] = useState(false);
   const [tested, setTested] = useState<string | null>(null);
   const [help, setHelp] = useState(false);
+  const urlRef = useRef(url);
+  urlRef.current = url;
 
   const test = async () => {
     setError("");
     setTested(null);
     setTesting(true);
+    const tried = url;
     try {
-      const info = await api.testServer(url);
-      setTested(`${info.serverName} · Jellyfin ${info.version}`);
+      const info = await api.testServer(tried);
+      // The address was edited meanwhile: this answer is about another server.
+      if (urlRef.current === tried) setTested(`${info.serverName} · Jellyfin ${info.version}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (urlRef.current === tried) setError(err instanceof Error ? err.message : String(err));
     } finally {
       setTesting(false);
     }

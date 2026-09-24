@@ -276,6 +276,37 @@ export type PlayerState = {
   speed: number;
   /** "auto" | "16:9" | "4:3" | "2.35:1" | "fill" */
   aspect: string;
+  /** Subtitle / audio delay in seconds (remembered per title). */
+  subDelay: number;
+  audioDelay: number;
+  /** Night mode (dynamic range compression) is on. */
+  night: boolean;
+  /** The window is the small always-on-top mini player. */
+  mini: boolean;
+};
+
+/** One OpenSubtitles.com search result. */
+export type OnlineSubtitle = {
+  fileId: number;
+  release: string;
+  /** OpenSubtitles language code ("es", "en", "pt-BR"...). */
+  language: string;
+  downloads: number;
+  hearingImpaired: boolean;
+  machineTranslated: boolean;
+  trusted: boolean;
+  fps: number | null;
+};
+
+/** What the online subtitle search looks for. */
+export type SubtitleQuery = {
+  imdb?: string | null;
+  parentImdb?: string | null;
+  season?: number | null;
+  episode?: number | null;
+  title?: string | null;
+  /** ISO 639-2 or 639-1 codes; empty = every language. */
+  languages: string[];
 };
 
 export type Toast = {
@@ -452,6 +483,20 @@ export type Settings = {
     subBackground: SubBackground;
     /** Seconds a seek jumps: 5, 10, 15 or 30. */
     seekStep: number;
+    /** Percentage past which stopping marks the title watched (80, 85, 90, 95); the credits count too. */
+    watchedThreshold: number;
+    /** Night mode on when playback starts. */
+    nightMode: boolean;
+    /** Vertical subtitle position (mpv sub-pos): 100 = bottom, 50 to 100. */
+    subPos: number;
+    /** Subtitle outline thickness, 0 to 6. */
+    subOutline: number;
+    /** Apply the look to styled (ASS/SSA) subtitles too. */
+    subAssOverride: boolean;
+    /** OpenSubtitles.com API key ("" = online search off). */
+    opensubtitlesApiKey: string;
+    /** Optional OpenSubtitles.com username; the password is stored apart. */
+    opensubtitlesUser: string;
   };
   library: { pinned: string[] };
   /** `disabled` holds the URLs of addons kept in the list but switched off. */
@@ -705,6 +750,13 @@ export const DEFAULT_SETTINGS: Settings = {
     subColor: "#FFFFFF",
     subBackground: "outline",
     seekStep: 10,
+    watchedThreshold: 90,
+    nightMode: false,
+    subPos: 100,
+    subOutline: 3,
+    subAssOverride: false,
+    opensubtitlesApiKey: "",
+    opensubtitlesUser: "",
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true, disabled: [] },

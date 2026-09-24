@@ -5,9 +5,10 @@
 //!    plugins), with the legacy Intro Skipper endpoint as a fallback on older servers.
 //! 2. IntroDB.app, a public community database keyed by the show's IMDb id.
 //!
-//! Everything here is best effort: a failure of any kind yields an empty list, results
-//! (including empty ones) are cached per item, and IntroDB gets a global backoff when it
-//! is slow or down so playback never waits on it twice.
+//! Everything here is best effort: a failure of any kind yields an empty list, complete
+//! results (including empty ones) are cached per item, and IntroDB gets a global backoff
+//! when it is slow or down so playback never waits on it twice. A result missing a source
+//! because it failed is not cached, so a later playback asks again.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -74,12 +75,18 @@ impl SegmentsCache {
             return vec![];
         };
         let (native, community) = tokio::join!(from_jellyfin(jf, item_id), self.from_introdb(jf, &movie));
-        let merged = sanitize(merge(native, community), movie.runtime_ticks.map(|t| t as f64 / 10_000_000.0));
-        let mut items = self.items.write().await;
-        if items.len() >= MAX_CACHED_ITEMS {
-            items.clear();
+        let complete = native.is_some() && community.is_some();
+        let merged = sanitize(
+            merge(native.unwrap_or_default(), community.unwrap_or_default()),
+            movie.runtime_ticks.map(|t| t as f64 / 10_000_000.0),
+        );
+        if complete {
+            let mut items = self.items.write().await;
+            if items.len() >= MAX_CACHED_ITEMS {
+                items.clear();
+            }
+            items.insert(item_id.to_string(), merged.clone());
         }
-        items.insert(item_id.to_string(), merged.clone());
         merged
     }
 
@@ -89,30 +96,35 @@ impl SegmentsCache {
         if let Some(cached) = self.items.read().await.get(&key) {
             return cached.clone();
         }
-        let list = sanitize(self.introdb(imdb, season, episode).await, None);
-        let mut items = self.items.write().await;
-        if items.len() >= MAX_CACHED_ITEMS {
-            items.clear();
+        let found = self.introdb(imdb, season, episode).await;
+        let complete = found.is_some();
+        let list = sanitize(found.unwrap_or_default(), None);
+        if complete {
+            let mut items = self.items.write().await;
+            if items.len() >= MAX_CACHED_ITEMS {
+                items.clear();
+            }
+            items.insert(key, list.clone());
         }
-        items.insert(key, list.clone());
         list
     }
 
-    async fn from_introdb(&self, jf: &JellyfinClient, movie: &Movie) -> Vec<MediaSegment> {
+    /// `None` when IntroDB failed or is backed off (the answer is unknown, not empty).
+    async fn from_introdb(&self, jf: &JellyfinClient, movie: &Movie) -> Option<Vec<MediaSegment>> {
         if movie.kind != "Episode" {
-            return vec![];
+            return Some(vec![]);
         }
         let (Some(series_id), Some(season), Some(episode)) =
             (movie.series_id.as_deref(), movie.season_number, movie.episode_number)
         else {
-            return vec![];
+            return Some(vec![]);
         };
         if season < 0 || episode <= 0 {
-            return vec![];
+            return Some(vec![]);
         }
         if let Some(until) = *self.introdb_down_until.lock().unwrap() {
             if Instant::now() < until {
-                return vec![];
+                return None;
             }
         }
         let imdb = {
@@ -130,15 +142,17 @@ impl SegmentsCache {
             }
         };
         let Some(imdb) = imdb else {
-            return vec![];
+            return Some(vec![]);
         };
         self.introdb(&imdb, season, episode).await
     }
 
-    async fn introdb(&self, imdb: &str, season: i32, episode: i32) -> Vec<MediaSegment> {
+    /// `None` on a network error, a bad answer or during the backoff; `Some` otherwise
+    /// (empty when IntroDB has nothing for the episode).
+    async fn introdb(&self, imdb: &str, season: i32, episode: i32) -> Option<Vec<MediaSegment>> {
         if let Some(until) = *self.introdb_down_until.lock().unwrap() {
             if Instant::now() < until {
-                return vec![];
+                return None;
             }
         }
         let request = self
@@ -155,21 +169,21 @@ impl SegmentsCache {
             Ok(res) => res,
             Err(_) => {
                 self.mark_introdb_down();
-                return vec![];
+                return None;
             }
         };
         let status = response.status();
         if status.as_u16() == 429 || status.is_server_error() {
             self.mark_introdb_down();
-            return vec![];
+            return None;
         }
         if !status.is_success() {
-            return vec![];
+            return Some(vec![]);
         }
         let Ok(value) = response.json::<Value>().await else {
-            return vec![];
+            return None;
         };
-        ["intro", "recap", "outro"]
+        let list: Vec<MediaSegment> = ["intro", "recap", "outro"]
             .iter()
             .filter_map(|kind| {
                 let seg = value.get(*kind)?;
@@ -197,7 +211,8 @@ impl SegmentsCache {
                     source: "introdb".to_string(),
                 })
             })
-            .collect()
+            .collect();
+        Some(list)
     }
 
     fn mark_introdb_down(&self) {
@@ -205,19 +220,21 @@ impl SegmentsCache {
     }
 }
 
-async fn from_jellyfin(jf: &JellyfinClient, item_id: &str) -> Vec<MediaSegment> {
+/// `None` when the server could not be asked (the answer is unknown, not empty).
+async fn from_jellyfin(jf: &JellyfinClient, item_id: &str) -> Option<Vec<MediaSegment>> {
     match jf.media_segments(item_id).await {
-        Ok(Some(list)) => list
-            .into_iter()
-            .filter_map(|(kind, start, end)| {
-                Some(MediaSegment {
-                    kind: map_jellyfin_kind(&kind)?.to_string(),
-                    start_seconds: start,
-                    end_seconds: end,
-                    source: "jellyfin".to_string(),
+        Ok(Some(list)) => Some(
+            list.into_iter()
+                .filter_map(|(kind, start, end)| {
+                    Some(MediaSegment {
+                        kind: map_jellyfin_kind(&kind)?.to_string(),
+                        start_seconds: start,
+                        end_seconds: end,
+                        source: "jellyfin".to_string(),
+                    })
                 })
-            })
-            .collect(),
+                .collect(),
+        ),
         // No MediaSegments API (server < 10.10): try the Intro Skipper plugin directly.
         Ok(None) => {
             let (intro, credits) = tokio::join!(
@@ -241,9 +258,9 @@ async fn from_jellyfin(jf: &JellyfinClient, item_id: &str) -> Vec<MediaSegment> 
                     source: "jellyfin".into(),
                 });
             }
-            out
+            Some(out)
         }
-        Err(_) => vec![],
+        Err(_) => None,
     }
 }
 

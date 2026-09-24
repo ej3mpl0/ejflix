@@ -24,7 +24,8 @@ export async function reportTick(ctx: EngineContext, snap: PlayerState): Promise
         });
         break;
       case "addon":
-        upsertProgress(ctx.source.entry, snap.time, snap.duration);
+        // Before the duration is known the stored entry (and its duration) is kept.
+        if (snap.duration > 0) upsertProgress(ctx.source.entry, snap.time, snap.duration);
         break;
       case "live":
         break;

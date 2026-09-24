@@ -33,7 +33,9 @@ import type {
   LocalProfile,
   MediaSegment,
   Movie,
+  OnlineSubtitle,
   PlayerState,
+  SubtitleQuery,
   ProfilePatch,
   PublicInfo,
   PublicUser,
@@ -263,6 +265,23 @@ export const api = {
   /** A sync finished; `pulled` names the kinds this PC took from the account. */
   onAccountSynced: (handler: (report: SyncReport) => void): Promise<UnlistenFn> =>
     listen<SyncReport>("account://synced", (event) => handler(event.payload)),
+  // player
+  /** Subtitle ("sub") or audio delay; remembered for the title playing. Returns the value applied. */
+  playerSetDelay: (kind: "sub" | "audio", seconds: number) => invoke<number>("player_set_delay", { kind, seconds }),
+  playerSetNight: (on: boolean) => invoke<void>("player_set_night", { on }),
+  /** Start of the credits of the file playing (for marking it watched), or null. */
+  playerSetCredits: (start: number | null) => invoke<void>("player_set_credits", { start }),
+  /** Mini player on/off; resolves to whether the window is fullscreen afterwards. */
+  playerSetMini: (on: boolean) => invoke<boolean>("player_set_mini", { on }),
+  playerMiniDrag: () => invoke<void>("player_mini_drag"),
+  /** Played to the end (threshold or credits) and marked watched: a Jellyfin id or an online key. */
+  onPlayerWatched: (handler: (target: { itemId?: string; key?: string }) => void): Promise<UnlistenFn> =>
+    listen<{ itemId?: string; key?: string }>("player://watched", (event) => handler(event.payload)),
+  opensubtitlesSearch: (query: SubtitleQuery) => invoke<OnlineSubtitle[]>("opensubtitles_search", { query }),
+  /** Downloads a result and loads it into the player. */
+  opensubtitlesDownload: (fileId: number) => invoke<void>("opensubtitles_download", { fileId }),
+  opensubtitlesHasPassword: () => invoke<boolean>("opensubtitles_has_password"),
+  opensubtitlesSetPassword: (password: string) => invoke<void>("opensubtitles_set_password", { password }),
   // Discovery: custom lists, calendar, shuffle, recommendations
   customListsGet: () => invoke<CustomList[]>("custom_lists_get"),
   customListCreate: (name: string) => invoke<CustomList[]>("custom_list_create", { name }),

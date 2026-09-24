@@ -48,6 +48,12 @@ function errorText(err: unknown): string {
 
 const HISTORY_MAX = 10;
 
+/** The page that answers back navigation: the last one not already leaving. */
+function topIndexOf(stack: DetailsRoute[]): number {
+  for (let i = stack.length - 1; i >= 0; i--) if (!stack[i].leaving) return i;
+  return -1;
+}
+
 export function Home({
   session,
   server,
@@ -309,6 +315,8 @@ export function Home({
   const back = () => {
     const previous = history.current.pop() ?? "home";
     if (previous !== "search") setSearch("");
+    // A deep link into Settings (e.g. TV › configure) only holds for that visit.
+    setSettingsSection(undefined);
     setView(previous);
     const top = scrollOf.current.get(previous) ?? 0;
     // Wait for the previous view to render before putting it back where it was.
@@ -348,21 +356,26 @@ export function Home({
   };
 
   const popDetails = () => {
+    // A second back while the top page is still leaving pops the one under it too.
+    let popped: number | null = null;
     setStack((current) => {
-      if (!current.length) return current;
-      const top = current[current.length - 1];
-      if (top.leaving) return current;
-      return [...current.slice(0, -1), { ...top, leaving: true }];
+      const index = topIndexOf(current);
+      if (index < 0) return current;
+      popped = current[index].key;
+      return current.map((route, i) => (i === index ? { ...route, leaving: true } : route));
     });
     window.setTimeout(() => {
-      setStack((current) => current.filter((route) => !route.leaving));
+      setStack((current) => current.filter((route) => !(route.leaving && route.key === popped)));
     }, PAGE_EXIT_MS);
   };
 
   const hasStack = stack.length > 0;
+  const topIndex = topIndexOf(stack);
   useBackNavigation(hasStack || picker || seeAll || view === "home" ? null : back);
 
   const play = (movie: Movie) => {
+    // Only a start from the sources sheet may bring it back on failure.
+    lastPicker.current = null;
     if (movie.live) {
       onPlay(movie);
       return;
@@ -573,7 +586,8 @@ export function Home({
           <ExternalDetailsPage
             key={route.key}
             route={route}
-            top={i === stack.length - 1 && !picker}
+            top={i === topIndex && !picker}
+            refreshToken={refreshToken}
             onBack={popDetails}
             onOpen={openDetails}
             onPlay={play}
@@ -582,7 +596,8 @@ export function Home({
           <DetailsPage
             key={route.key}
             route={route}
-            top={i === stack.length - 1 && !picker}
+            top={i === topIndex && !picker}
+            refreshToken={refreshToken}
             onBack={popDetails}
             onPush={openDetails}
             onPlay={play}
