@@ -1040,6 +1040,13 @@ const es = {
   errMultiviewConnections: "Tu cuenta permite {detail} conexiones a la vez.",
   errMultiviewTooFew: "No se han podido abrir suficientes canales.",
   errMultiviewNoAudio: "Este canal no tiene sonido.",
+  // --- review fixes (browsing) ---
+  errListNameEmpty: "La lista necesita un nombre.",
+  errTooManyLists: "Has llegado al máximo de listas.",
+  errListGone: "La lista ya no existe.",
+  errListItemNoKey: "Este título no se puede añadir a una lista.",
+  errListFull: "La lista está llena.",
+  keyCardMenu: "Menú del póster (añadir a una lista…)",
 };
 
 const en: typeof es = {
@@ -2082,6 +2089,13 @@ const en: typeof es = {
   errMultiviewConnections: "Your account allows {detail} connections at a time.",
   errMultiviewTooFew: "Couldn't open enough channels.",
   errMultiviewNoAudio: "This channel has no sound.",
+  // --- review fixes (browsing) ---
+  errListNameEmpty: "The list needs a name.",
+  errTooManyLists: "You've reached the maximum number of lists.",
+  errListGone: "That list no longer exists.",
+  errListItemNoKey: "This title can't be added to a list.",
+  errListFull: "The list is full.",
+  keyCardMenu: "Poster menu (add to a list…)",
 };
 
 export const dictionaries = { es, en };

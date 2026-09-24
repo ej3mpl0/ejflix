@@ -21,6 +21,7 @@ import { PosterGridItemsSkeleton } from "../components/Skeletons";
 export function SeeAllPage({
   request,
   top,
+  hasServer,
   onBack,
   onOpen,
   onPlay,
@@ -28,6 +29,8 @@ export function SeeAllPage({
   request: SeeAllRequest;
   /** Only while nothing else is on top does it react to back navigation. */
   top: boolean;
+  /** Without a server its items of a custom list cannot open: they are left out. */
+  hasServer: boolean;
   onBack: () => void;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
@@ -42,7 +45,7 @@ export function SeeAllPage({
   const scroller = useRef<HTMLDivElement>(null);
   /** A custom list follows its live contents: removing a title takes it off the grid. */
   const list = request.listId ? lists.find((l) => l.id === request.listId) ?? null : null;
-  const shown = list ? moviesOf(list) : items;
+  const shown = list ? moviesOf(list).filter((movie) => hasServer || movie.external) : items;
   const title = list?.name ?? request.title;
 
   useBackNavigation(top ? onBack : null);

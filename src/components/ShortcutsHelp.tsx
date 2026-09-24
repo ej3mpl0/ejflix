@@ -48,6 +48,7 @@ const APP: Array<[string[], MessageKey]> = [
   [["/"], "keySearch"],
   [["←", "↑", "→", "↓"], "keyNavigate"],
   [["Enter"], "keyOpen"],
+  [["⇧", "F10"], "keyCardMenu"],
   [["Esc", "⌫"], "back"],
   [["?"], "keyHelp"],
   [["✚", "L"], "keyPadNavigate"],
