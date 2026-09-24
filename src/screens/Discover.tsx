@@ -4,6 +4,7 @@ import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
 import { Select } from "../components/Select";
@@ -248,7 +249,7 @@ export function Discover({
             .catch((err) => {
               if (id !== request.current) return [];
               serverDone.current = true;
-              onErrorRef.current(err instanceof Error ? err.message : String(err));
+              onErrorRef.current(errorText(t, err));
               return [];
             }),
         );

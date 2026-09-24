@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "./api";
+import { errorText } from "./errors";
+import { useI18n } from "./locale-context";
 import { emptyMovie, libraryToMovie } from "./addons";
 import type { CustomList, ListItem, Movie } from "./types";
 import { ListPickerDialog } from "../components/ListPickerDialog";
@@ -108,6 +110,9 @@ export function CustomListsProvider({
   const parental = useParental();
   const [picker, setPicker] = useState<Movie | null>(null);
   const onErrorRef = useRef(onError);
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   onErrorRef.current = onError;
 
   useEffect(() => {
@@ -161,7 +166,7 @@ export function CustomListsProvider({
       setLists(next);
       return next;
     } catch (err) {
-      onErrorRef.current(err instanceof Error ? err.message : String(err));
+      onErrorRef.current(errorText(tRef.current, err));
       return null;
     }
   }, []);

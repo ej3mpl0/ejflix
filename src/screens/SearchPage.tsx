@@ -4,6 +4,7 @@ import type { AddonCatalog, GenreRow, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import {
   clearSearchHistory,
@@ -140,7 +141,7 @@ export function SearchPage({
             })
             .catch((err) => {
               // Once per failure streak, not on every keystroke.
-              const message = err instanceof Error ? err.message : String(err);
+              const message = errorText(t, err);
               if (message !== lastError.current) onErrorRef.current(message);
               lastError.current = message;
               return [] as Movie[];

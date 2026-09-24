@@ -9,6 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { api } from "./api";
+import { errorText } from "./errors";
+import { useI18n } from "./locale-context";
 import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "./types";
 import { applyTheme } from "./theme";
 import { readLegacyPinned, clearLegacyPinned } from "./libraries";
@@ -60,6 +62,9 @@ export function SettingsProvider({
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onErrorRef = useRef(onError);
+  const { t } = useI18n();
+  const tRef = useRef(t);
+  tRef.current = t;
   onErrorRef.current = onError;
 
   const update = useCallback(async (patch: SettingsPatch) => {
@@ -76,7 +81,7 @@ export function SettingsProvider({
       const current = await api.settingsGet().catch(() => previous);
       settingsRef.current = current;
       setSettings(current);
-      onErrorRef.current?.(err instanceof Error ? err.message : String(err));
+      onErrorRef.current?.(errorText(tRef.current, err));
     }
   }, []);
 

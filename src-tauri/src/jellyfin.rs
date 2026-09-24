@@ -390,7 +390,7 @@ impl JellyfinClient {
     /// never a special or an episode the server does not have yet.
     pub async fn random_episode(&self, series_id: &str, exclude: &[String]) -> Result<Option<Movie>, String> {
         if !valid_item_id(series_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -635,7 +635,7 @@ impl JellyfinClient {
     pub async fn require_session(&self) -> Result<Session, String> {
         self.session()
             .await
-            .ok_or_else(|| "No hay sesión activa".to_string())
+            .ok_or_else(|| crate::errors::code("noSession"))
     }
 
     pub async fn probe(&self, url: &str) -> Result<PublicInfo, String> {
@@ -645,14 +645,14 @@ impl JellyfinClient {
             .get(format!("{url}/System/Info/Public"))
             .send()
             .await
-            .map_err(|e| format!("No se puede conectar a Jellyfin: {e}"))?;
+            .map_err(|e| crate::errors::detail("jellyfinUnreachable", e))?;
         if !res.status().is_success() {
-            return Err(format!("El servidor respondió {}", res.status()));
+            return Err(crate::errors::detail("serverStatus", res.status().as_u16()));
         }
         let value: Value = res
             .json()
             .await
-            .map_err(|e| format!("Respuesta inválida: {e}"))?;
+            .map_err(|e| crate::errors::detail("badReply", e))?;
         Ok(PublicInfo {
             server_name: value
                 .get("ServerName")
@@ -679,14 +679,14 @@ impl JellyfinClient {
             .get(format!("{server_url}/Users/Public"))
             .send()
             .await
-            .map_err(|e| format!("No se pueden leer los perfiles: {e}"))?;
+            .map_err(|e| crate::errors::detail("profilesUnreadable", e))?;
         if !res.status().is_success() {
-            return Err(format!("El servidor respondió {}", res.status()));
+            return Err(crate::errors::detail("serverStatus", res.status().as_u16()));
         }
         let value: Value = res
             .json()
             .await
-            .map_err(|e| format!("Respuesta inválida: {e}"))?;
+            .map_err(|e| crate::errors::detail("badReply", e))?;
         let users = value
             .as_array()
             .or_else(|| value.get("Items").and_then(|v| v.as_array()))
@@ -716,24 +716,24 @@ impl JellyfinClient {
             .json(&json!({ "Username": username, "Pw": password }))
             .send()
             .await
-            .map_err(|e| format!("No se puede conectar: {e}"))?;
+            .map_err(|e| crate::errors::detail("unreachable", e))?;
         if !res.status().is_success() {
-            return Err("Usuario o contraseña incorrectos".into());
+            return Err(crate::errors::code("wrongCredentials"));
         }
         let value: Value = res
             .json()
             .await
-            .map_err(|e| format!("Respuesta inválida: {e}"))?;
+            .map_err(|e| crate::errors::detail("badReply", e))?;
         let token = value
             .get("AccessToken")
             .and_then(|v| v.as_str())
-            .ok_or("El servidor no devolvió token")?
+            .ok_or_else(|| crate::errors::code("loginIncomplete"))?
             .to_string();
-        let user = value.get("User").ok_or("El servidor no devolvió usuario")?;
+        let user = value.get("User").ok_or_else(|| crate::errors::code("loginIncomplete"))?;
         let user_id = user
             .get("Id")
             .and_then(|v| v.as_str())
-            .ok_or("Falta el id de usuario")?
+            .ok_or_else(|| crate::errors::code("loginIncomplete"))?
             .to_string();
         let user_name = user
             .get("Name")
@@ -760,7 +760,7 @@ impl JellyfinClient {
             .await?;
         if !res.status().is_success() {
             self.set_session(None).await;
-            return Err("Sesión caducada".into());
+            return Err(crate::errors::code("sessionExpired"));
         }
         if let Ok(value) = res.json::<Value>().await {
             if let Some(name) = value.get("Name").and_then(|v| v.as_str()) {
@@ -891,7 +891,7 @@ impl JellyfinClient {
 
     pub async fn seasons(&self, series_id: &str) -> Result<Vec<Movie>, String> {
         if !valid_item_id(series_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -904,7 +904,7 @@ impl JellyfinClient {
 
     pub async fn episodes(&self, series_id: &str, season_id: &str) -> Result<Vec<Movie>, String> {
         if !valid_item_id(series_id) || !valid_item_id(season_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -918,7 +918,7 @@ impl JellyfinClient {
     /// Episode that follows `episode_id` in series order (crosses seasons), if any.
     pub async fn next_episode(&self, series_id: &str, episode_id: &str) -> Result<Option<Movie>, String> {
         if !valid_item_id(series_id) || !valid_item_id(episode_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -935,7 +935,7 @@ impl JellyfinClient {
     /// unwatched after the last watched), else the first episode of the show.
     pub async fn series_next_up(&self, series_id: &str) -> Result<Option<Movie>, String> {
         if !valid_item_id(series_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -961,7 +961,7 @@ impl JellyfinClient {
     /// Items Jellyfin considers similar ("More like this").
     pub async fn similar(&self, id: &str) -> Result<Vec<Movie>, String> {
         if !valid_item_id(id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = item_fields();
@@ -1005,7 +1005,7 @@ impl JellyfinClient {
         field: &str,
     ) -> Result<bool, String> {
         if !valid_item_id(item_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let method = if on {
@@ -1052,7 +1052,7 @@ impl JellyfinClient {
     /// Episodes of a series as (id, season, episode, played).
     pub async fn episode_index(&self, series_id: &str) -> Result<Vec<(String, i32, i32, bool)>, String> {
         if !valid_item_id(series_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let res = self
@@ -1101,7 +1101,7 @@ impl JellyfinClient {
         item_id: &str,
     ) -> Result<Option<Vec<(String, f64, f64)>>, String> {
         if !valid_item_id(item_id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let res = self.get(&format!("/MediaSegments/{item_id}")).await?;
         if res.status().as_u16() == 404 {
@@ -1164,7 +1164,7 @@ impl JellyfinClient {
 
     pub async fn get_item(&self, id: &str) -> Result<Movie, String> {
         if !valid_item_id(id) {
-            return Err("Ítem no válido".into());
+            return Err(crate::errors::code("invalidItem"));
         }
         let session = self.require_session().await?;
         let fields = detail_fields();
@@ -1175,7 +1175,7 @@ impl JellyfinClient {
             ))
             .await?;
         if !res.status().is_success() {
-            return Err("No se encontró la película".into());
+            return Err(crate::errors::code("itemNotFound"));
         }
         let value: Value = res.json().await.map_err(|e| e.to_string())?;
         let movie = self.map_item(&session, &value)?;
@@ -1722,7 +1722,7 @@ impl JellyfinClient {
             .headers(auth_headers(&session.device_id, Some(&session.token)))
             .send()
             .await
-            .map_err(|e| format!("Error de red: {e}"))
+            .map_err(|e| crate::errors::detail("network", e))
     }
 
     /// Body-less request (POST/DELETE toggles). Returns the raw response.
@@ -1739,7 +1739,7 @@ impl JellyfinClient {
             .header(reqwest::header::CONTENT_LENGTH, "0")
             .send()
             .await
-            .map_err(|e| format!("Error de red: {e}"))
+            .map_err(|e| crate::errors::detail("network", e))
     }
 
     async fn post_json(&self, path: &str, body: &Value) -> Result<(), String> {
@@ -1752,7 +1752,7 @@ impl JellyfinClient {
             .json(body)
             .send()
             .await
-            .map_err(|e| format!("Error de red: {e}"))?;
+            .map_err(|e| crate::errors::detail("network", e))?;
         if res.status().is_success() || res.status().as_u16() == 204 {
             Ok(())
         } else {
@@ -1887,23 +1887,23 @@ pub fn valid_item_id(id: &str) -> bool {
 pub fn normalize_url(url: &str) -> Result<String, String> {
     let trimmed = url.trim();
     if trimmed.is_empty() || trimmed.len() > 2048 {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     let mut u = trimmed.trim_end_matches('/').to_string();
     if !u.starts_with("http://") && !u.starts_with("https://") {
         if u.contains("://") {
-            return Err("Solo se permiten URLs http o https".into());
+            return Err(crate::errors::code("httpOnlyUrl"));
         }
         u = format!("http://{u}");
     }
     if !u.starts_with("http://") && !u.starts_with("https://") {
-        return Err("Solo se permiten URLs http o https".into());
+        return Err(crate::errors::code("httpOnlyUrl"));
     }
     if has_userinfo(&u) {
-        return Err("La URL no debe incluir usuario ni contraseña".into());
+        return Err(crate::errors::code("urlCredentials"));
     }
     if host_of(&u).is_none() {
-        return Err("URL no válida".into());
+        return Err(crate::errors::code("invalidUrl"));
     }
     Ok(u)
 }

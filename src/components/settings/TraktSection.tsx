@@ -3,6 +3,7 @@ import { Copy, Download, ExternalLink, KeyRound, LoaderCircle, LogOut, Link2 } f
 import { api } from "../../lib/api";
 import { cn } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
+import { errorText } from "../../lib/errors";
 import type { TraktDeviceCode, TraktStatus } from "../../lib/types";
 import { fieldClass as field, labelClass } from "../../lib/ui";
 import { ConfirmButton } from "../ConfirmButton";
@@ -16,13 +17,6 @@ const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
 const primary =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60";
-
-function errorText(err: unknown, t: ReturnType<typeof useI18n>["t"]): string {
-  const text = err instanceof Error ? err.message : String(err);
-  if (text === "trakt_bad_app") return t("traktBadApp");
-  if (text === "trakt_expired" || text === "trakt_not_connected") return t("traktExpired");
-  return text;
-}
 
 /**
  * Settings › Trakt: the user's own API application, the device sign-in (a code typed
@@ -51,7 +45,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
         setStatus(next);
         setClientId(next.clientId);
       })
-      .catch((err) => setError(errorText(err, t)));
+      .catch((err) => setError(errorText(t, err)));
     return stopPolling;
   }, [stopPolling, t]);
 
@@ -76,7 +70,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
       setClientSecret("");
       setEditingApp(false);
     } catch (err) {
-      setError(errorText(err, t));
+      setError(errorText(t, err));
     } finally {
       setBusy(null);
     }
@@ -97,7 +91,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
         }
       } catch (err) {
         setDevice(null);
-        setError(errorText(err, t));
+        setError(errorText(t, err));
       }
     }, interval * 1000);
   };
@@ -112,7 +106,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
       void api.traktOpen(code.verificationUrl).catch(() => undefined);
       poll(code.interval);
     } catch (err) {
-      setError(errorText(err, t));
+      setError(errorText(t, err));
     } finally {
       setBusy(null);
     }
@@ -129,7 +123,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
         setError(t("traktImportLeftOut", { unmatched: report.unmatched, skipped: report.skipped }));
       }
     } catch (err) {
-      setError(errorText(err, t));
+      setError(errorText(t, err));
     } finally {
       setBusy(null);
     }
@@ -283,7 +277,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
           <SettingsRow label={t("traktSyncBack")} hint={t("traktSyncBackHint")}>
             <Toggle
               checked={status.syncBack}
-              onChange={(on) => void api.traktSetSyncBack(on).then(setStatus).catch((err) => setError(errorText(err, t)))}
+              onChange={(on) => void api.traktSetSyncBack(on).then(setStatus).catch((err) => setError(errorText(t, err)))}
               label={t("traktSyncBack")}
             />
           </SettingsRow>

@@ -9,6 +9,7 @@ import { PinInput } from "../components/PinInput";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../lib/errors";
 import type { LocalProfile, PublicUser, SavedServer, Session } from "../lib/types";
 import { fieldLgClass } from "../lib/ui";
 
@@ -76,7 +77,7 @@ export function Profiles({
             if (!cancelled) setUsers(list);
           })
           .catch((err) => {
-            if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+            if (!cancelled) setError(errorText(t, err));
           }),
       );
     }
@@ -95,7 +96,7 @@ export function Profiles({
     try {
       onReady(await api.login(server.serverUrl, name.trim(), pw));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(t, err));
     } finally {
       setSigning(false);
     }
@@ -152,7 +153,7 @@ export function Profiles({
         setPinError(true);
         window.setTimeout(() => setPinError(false), 600);
       } else {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(errorText(t, err));
       }
     } finally {
       setSigning(false);
