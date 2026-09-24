@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Clock, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
+import { Clock, Plus, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
 import type { Channel, ChannelGroup, IptvSource, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
@@ -32,6 +32,7 @@ export function LiveTv({
   onPlay,
   onError,
   onSettings,
+  onAddSource,
 }: {
   sources: IptvSource[];
   /** Bumped after playback: reloads the page (the Recent list changed). */
@@ -40,6 +41,8 @@ export function LiveTv({
   onError: (message: string) => void;
   /** Opens Settings › IPTV. */
   onSettings: () => void;
+  /** Opens Settings › IPTV with the "add a list" form up. */
+  onAddSource?: () => void;
 }) {
   const { t } = useI18n();
   const enabled = useMemo(() => sources.filter((s) => s.enabled), [sources]);
@@ -188,7 +191,7 @@ export function LiveTv({
           icon={<Tv size={26} />}
           title={t("iptvNoSources")}
           hint={t("iptvNoSourcesHint")}
-          action={{ label: t("iptvGoToSettings"), onClick: onSettings }}
+          action={{ label: t("iptvAddList"), icon: <Plus size={16} />, onClick: onAddSource ?? onSettings }}
         />
       </div>
     );
@@ -292,7 +295,14 @@ export function LiveTv({
             {sideButton(t("favorites"), selection.type === "favorites", () => setSelection({ type: "favorites" }), undefined, <Star size={15} />)}
             {sideButton(t("recent"), selection.type === "recent", () => setSelection({ type: "recent" }), undefined, <Clock size={15} />)}
           </div>
-          {groups.length ? (
+          {!groups.length && (loading || (anyLoading && !ready)) ? (
+            <div className="mt-5 space-y-1.5 px-3" aria-hidden>
+              <Shimmer className="mb-3 h-3 w-20 rounded" />
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Shimmer key={i} className="h-7 rounded-btn" delay={i * 60} />
+              ))}
+            </div>
+          ) : groups.length ? (
             <>
               <p className="mt-5 mb-2 px-3 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("iptvGroupsLabel")}</p>
               {groups.length > 20 ? (
@@ -321,7 +331,7 @@ export function LiveTv({
         </nav>
 
         <div className="min-w-0">
-          {loading && !items.length ? (
+          {(loading || (anyLoading && selection.type === "all" && !query)) && !items.length ? (
             <div className={grid}>
               {Array.from({ length: 12 }).map((_, i) => (
                 <div key={i}>

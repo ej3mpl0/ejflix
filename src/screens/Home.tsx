@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Puzzle, RotateCcw, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Compass, Download, Puzzle, RotateCcw, WifiOff } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
 import { PosterCard } from "../components/PosterCard";
@@ -34,6 +34,12 @@ import { SeeAllContext, type SeeAllRequest } from "../lib/see-all-context";
 import { SeeAllPage } from "./SeeAllPage";
 import { handlePosterArrows } from "../lib/poster-nav";
 import { Shimmer } from "../components/Shimmer";
+import { CommandPalette } from "../components/CommandPalette";
+import { ShortcutsHelp } from "../components/ShortcutsHelp";
+import { TrailerGate } from "../lib/trailer-autoplay";
+import { useAutoAccent } from "../lib/auto-accent";
+import { useSpatialNavigation } from "../lib/spatial-nav";
+import { requestSettingsIntent } from "../lib/settings-intent";
 
 const PAGE_EXIT_MS = 250;
 
@@ -110,6 +116,9 @@ export function Home({
   const [seeAll, setSeeAll] = useState<SeeAllRequest | null>(null);
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
+  /** Ctrl+K command palette and the "?" shortcuts sheet. */
+  const [palette, setPalette] = useState(false);
+  const [shortcuts, setShortcuts] = useState(false);
 
   // The player could not start: put the user back in front of the other sources.
   useEffect(() => {
@@ -369,6 +378,50 @@ export function Home({
   const topIndex = topIndexOf(stack);
   useBackNavigation(hasStack || picker || seeAll || view === "home" ? null : back);
 
+  // Arrow keys / gamepad across the whole window, and the accent that follows the artwork,
+  // while Home is on screen (the player has its own keys).
+  useSpatialNavigation(!hidden);
+  useAutoAccent(settings.appearance.autoAccent && !hidden);
+
+  // Ctrl+K: command palette (even from a text field); "?": the shortcuts sheet.
+  useEffect(() => {
+    if (hidden) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShortcuts(false);
+        setPalette((open) => !open);
+        return;
+      }
+      const target = e.target as HTMLElement | null;
+      const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
+      if (e.key === "?" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.defaultPrevented) {
+        e.preventDefault();
+        setShortcuts(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [hidden]);
+
+  useEffect(() => {
+    if (hidden) {
+      setPalette(false);
+      setShortcuts(false);
+    }
+  }, [hidden]);
+
+  /** Settings › Addons with the import panel up (empty screens, palette). */
+  const importAddons = () => {
+    requestSettingsIntent("addons-import");
+    openSettings("addons");
+  };
+  /** Settings › IPTV with the "add a list" form open. */
+  const addIptvList = () => {
+    requestSettingsIntent("iptv-add");
+    openSettings("iptv");
+  };
+
   const play = (movie: Movie) => {
     // Only a start from the sources sheet may bring it back on failure.
     lastPicker.current = null;
@@ -425,7 +478,11 @@ export function Home({
     </div>
   );
 
-  const grid = (title: string, items: Movie[], empty?: { text: string; hint: string }) => (
+  const grid = (
+    title: string,
+    items: Movie[],
+    empty?: { text: string; hint: string; icon?: ReactNode; action?: { label: string; onClick: () => void; icon?: ReactNode } },
+  ) => (
     <div className="page-enter px-page pt-24 pb-16">
       <h2 className="mb-6 text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
       {items.length ? (
@@ -442,7 +499,7 @@ export function Home({
           ))}
         </div>
       ) : empty ? (
-        <EmptyState title={empty.text} hint={empty.hint} />
+        <EmptyState title={empty.text} hint={empty.hint} icon={empty.icon} action={empty.action} />
       ) : null}
     </div>
   );
@@ -455,7 +512,7 @@ export function Home({
         icon={<Puzzle size={26} />}
         title={t("noAddonsYet")}
         hint={t("noAddonsYetHint")}
-        action={{ label: t("goToAddons"), onClick: () => openView("settings") }}
+        action={{ label: t("importAddons"), icon: <Download size={16} />, onClick: importAddons }}
       />
     </div>
   );
@@ -466,6 +523,13 @@ export function Home({
       <RowSkeleton />
       <RowSkeleton />
     </>
+  );
+
+  // Muted trailers: none while the player runs; the hero's also stops under a page, a grid
+  // or the sources sheet.
+  const trailerGate = useMemo(
+    () => ({ hero: !hidden && !hasStack && !seeAll && !picker && !palette, pages: !hidden }),
+    [hidden, hasStack, seeAll, picker, palette],
   );
 
   // Online-only profiles: wait for the addon list so the hero does not flash empty.
@@ -494,6 +558,7 @@ export function Home({
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
       />
+      <TrailerGate.Provider value={trailerGate}>
       <SeeAllContext.Provider value={setSeeAll}>
       <div
         ref={scroller}
@@ -523,7 +588,14 @@ export function Home({
             onToast={onToast}
           />
         ) : view === "tv" ? (
-          <LiveTv sources={tvSources} refreshToken={refreshToken} onPlay={play} onError={onToast} onSettings={() => openSettings("iptv")} />
+          <LiveTv
+            sources={tvSources}
+            refreshToken={refreshToken}
+            onPlay={play}
+            onError={onToast}
+            onSettings={() => openSettings("iptv")}
+            onAddSource={addIptvList}
+          />
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}
@@ -534,9 +606,10 @@ export function Home({
             onOpen={openDetails}
             onPlay={play}
             onError={onToast}
+            onDiscover={() => openView("discover")}
           />
         ) : view === "discover" ? (
-          <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} />
+          <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} onImportAddons={importAddons} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (
@@ -552,7 +625,12 @@ export function Home({
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
-          grid(t("myList"), myList, { text: t("emptyList"), hint: t("emptyListHint") })
+          grid(t("myList"), myList, {
+            text: t("emptyList"),
+            hint: t("emptyListHint"),
+            icon: <Compass size={26} />,
+            action: { label: t("exploreAction"), icon: <Compass size={16} />, onClick: () => openView("discover") },
+          })
         ) : view === "myserver" && data ? (
           <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
@@ -632,6 +710,25 @@ export function Home({
           }}
         />
       ) : null}
+      </TrailerGate.Provider>
+      {palette ? (
+        <CommandPalette
+          userId={session.userId}
+          hasServer={hasServer}
+          hasTv={tvSources.length > 0}
+          onClose={() => setPalette(false)}
+          onView={openView}
+          onSettings={openSettings}
+          onOpen={openDetails}
+          onSearch={(query) => {
+            setSearch(query);
+            openSearch();
+          }}
+          onSwitchProfile={onSwitchProfile}
+          onShortcuts={() => setShortcuts(true)}
+        />
+      ) : null}
+      {shortcuts ? <ShortcutsHelp app onClose={() => setShortcuts(false)} /> : null}
     </div>
   );
 }

@@ -11,12 +11,15 @@ export function WatchedButton({
   scope = "item",
   pill = false,
   className,
+  tabIndex,
 }: {
   movie: Movie;
-  variant?: "action" | "icon";
+  /** `icon`: dark round button over artwork; `outline`: bordered round button (hover card). */
+  variant?: "action" | "icon" | "outline";
   scope?: "item" | "season";
   pill?: boolean;
   className?: string;
+  tabIndex?: number;
 }) {
   const { t } = useI18n();
   const { flags, setPlayed, pending } = useUserData();
@@ -32,10 +35,11 @@ export function WatchedButton({
         ? t("markUnwatched")
         : t("markWatched");
 
-  if (variant === "icon") {
+  if (variant !== "action") {
     return (
       <button
         type="button"
+        tabIndex={tabIndex}
         disabled={busy}
         aria-pressed={watched}
         aria-label={label}
@@ -45,7 +49,10 @@ export function WatchedButton({
           void setPlayed(movie, !watched);
         }}
         className={cn(
-          "btn-press grid h-8 w-8 place-items-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 disabled:opacity-60",
+          "btn-press grid place-items-center rounded-full text-white disabled:opacity-60",
+          variant === "outline"
+            ? "h-9 w-9 border border-white/25 hover:border-white/60"
+            : "h-8 w-8 bg-black/60 backdrop-blur-sm hover:bg-black/80",
           className,
         )}
       >

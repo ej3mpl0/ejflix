@@ -9,7 +9,7 @@ import { useI18n } from "../lib/locale-context";
 import { useItemFlags } from "../lib/userdata-context";
 import { PosterPreview } from "./PosterPreview";
 
-const PREVIEW_DELAY_MS = 750;
+const PREVIEW_DELAY_MS = 500;
 /** Only a real mouse gets the hover card (touch screens and pens would trip it on tap). */
 const finePointer = typeof matchMedia === "function" && matchMedia("(hover: hover) and (pointer: fine)").matches;
 
@@ -46,8 +46,12 @@ export function PosterCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef<number | undefined>(undefined);
 
+  const armed = useRef(false);
+  // Armed by the mouse actually moving over the card: a card that slides under a still
+  // pointer (keyboard or gamepad scrolling the row) does not pop its preview.
   const armPreview = () => {
-    if (!finePointer) return;
+    if (!finePointer || armed.current) return;
+    armed.current = true;
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => {
       const rect = cardRef.current?.getBoundingClientRect();
@@ -55,15 +59,21 @@ export function PosterCard({
     }, PREVIEW_DELAY_MS);
   };
   const dropPreview = () => {
+    armed.current = false;
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setPreview(null), 120);
   };
   useEffect(() => {
     if (!preview) return;
-    // Any scroll moves the poster away from the card: close it.
+    // Any scroll moves the poster away from the card, and a key press means the keyboard
+    // (or a gamepad) is driving: close it.
     const close = () => setPreview(null);
     window.addEventListener("scroll", close, true);
-    return () => window.removeEventListener("scroll", close, true);
+    window.addEventListener("keydown", close, true);
+    return () => {
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", close, true);
+    };
   }, [preview]);
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
@@ -79,7 +89,7 @@ export function PosterCard({
       data-item-id={movie.id}
       data-poster
       ref={cardRef}
-      onMouseEnter={armPreview}
+      onMouseMove={armPreview}
       onMouseLeave={dropPreview}
     >
       <div className="poster-card card-depth relative overflow-hidden rounded-poster bg-surface">
@@ -169,6 +179,7 @@ export function PosterCard({
           }}
           onEnter={() => window.clearTimeout(timer.current)}
           onLeave={dropPreview}
+          onDismiss={() => setPreview(null)}
         />
       ) : null}
     </div>

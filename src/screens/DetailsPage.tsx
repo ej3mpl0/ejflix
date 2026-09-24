@@ -25,6 +25,9 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { ScrollRow } from "../components/ScrollRow";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { PersonDialog } from "../components/PersonDialog";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
+import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useArtworkAccent } from "../lib/auto-accent";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -69,6 +72,10 @@ export function DetailsPage({
   const loadedSeason = useRef<string | null>(null);
   const isSeries = route.kind === "Series";
   const tint = useDominantColor(detail?.backdropUrl);
+  const trailerGate = useTrailerGate();
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  useArtworkAccent(`details:${route.key}`, route.leaving ? null : detail?.backdropUrl);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -212,6 +219,13 @@ export function DetailsPage({
                 ) : (
                   <div className="absolute inset-0 bg-surface" />
                 )}
+                <TrailerBackdrop
+                  url={trailer}
+                  active={top && !route.leaving && !showTrailer && trailerGate.pages}
+                  muted={trailerMuted}
+                  loop
+                  onPhase={setTrailerPhase}
+                />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
               <div
@@ -272,6 +286,13 @@ export function DetailsPage({
                   ) : null}
                 </div>
               </div>
+              {trailerPhase === "playing" ? (
+                <TrailerMuteButton
+                  muted={trailerMuted}
+                  onToggle={() => setTrailerMuted((v) => !v)}
+                  className="absolute right-page bottom-8"
+                />
+              ) : null}
             </section>
 
             <div
