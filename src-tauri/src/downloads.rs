@@ -25,6 +25,9 @@ const MAX_ITEMS: usize = 60;
 const MAX_ACTIVE: usize = 3;
 const EMIT_EVERY: Duration = Duration::from_millis(300);
 const MAX_NAME: usize = 120;
+/// A server that sends nothing for this long is stalled: the download fails instead of
+/// hanging forever (and holding one of the `MAX_ACTIVE` slots).
+const READ_TIMEOUT: Duration = Duration::from_secs(60);
 
 pub const DOWNLOADING: &str = "downloading";
 pub const DONE: &str = "done";
@@ -105,9 +108,11 @@ enum Outcome {
 
 impl Downloads {
     pub fn new() -> Self {
-        // No request timeout: a download legitimately takes hours. Only connecting is bounded.
+        // No request timeout: a download legitimately takes hours. Connecting and each
+        // read are bounded, so a stalled server ends the download instead of hanging it.
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(20))
+            .read_timeout(READ_TIMEOUT)
             .user_agent(format!("ejFlix/{}", env!("CARGO_PKG_VERSION")))
             .redirect(reqwest::redirect::Policy::limited(10))
             .build()
@@ -205,7 +210,18 @@ impl Downloads {
         let dir = downloads_dir(app);
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("No se pudo crear la carpeta de descargas: {e}"))?;
-        let name = unique_name(&dir, &target_name(&args.file_name, &args.title, &args.url));
+        let wanted = target_name(&args.file_name, &args.title, &args.url);
+        let cancel = Arc::new(AtomicBool::new(false));
+        // The name is picked and the entry added under one lock: a download whose task
+        // is still running holds its name even before its `.part` file exists on disk.
+        let mut items = self.items.lock().unwrap();
+        let mut cancels = self.cancels.lock().unwrap();
+        let busy: std::collections::HashSet<String> = items
+            .iter()
+            .filter(|i| cancels.contains_key(&i.id))
+            .map(|i| i.name.to_lowercase())
+            .collect();
+        let name = unique_name(&dir, &wanted, &busy);
         let path = dir.join(&name);
         let item = DownloadItem {
             id: uuid::Uuid::new_v4().to_string(),
@@ -220,13 +236,11 @@ impl Downloads {
             started_ms: crate::addons::now_ms(),
             updated_ms: crate::addons::now_ms(),
         };
-        let cancel = Arc::new(AtomicBool::new(false));
-        {
-            let mut items = self.items.lock().unwrap();
-            items.insert(0, item.clone());
-            items.truncate(MAX_ITEMS);
-            self.cancels.lock().unwrap().insert(item.id.clone(), cancel.clone());
-        }
+        items.insert(0, item.clone());
+        items.truncate(MAX_ITEMS);
+        cancels.insert(item.id.clone(), cancel.clone());
+        drop(cancels);
+        drop(items);
         self.emit(app);
         self.persist(app);
 
@@ -308,6 +322,10 @@ impl Downloads {
         let total = response.content_length().unwrap_or(0);
         if total > 0 {
             self.touch(app, id, |item| item.total = total);
+        }
+        // Canceled while waiting for the server: its name may already be someone else's.
+        if cancel.load(Ordering::SeqCst) {
+            return Ok(Outcome::Canceled);
         }
         let mut file = std::fs::File::create(&partial)
             .map_err(|e| format!("No se pudo crear el archivo: {e}"))?;
@@ -525,8 +543,10 @@ fn url_extension(url: &str) -> Option<String> {
 }
 
 /// `name`, `name (2)`, `name (3)`… until nothing on disk uses it.
-fn unique_name(dir: &Path, name: &str) -> String {
-    if !taken(dir, name) {
+/// `busy` holds the (lowercase) names of downloads still running.
+fn unique_name(dir: &Path, name: &str, busy: &std::collections::HashSet<String>) -> String {
+    let used = |candidate: &str| busy.contains(&candidate.to_lowercase()) || taken(dir, candidate);
+    if !used(name) {
         return name.to_string();
     }
     let (stem, ext) = match extension_of(name) {
@@ -535,7 +555,7 @@ fn unique_name(dir: &Path, name: &str) -> String {
     };
     for n in 2..100 {
         let candidate = format!("{stem} ({n}){ext}");
-        if !taken(dir, &candidate) {
+        if !used(&candidate) {
             return candidate;
         }
     }

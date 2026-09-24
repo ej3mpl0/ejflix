@@ -6,6 +6,9 @@ import type { Movie } from "../lib/types";
 
 export function OverlayApp() {
   const [movie, setMovie] = useState<Movie | null>(null);
+  // Lives here, not in the player: the window stays fullscreen across the next episode,
+  // which remounts the player. Closing the player leaves fullscreen (Rust side).
+  const [fullscreen, setFullscreen] = useState(false);
   const { reload } = useSettings();
 
   useEffect(() => {
@@ -25,6 +28,7 @@ export function OverlayApp() {
     const close = api.onPlayerClose(() => {
       seq += 1;
       setMovie(null);
+      setFullscreen(false);
     });
     return () => {
       void open.then((fn) => fn());
@@ -43,6 +47,8 @@ export function OverlayApp() {
       mode="overlay"
       onExit={() => void api.exitPlayer()}
       onError={() => void api.exitPlayer()}
+      fullscreen={fullscreen}
+      onFullscreenChange={setFullscreen}
     />
   );
 }

@@ -43,10 +43,13 @@ export function EpgGuide({
   const [open, setOpen] = useState<{ channel: Channel; programme: Programme } | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const hasCatchup = withGuide.some((c) => (c.catchupDays ?? 0) > 0);
-  // "Now" origin: the last half hour boundary before "now - 30 min". With catch-up the
-  // timeline starts a day earlier, but opens scrolled to the same place.
-  const liveOrigin = useMemo(() => Math.floor((Date.now() / 1000 - 1800) / 1800) * 1800, []);
-  const origin = hasCatchup ? liveOrigin - CATCHUP_HOURS * 3600 : liveOrigin;
+  // "Now" origin: the last half hour boundary before "now - 30 min". It follows the
+  // clock, so a guide left open does not watch "now" slide off its end. With catch-up the
+  // timeline starts a day before the first one (fixed, so the past does not shift while
+  // browsing it) and opens scrolled to "now".
+  const liveOrigin = Math.floor((now - 1800) / 1800) * 1800;
+  const firstOrigin = useMemo(() => Math.floor((Date.now() / 1000 - 1800) / 1800) * 1800, []);
+  const origin = hasCatchup ? firstOrigin - CATCHUP_HOURS * 3600 : liveOrigin;
   const end = liveOrigin + SPAN_HOURS * 3600;
   const x = (seconds: number) => ((seconds - origin) / 3600) * HOUR_PX;
 
@@ -55,9 +58,11 @@ export function EpgGuide({
     return () => window.clearInterval(handle);
   }, []);
 
+  // Opens on "now" (the catch-up day sits to the left, reached by scrolling back).
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollLeft = ((liveOrigin - origin) / 3600) * HOUR_PX;
-  }, [liveOrigin, origin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasCatchup]);
 
   // Fetch the guide of each channel once, a few at a time.
   useEffect(() => {

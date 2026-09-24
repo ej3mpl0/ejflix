@@ -224,9 +224,9 @@ export function AddonImport({ onImported }: { onImported?: (added: number) => vo
       {result ? (
         <p role="status" className="flex flex-wrap items-center gap-1.5 text-[13px] text-muted">
           {result.added ? <Check size={14} className="text-success" /> : null}
-          {t("importResult", { n: result.added })}
+          {result.added === 1 ? t("importResultOne") : t("importResult", { n: result.added })}
           {result.failed.length ? (
-            <span className="text-danger">· {t("importFailed", { n: result.failed.length })}</span>
+            <span className="text-danger">· {result.failed.length === 1 ? t("importFailedOne") : t("importFailed", { n: result.failed.length })}</span>
           ) : null}
         </p>
       ) : null}

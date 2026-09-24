@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Welcome } from "./screens/Welcome";
 import { Login } from "./screens/Login";
 import { Profiles } from "./screens/Profiles";
@@ -29,12 +29,20 @@ type Gate = "welcome" | "login" | "profiles" | "create";
 /** What stands between a fresh session and Home: the account offer, or its second factor. */
 type AccountGate = "checking" | "none" | "intro" | "mfa";
 
-/** First-run setup (torrents, addon import) of a profile that has not been through it. */
-function SetupGate() {
+/**
+ * First-run setup (torrents, addon import) of a profile that has not been through it.
+ * `children` learns whether it is showing, so the screen behind can step out of reach.
+ */
+function SetupGate({ enabled, children }: { enabled: boolean; children: (showing: boolean) => ReactNode }) {
   const { settings, ready } = useSettings();
   const [closed, setClosed] = useState(false);
-  if (!ready || closed || settings.onboarding.setupDone) return null;
-  return <SetupStep onDone={() => setClosed(true)} />;
+  const showing = enabled && ready && !closed && !settings.onboarding.setupDone;
+  return (
+    <>
+      {showing ? <SetupStep onDone={() => setClosed(true)} /> : null}
+      {children(showing)}
+    </>
+  );
 }
 
 export default function App() {
@@ -210,25 +218,28 @@ function AppInner() {
                   onToast={toast}
                 />
               ) : null}
-              {accountGate === "none" ? <SetupGate /> : null}
               {/* Home stays mounted while playing so the view and scroll survive the trip. */}
-              <Home
-                session={session}
-                server={server}
-                version={version}
-                hidden={playing != null || accountGate !== "none"}
-                refreshToken={homeRefresh}
-                playFailed={playFailed}
-                onPlay={setPlaying}
-                onToast={toast}
-                onSessionChange={(next) => {
-                  setSession(next);
-                  void api.savedServer().then(setServer).catch(() => undefined);
-                  setHomeRefresh((n) => n + 1);
-                }}
-                onSwitchProfile={() => void switchProfile()}
-                onLogout={() => void logoutServer()}
-              />
+              <SetupGate enabled={accountGate === "none"}>
+                {(setupShowing) => (
+                  <Home
+                    session={session}
+                    server={server}
+                    version={version}
+                    hidden={playing != null || accountGate !== "none" || setupShowing}
+                    refreshToken={homeRefresh}
+                    playFailed={playFailed}
+                    onPlay={setPlaying}
+                    onToast={toast}
+                    onSessionChange={(next) => {
+                      setSession(next);
+                      void api.savedServer().then(setServer).catch(() => undefined);
+                      setHomeRefresh((n) => n + 1);
+                    }}
+                    onSwitchProfile={() => void switchProfile()}
+                    onLogout={() => void logoutServer()}
+                  />
+                )}
+              </SetupGate>
               {playing ? (
                 <Player
                   movie={playing}

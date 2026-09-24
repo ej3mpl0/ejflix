@@ -29,12 +29,15 @@ import { useUserData } from "../lib/userdata-context";
 export function ExternalDetailsPage({
   route,
   top,
+  refreshToken = 0,
   onBack,
   onOpen,
   onPlay,
 }: {
   route: DetailsRoute;
   top: boolean;
+  /** Bumped after playback: the remembered positions moved. */
+  refreshToken?: number;
   onBack: () => void;
   /** Opening another title from the "more like this" rail. */
   onOpen: (movie: Movie) => void;
@@ -72,6 +75,14 @@ export function ExternalDetailsPage({
       .catch((err) => {
         if (alive) setError(err instanceof Error ? err.message : String(err));
       });
+    return () => {
+      alive = false;
+    };
+  }, [ext?.type, ext?.metaId, reload]);
+
+  useEffect(() => {
+    if (!ext) return;
+    let alive = true;
     api
       .addonProgressList()
       .then((list) => {
@@ -81,7 +92,7 @@ export function ExternalDetailsPage({
     return () => {
       alive = false;
     };
-  }, [ext?.type, ext?.metaId, reload]);
+  }, [ext?.metaId, reload, refreshToken]);
 
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasons = useMemo(() => {
@@ -148,7 +159,9 @@ export function ExternalDetailsPage({
     );
   }
 
-  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric" });
+  // Addons send release dates as UTC midnight: read them in UTC, or west of Greenwich
+  // every episode would come out a day early.
+  const releaseFormat = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const releaseLabel = (iso: string) => {
     const date = new Date(iso);
     return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : releaseFormat.format(date);

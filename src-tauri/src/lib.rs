@@ -5,6 +5,7 @@ mod downloads;
 mod inflate;
 mod iptv;
 mod jellyfin;
+mod opensubs;
 mod player;
 mod profiles;
 mod protect;
@@ -38,6 +39,43 @@ pub fn store_path() -> std::path::PathBuf {
     match std::env::var("EJFLIX_DATA_DIR") {
         Ok(dir) if !dir.trim().is_empty() => std::path::PathBuf::from(dir).join("session.json"),
         _ => std::path::PathBuf::from("session.json"),
+    }
+}
+
+/// Guards `session.json` against a torn write (the store plugin overwrites it in place
+/// and, when it cannot parse it, starts empty and saves that over everything). Runs
+/// before anything opens the store: a file that reads is copied to `session.json.bak`;
+/// one that does not is set aside as `session.json.corrupt` and the backup put back.
+fn protect_store_file(app: &tauri::AppHandle) {
+    let Ok(path) = app.path().resolve(store_path(), tauri::path::BaseDirectory::AppData) else {
+        return;
+    };
+    let with_suffix = |suffix: &str| {
+        let mut name = path.clone().into_os_string();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    };
+    let (backup, corrupt) = (with_suffix(".bak"), with_suffix(".corrupt"));
+    let reads = |file: &std::path::Path| {
+        std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok())
+            .is_some()
+    };
+    if !path.exists() {
+        return;
+    }
+    if reads(&path) {
+        // Copy then rename, so the backup itself is never half written.
+        let tmp = with_suffix(".bak.tmp");
+        if std::fs::copy(&path, &tmp).is_ok() {
+            let _ = std::fs::rename(&tmp, &backup);
+        }
+        return;
+    }
+    let _ = std::fs::rename(&path, &corrupt);
+    if reads(&backup) {
+        let _ = std::fs::copy(&backup, &path);
     }
 }
 
@@ -809,15 +847,8 @@ async fn player_start(
     let playback = settings::load(&app, &session.user_id)
         .unwrap_or_default()
         .playback;
-    let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
-        remember_speed: playback.remember_speed,
-        last_speed: playback.last_speed,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
-    };
+    let mut prefs = PlaybackPrefs::from_settings(&playback);
+    apply_sync_offsets(&app, &state, &movie.id, &mut prefs).await;
     let start = args.start_seconds.unwrap_or(0.0);
     let play_session_id = Uuid::new_v4().to_string();
     // Version picker: play the requested media source when the item has it, else the first.
@@ -867,7 +898,14 @@ async fn player_stop(
     state: State<'_, AppState>,
     switching: Option<bool>,
 ) -> Result<(), String> {
+    let credits = state.player.credits_start();
     if let Some((ctx, time, duration)) = state.player.stop().await? {
+        let uid = settings_user(&app, &state).await;
+        let threshold = match &uid {
+            Some(uid) => settings::load(&app, uid).unwrap_or_default().playback.watched_threshold,
+            None => settings::Settings::default().playback.watched_threshold,
+        };
+        let watched = player::counts_as_watched(time, duration, threshold, credits);
         match ctx.source {
             PlaybackSource::Jellyfin {
                 item_id,
@@ -883,9 +921,36 @@ async fn player_stop(
                         seconds_to_ticks(time),
                     )
                     .await;
+                // The server only marks it played past its own resume limit; stopping in
+                // the credits or past the profile's threshold counts too.
+                if watched && state.jellyfin.set_played(&item_id, true).await.is_ok() {
+                    let _ = app.emit("player://watched", serde_json::json!({ "itemId": item_id }));
+                }
+            }
+            PlaybackSource::Addon { entry } if watched => {
+                if let Some(uid) = uid {
+                    let _ = addons::remove_progress(&app, &uid, &entry.key);
+                    let library = addons::LibraryEntry {
+                        key: entry.key.clone(),
+                        kind: entry.kind.clone(),
+                        meta_id: entry.meta_id.clone(),
+                        name: entry.name.clone(),
+                        series_name: entry.series_name.clone(),
+                        poster: entry.poster.clone(),
+                        background: entry.background.clone(),
+                        logo: entry.logo.clone(),
+                        season: entry.season,
+                        episode: entry.episode,
+                        imdb: entry.imdb.clone(),
+                        ..addons::LibraryEntry::default()
+                    };
+                    if addons::set_library_flags(&app, &uid, library, None, Some(true)).is_ok() {
+                        let _ = app.emit("player://watched", serde_json::json!({ "key": entry.key }));
+                    }
+                }
             }
             PlaybackSource::Addon { entry } => {
-                if let Some(uid) = settings_user(&app, &state).await {
+                if let Some(uid) = uid {
                     let _ = addons::upsert_progress(
                         &app,
                         &uid,
@@ -907,6 +972,7 @@ async fn player_stop(
     if switching.unwrap_or(false) {
         return Ok(());
     }
+    let _ = state.player.exit_mini(&app, false).await;
     hide_player_overlay(&app);
     if let Some(window) = app.get_webview_window("main") {
         set_main_fullscreen(&window, false)?;
@@ -1019,6 +1085,125 @@ async fn player_sub_add_text(state: State<'_, AppState>, name: String, content: 
     let path = dir.join(format!("{}.{ext}", Uuid::new_v4()));
     std::fs::write(&path, content).map_err(|e| e.to_string())?;
     state.player.sub_add(&path.to_string_lossy()).await
+}
+
+// ---- player extras: sync offsets, night mode, watched rule, mini player, OpenSubtitles ----
+
+/// The subtitle / audio delays remembered for a title, into the prefs of its start.
+async fn apply_sync_offsets(app: &tauri::AppHandle, state: &AppState, key: &str, prefs: &mut PlaybackPrefs) {
+    if let Some(uid) = settings_user(app, state).await {
+        if let Some(offset) = player::load_offset(app, &uid, key) {
+            prefs.sub_delay = offset.sub;
+            prefs.audio_delay = offset.audio;
+        }
+    }
+}
+
+/// Sets the subtitle ("sub") or audio delay and remembers both for the title playing.
+#[tauri::command]
+async fn player_set_delay(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    kind: String,
+    seconds: f64,
+) -> Result<f64, String> {
+    let value = state.player.set_delay(&kind, seconds).await?;
+    let key = state
+        .player
+        .context
+        .read()
+        .await
+        .as_ref()
+        .and_then(|ctx| ctx.source.title_key());
+    if let (Some(key), Some(uid)) = (key, settings_user(&app, &state).await) {
+        let snap = state.player.snapshot().await;
+        let _ = player::save_offset(&app, &uid, &key, snap.sub_delay, snap.audio_delay);
+    }
+    Ok(value)
+}
+
+#[tauri::command]
+async fn player_set_night(state: State<'_, AppState>, on: bool) -> Result<(), String> {
+    state.player.set_night(on).await
+}
+
+/// Where the credits of the file playing start (seconds), for the "watched" rule.
+#[tauri::command]
+fn player_set_credits(state: State<'_, AppState>, start: Option<f64>) {
+    state.player.set_credits_start(start);
+}
+
+/// Mini player on or off. Returns whether the window is fullscreen afterwards.
+#[tauri::command]
+async fn player_set_mini(app: tauri::AppHandle, state: State<'_, AppState>, on: bool) -> Result<bool, String> {
+    if on {
+        state.player.enter_mini(&app).await?;
+        Ok(false)
+    } else {
+        state.player.exit_mini(&app, true).await
+    }
+}
+
+/// Moves the mini player: the press happens on the overlay, but the main window (the
+/// video) is what moves; the overlay follows it.
+#[tauri::command]
+fn player_mini_drag(app: tauri::AppHandle) -> Result<(), String> {
+    let main = app
+        .get_webview_window("main")
+        .ok_or_else(|| "Ventana no disponible".to_string())?;
+    main.start_dragging().map_err(|e| e.to_string())
+}
+
+async fn opensubtitles_prefs(app: &tauri::AppHandle, state: &AppState) -> Result<(String, settings::Playback), String> {
+    let uid = settings_user(app, state)
+        .await
+        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+    let playback = settings::load(app, &uid).unwrap_or_default().playback;
+    if playback.opensubtitles_api_key.is_empty() {
+        return Err("Añade tu clave de API de OpenSubtitles en Ajustes › Reproducción".into());
+    }
+    Ok((uid, playback))
+}
+
+#[tauri::command]
+async fn opensubtitles_search(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    query: opensubs::SearchQuery,
+) -> Result<Vec<opensubs::SubtitleResult>, String> {
+    let (_, playback) = opensubtitles_prefs(&app, &state).await?;
+    opensubs::search(&playback.opensubtitles_api_key, &query).await
+}
+
+/// Downloads a search result and loads it into the player (selected).
+#[tauri::command]
+async fn opensubtitles_download(app: tauri::AppHandle, state: State<'_, AppState>, file_id: u64) -> Result<(), String> {
+    let (uid, playback) = opensubtitles_prefs(&app, &state).await?;
+    let password = opensubs::load_password(&app, &uid);
+    let login = match (playback.opensubtitles_user.as_str(), password.as_deref()) {
+        ("", _) | (_, None) => None,
+        (user, Some(password)) => Some((user, password)),
+    };
+    let path = opensubs::download(&playback.opensubtitles_api_key, login, file_id).await?;
+    state.player.sub_add(&path.to_string_lossy()).await
+}
+
+/// Whether an OpenSubtitles password is saved for the profile.
+#[tauri::command]
+async fn opensubtitles_has_password(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => opensubs::load_password(&app, &uid).is_some(),
+        None => false,
+    })
+}
+
+/// Saves the OpenSubtitles password (empty forgets it), encrypted and outside the synced settings.
+#[tauri::command]
+async fn opensubtitles_set_password(app: tauri::AppHandle, state: State<'_, AppState>, password: String) -> Result<(), String> {
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+    opensubs::save_password(&app, &uid, &password)
 }
 
 /// Peers, speed and progress of a torrent being opened or played.
@@ -1792,15 +1977,8 @@ async fn player_start_url(
         Some(uid) => settings::load(&app, &uid).unwrap_or_default().playback,
         None => settings::Settings::default().playback,
     };
-    let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
-        remember_speed: playback.remember_speed,
-        last_speed: playback.last_speed,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
-    };
+    let mut prefs = PlaybackPrefs::from_settings(&playback);
+    apply_sync_offsets(&app, &state, &args.entry.key, &mut prefs).await;
     let headers: Vec<(String, String)> = args
         .headers
         .into_iter()
@@ -2019,14 +2197,10 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
     let (url, headers) = iptv::stream_for(&source, &channel)?;
     let playback = settings::load(&app, &uid).unwrap_or_default().playback;
     let prefs = PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
         // Live TV always plays at normal speed.
         remember_speed: false,
         last_speed: 1.0,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
+        ..PlaybackPrefs::from_settings(&playback)
     };
     let now = addons::now_ms() / 1000;
     let epg = state.iptv.epg_now(std::slice::from_ref(&id), now).await;
@@ -2067,13 +2241,9 @@ async fn active_user(state: &AppState) -> Option<String> {
 fn live_prefs(app: &tauri::AppHandle, uid: &str) -> PlaybackPrefs {
     let playback = settings::load(app, uid).unwrap_or_default().playback;
     PlaybackPrefs {
-        audio_language: playback.audio_language,
-        subtitle_language: playback.subtitle_language,
         remember_speed: false,
         last_speed: 1.0,
-        sub_scale: playback.sub_scale,
-        sub_color: playback.sub_color.clone(),
-        sub_background: playback.sub_background.clone(),
+        ..PlaybackPrefs::from_settings(&playback)
     }
 }
 
@@ -2439,6 +2609,16 @@ pub fn run() {
             torrent_cache_clear,
             torrent_pause_all,
             addons_all,
+            // player
+            player_set_delay,
+            player_set_night,
+            player_set_credits,
+            player_set_mini,
+            player_mini_drag,
+            opensubtitles_search,
+            opensubtitles_download,
+            opensubtitles_has_password,
+            opensubtitles_set_password,
             // livetv
             iptv_reminders,
             iptv_reminder_set,
@@ -2450,6 +2630,7 @@ pub fn run() {
         .setup(|app| {
             let state = app.state::<AppState>();
             let handle = app.handle().clone();
+            protect_store_file(&handle);
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = create_player_overlay(&handle, &window) {
                     eprintln!("player overlay: {err}");

@@ -56,6 +56,16 @@ export function useSkipPrompt({
   const latest = useRef({ settings, nextEpisode, onSeekTo, onPlayNext, duration });
   latest.current = { settings, nextEpisode, onSeekTo, onPlayNext, duration };
 
+  // The player resets `ready` for every new item: segment keys (`kind:start`) repeat
+  // across episodes, so what was skipped or shown before must not carry over.
+  useEffect(() => {
+    if (ready) return;
+    activeKey.current = null;
+    autoSkipped.current.clear();
+    setHidden(false);
+    setPrompt(null);
+  }, [ready]);
+
   // Enter / leave detection with hysteresis.
   useEffect(() => {
     if (!ready || duration <= 0) return;

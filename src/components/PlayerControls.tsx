@@ -7,7 +7,9 @@ import {
   Lock,
   Maximize,
   Minimize,
+  Moon,
   Pause,
+  PictureInPicture2,
   Play,
   Ratio,
   RotateCcw,
@@ -105,6 +107,9 @@ export function PlayerControls({
   onPanel,
   onReveal,
   onHoldUi,
+  onNight,
+  onMini,
+  onSearchSubs,
 }: {
   movie: Movie;
   /** Movie with trickplay/chapter detail for the timeline (may be a fuller copy). */
@@ -140,6 +145,12 @@ export function PlayerControls({
   onPanel: () => void;
   onReveal: () => void;
   onHoldUi: (hold: boolean) => void;
+  /** Night mode (dynamic range compression) on/off. */
+  onNight: () => void;
+  /** Into the always-on-top mini player. */
+  onMini: () => void;
+  /** Opens the OpenSubtitles search. */
+  onSearchSubs: () => void;
 }) {
   const { t, locale } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
@@ -150,6 +161,18 @@ export function PlayerControls({
     remaining && state.duration > 0
       ? `-${formatClock(Math.max(0, state.duration - shownTime))}`
       : `${formatClock(shownTime)} / ${formatClock(state.duration)}`;
+
+  // Only the bars hold the controls on screen; the layer between them is the video.
+  const holdHandlers = {
+    onMouseEnter: () => {
+      overChrome.current = true;
+      onHoldUi(true);
+    },
+    onMouseLeave: () => {
+      overChrome.current = false;
+      onHoldUi(false);
+    },
+  };
 
   const toggleMenu = (next: Exclude<PlayerMenu, null>) => onMenu(menu === next ? null : next);
   const isEpisode = isSeriesEpisode(movie);
@@ -188,22 +211,18 @@ export function PlayerControls({
         style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? "auto" : "none" }}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.target === e.currentTarget && menu) onMenu(null);
+          // The empty area is the video: close what is open, else play / pause.
+          if (e.target === e.currentTarget) onVideoClick();
         }}
-        onDoubleClick={(e) => e.stopPropagation()}
-        onMouseEnter={() => {
-          overChrome.current = true;
-          onHoldUi(true);
-        }}
-        onMouseLeave={() => {
-          overChrome.current = false;
-          onHoldUi(false);
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (e.target === e.currentTarget) onVideoDoubleClick();
         }}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[160px] bg-gradient-to-b from-black/80 via-black/40 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[280px] bg-gradient-to-t from-black via-black/70 to-transparent" />
 
-        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4">
+        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4" {...holdHandlers}>
           <button
             type="button"
             className="icon-hit grid h-10 w-10 place-items-center text-white"
@@ -238,6 +257,15 @@ export function PlayerControls({
             >
               <Lock size={19} />
             </button>
+            <button
+              type="button"
+              className="icon-hit grid h-10 w-10 place-items-center text-white/85"
+              onClick={onMini}
+              aria-label={t("miniPlayer")}
+              title={`${t("miniPlayer")} (P)`}
+            >
+              <PictureInPicture2 size={19} />
+            </button>
             {showPanelChip ? (
               <button
                 type="button"
@@ -256,7 +284,7 @@ export function PlayerControls({
           </div>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-6 pb-4">
+        <div className="absolute inset-x-0 bottom-0 px-6 pb-4" {...holdHandlers}>
           {live ? (
             live.now ? (
               <div className="mb-2 px-1">
@@ -428,7 +456,16 @@ export function PlayerControls({
                 {menu === "sub" ? (
                   <TrackMenu
                     kind="sub"
-                    footer={<SubtitleTools delay={delays.sub} onDelay={(value) => onDelay("sub", value)} />}
+                    footer={
+                      <SubtitleTools
+                        delay={delays.sub}
+                        onDelay={(value) => onDelay("sub", value)}
+                        onSearchOnline={() => {
+                          onMenu(null);
+                          onSearchSubs();
+                        }}
+                      />
+                    }
                     tracks={state.tracks}
                     onSelect={(kind, id) => {
                       onTrack(kind, id);
@@ -462,6 +499,13 @@ export function PlayerControls({
                   />
                 ) : null}
               </div>
+              <ControlChip
+                icon={<Moon size={16} />}
+                label={t("nightMode")}
+                ariaLabel={`${t("nightMode")} (D)`}
+                active={state.night}
+                onClick={onNight}
+              />
               {showPanelChip ? (
                 <ControlChip
                   icon={live ? <Tv size={16} /> : <ListVideo size={16} />}

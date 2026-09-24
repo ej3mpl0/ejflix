@@ -75,6 +75,8 @@ export function Discover({
   const [loading, setLoading] = useState(true);
   const [more, setMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  const loadingRef = useRef(loading);
+  loadingRef.current = loading;
   const request = useRef(0);
   const page = useRef(0);
   const onErrorRef = useRef(onError);
@@ -84,8 +86,11 @@ export function Discover({
   const catalogDone = useRef<Record<string, boolean>>({});
 
   const hasAddons = (addons?.length ?? 0) > 0;
-  const useServer = hasServer && source !== "online";
-  const useOnline = hasAddons && source !== "server";
+  // The source switch only shows with both sources; without it (another profile, the
+  // server unlinked) a remembered "server"/"online" would leave nothing to browse.
+  const activeSource: Source = hasServer && hasAddons ? source : "all";
+  const useServer = hasServer && activeSource !== "online";
+  const useOnline = hasAddons && activeSource !== "server";
 
   useEffect(() => {
     let alive = true;
@@ -168,6 +173,8 @@ export function Discover({
 
   const fetchPage = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of new filters loads would land on the old list.
+      if (!first && loadingRef.current) return;
       const id = ++request.current;
       if (first) {
         page.current = 0;
@@ -185,10 +192,12 @@ export function Discover({
           api
             .browseItems({ type: kind, genre, year, sort, start: current * SERVER_PAGE, limit: SERVER_PAGE })
             .then((list) => {
-              if (list.length < SERVER_PAGE) serverDone.current = true;
+              // A superseded request must not touch the paging state of the current one.
+              if (id === request.current && list.length < SERVER_PAGE) serverDone.current = true;
               return list;
             })
             .catch((err) => {
+              if (id !== request.current) return [];
               serverDone.current = true;
               onErrorRef.current(err instanceof Error ? err.message : String(err));
               return [];
@@ -204,12 +213,13 @@ export function Discover({
         return api
           .addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, genre: matched, skip: catalogSkip.current[key] ?? 0 })
           .then((metas) => {
+            if (id !== request.current) return [];
             catalogSkip.current[key] = (catalogSkip.current[key] ?? 0) + metas.length;
             if (!metas.length) catalogDone.current[key] = true;
             return metas.filter((m) => year == null || m.year === year).map(metaToMovie);
           })
           .catch(() => {
-            catalogDone.current[key] = true;
+            if (id === request.current) catalogDone.current[key] = true;
             return [];
           });
       });
@@ -363,7 +373,7 @@ export function Discover({
             ))}
           </div>
           {more ? (
-            <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
+            <LoadMoreButton loading={loading || loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (
