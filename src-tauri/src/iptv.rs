@@ -397,7 +397,7 @@ fn save_sources(app: &tauri::AppHandle, user_id: &str, list: &[IptvSource]) -> R
         sources_key(user_id),
         serde_json::to_value(list).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
@@ -413,7 +413,7 @@ fn load_ids(app: &tauri::AppHandle, key: &str) -> Vec<String> {
 fn save_ids(app: &tauri::AppHandle, key: &str, ids: &[String]) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(key, serde_json::to_value(ids).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 pub fn favorites(app: &tauri::AppHandle, user_id: &str) -> Vec<String> {
@@ -494,7 +494,7 @@ fn load_reminders(app: &tauri::AppHandle, user_id: &str) -> Vec<Reminder> {
 fn save_reminders(app: &tauri::AppHandle, user_id: &str, list: &[Reminder]) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(reminders_key(user_id), serde_json::to_value(list).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 /// Pending reminders of a profile, soonest first. Programmes that started a while ago
@@ -684,7 +684,7 @@ pub fn delete_profile_data(app: &tauri::AppHandle, user_id: &str) {
         store.delete(favorites_key(user_id));
         store.delete(recent_key(user_id));
         store.delete(reminders_key(user_id));
-        let _ = store.save();
+        let _ = crate::save_store(&store);
     }
 }
 

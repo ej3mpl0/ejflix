@@ -120,7 +120,7 @@ fn load(app: &tauri::AppHandle) -> Stored {
 fn save(app: &tauri::AppHandle, stored: &Stored) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set(STORE_KEY, serde_json::to_value(stored).map_err(|e| e.to_string())?);
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn valid_pin(pin: &str) -> bool {

@@ -46,8 +46,9 @@ pub fn store_path() -> std::path::PathBuf {
     }
 }
 
-/// Guards `session.json` against a torn write (the store plugin overwrites it in place
-/// and, when it cannot parse it, starts empty and saves that over everything). Runs
+/// Guards `session.json` against a torn write (saves are atomic now, see `save_store`, so
+/// this is the second line of defence: when the plugin cannot parse the file it starts
+/// empty and the next save would put that over everything). Runs
 /// before anything opens the store: a file that reads is copied to `session.json.bak`;
 /// one that does not is set aside as `session.json.corrupt` and the backup put back.
 fn protect_store_file(app: &tauri::AppHandle) {
@@ -80,6 +81,74 @@ fn protect_store_file(app: &tauri::AppHandle) {
     let _ = std::fs::rename(&path, &corrupt);
     if reads(&backup) {
         let _ = std::fs::copy(&backup, &path);
+    }
+}
+
+/// Absolute path of `session.json`, resolved once in setup for `save_store`.
+static STORE_FILE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+/// Serializes snapshot + write, so two saves never interleave on the temp file and a
+/// later snapshot can never be overwritten by an earlier one.
+static STORE_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serializer given to the store plugin itself. The plugin writes with a plain in-place
+/// `fs::write` (a crash mid-write tears the file) and also saves every store on exit, so
+/// it is refused here: nothing reaches disk except through `save_store`.
+fn refuse_plugin_save(
+    _: &std::collections::HashMap<String, serde_json::Value>,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    Err("session.json is saved through crate::save_store".into())
+}
+
+/// Opens the one store instance the whole app shares. The plugin caches stores by path,
+/// so building it here first (with auto-save off and plugin saves refused) makes every
+/// later `app.store(store_path())` return this same instance.
+fn open_store(app: &tauri::AppHandle) -> Result<(), String> {
+    let path = app
+        .path()
+        .resolve(store_path(), tauri::path::BaseDirectory::AppData)
+        .map_err(|e| e.to_string())?;
+    let _ = STORE_FILE.set(path);
+    tauri_plugin_store::StoreBuilder::new(app, store_path())
+        .disable_auto_save()
+        .serialize(refuse_plugin_save)
+        .build()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+/// Writes the store to `session.json` atomically: the entries go to `session.json.tmp`,
+/// which is flushed to disk and then renamed over the real file (on Windows `rename`
+/// replaces the target in one step), so a crash leaves either the old or the new file,
+/// never a torn one. Every save in the app goes through here.
+pub fn save_store<R: tauri::Runtime>(store: &tauri_plugin_store::Store<R>) -> Result<(), String> {
+    use std::io::Write;
+    let path = STORE_FILE.get().ok_or("store not opened")?;
+    let _guard = STORE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    let entries: serde_json::Map<String, serde_json::Value> = store.entries().into_iter().collect();
+    let bytes = serde_json::to_vec_pretty(&entries).map_err(|e| e.to_string())?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let mut tmp_name = path.clone().into_os_string();
+    tmp_name.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp_name);
+    {
+        let mut file = std::fs::File::create(&tmp).map_err(|e| e.to_string())?;
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+    }
+    // An antivirus or indexer briefly holding the file makes the replace fail with
+    // "access denied"; a couple of short retries ride that out.
+    let mut attempt = 0;
+    loop {
+        match std::fs::rename(&tmp, path) {
+            Ok(()) => return Ok(()),
+            Err(_) if attempt < 3 => {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(40));
+            }
+            Err(e) => return Err(e.to_string()),
+        }
     }
 }
 
@@ -1322,7 +1391,7 @@ fn update_prefs(app: tauri::AppHandle) -> Result<update::UpdatePrefs, String> {
 fn update_set_auto(app: tauri::AppHandle, auto: bool) -> Result<update::UpdatePrefs, String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("updateAuto", serde_json::Value::Bool(auto));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     load_update_prefs(&app)
 }
 
@@ -1334,7 +1403,7 @@ fn update_skip(app: tauri::AppHandle, version: String) -> Result<update::UpdateP
         .map(|(a, b, c)| format!("{a}.{b}.{c}"))
         .unwrap_or_default();
     store.set("updateSkipped", serde_json::Value::String(clean));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     load_update_prefs(&app)
 }
 
@@ -1410,7 +1479,7 @@ fn save_session_at(app: &tauri::AppHandle, key: &str, session: &Session) -> Resu
             "blob": protect::to_hex(&sealed),
         }),
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1445,7 +1514,7 @@ fn clear_session(app: &tauri::AppHandle) -> Result<(), String> {
 fn clear_session_at(app: &tauri::AppHandle, key: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete(key);
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1455,7 +1524,7 @@ fn save_server(app: &tauri::AppHandle, url: &str, name: &str) -> Result<(), Stri
     if !name.is_empty() {
         store.set("serverName", serde_json::Value::String(name.to_string()));
     }
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1482,7 +1551,7 @@ fn clear_server(app: &tauri::AppHandle) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("serverUrl");
     store.delete("serverName");
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1506,14 +1575,14 @@ fn upsert_profile(app: &tauri::AppHandle, profile: PublicUser) -> Result<(), Str
         "profiles",
         serde_json::to_value(&profiles).map_err(|e| e.to_string())?,
     );
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
 fn clear_profiles(app: &tauri::AppHandle) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.delete("profiles");
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1565,7 +1634,7 @@ fn load_device_id(app: &tauri::AppHandle) -> Option<String> {
 fn save_device_id(app: &tauri::AppHandle, id: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("deviceId", serde_json::Value::String(id.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -1588,14 +1657,14 @@ fn load_locale(app: &tauri::AppHandle) -> Result<String, String> {
 fn save_locale(app: &tauri::AppHandle, locale: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("locale", serde_json::Value::String(locale.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
 fn save_last_seen_version(app: &tauri::AppHandle, version: &str) -> Result<(), String> {
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
     store.set("lastSeenVersion", serde_json::Value::String(version.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(())
 }
 
@@ -2831,6 +2900,9 @@ pub fn run() {
             let state = app.state::<AppState>();
             let handle = app.handle().clone();
             protect_store_file(&handle);
+            if let Err(err) = open_store(&handle) {
+                eprintln!("store: {err}");
+            }
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = create_player_overlay(&handle, &window) {
                     eprintln!("player overlay: {err}");

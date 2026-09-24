@@ -159,7 +159,7 @@ impl Downloads {
         };
         if let Ok(value) = serde_json::to_value(self.list()) {
             store.set(STORE_KEY, value);
-            let _ = store.save();
+            let _ = crate::save_store(&store);
         }
     }
 

@@ -1382,7 +1382,7 @@ pub fn save_offset(app: &AppHandle, user_id: &str, key: &str, sub: f64, audio: f
         }
     }
     store.set(offsets_key(user_id), Value::Object(map));
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 fn parse_track_id(data: Option<&Value>) -> i64 {
