@@ -3,7 +3,7 @@ import { useI18n } from "../lib/locale-context";
 /** What's new in this version (shown by the update modal and in Settings › Account). */
 export function ReleaseNotes({ className }: { className?: string }) {
   const { t } = useI18n();
-  const notes = [t("note18"), t("note17"), t("note16"), t("note15"), t("note14"), t("note13"), t("note12"), t("note11"), t("note10"), t("note9"), t("note8"), t("note7"), t("note6"), t("note5"), t("note4"), t("note3"), t("note2"), t("note1")];
+  const notes = [t("note19"), t("note18"), t("note17"), t("note16"), t("note15"), t("note14"), t("note13"), t("note12"), t("note11"), t("note10"), t("note9"), t("note8"), t("note7"), t("note6"), t("note5"), t("note4"), t("note3"), t("note2"), t("note1")];
   return (
     <ul className={className ?? "space-y-2.5 text-[15px] leading-[1.6] text-muted"}>
       {notes.map((note) => (
