@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { HeroCarousel } from "./HeroCarousel";
 import { PosterRow } from "./PosterRow";
 import { AddonRows } from "./AddonRows";
+import { CustomListRows, NewEpisodesRow, RecommendationRows } from "./DiscoveryRows";
 import type { HomeData, Movie } from "../lib/types";
 import { useI18n } from "../lib/locale-context";
 
@@ -14,6 +15,7 @@ export function Feed({
   onlineResume = [],
   showAddons = false,
   empty = null,
+  personal = null,
   onOpen,
   onPlay,
 }: {
@@ -30,6 +32,8 @@ export function Feed({
   showAddons?: boolean;
   /** Shown under the (absent) hero when there is nothing at all to list. */
   empty?: ReactNode;
+  /** Profile rows (main Home only): new episodes, custom lists, recommendations. */
+  personal?: { userId: string; hasServer: boolean } | null;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
@@ -70,10 +74,13 @@ export function Feed({
         {nextUp.length ? (
           <PosterRow title={t("nextUp")} items={nextUp} variant="nextUp" onOpen={onOpen} onPlay={onPlay} />
         ) : null}
+        {personal ? <NewEpisodesRow {...personal} onOpen={onOpen} onPlay={onPlay} /> : null}
         {myList.length ? <PosterRow title={t("myList")} items={myList} onOpen={onOpen} onPlay={onPlay} /> : null}
+        {personal ? <CustomListRows {...personal} onOpen={onOpen} onPlay={onPlay} /> : null}
         {data.latest.length ? (
           <PosterRow title={t("recentlyAdded")} items={data.latest} onOpen={onOpen} onPlay={onPlay} />
         ) : null}
+        {personal ? <RecommendationRows {...personal} onOpen={onOpen} onPlay={onPlay} /> : null}
         {showAddons ? <AddonRows onOpen={onOpen} onPlay={onPlay} empty={hero.length ? null : empty} /> : null}
         {data.genres.map((row) => (
           <PosterRow key={row.id} title={row.name} items={row.items} onOpen={onOpen} onPlay={onPlay} />

@@ -12,6 +12,7 @@ import { api } from "./api";
 import { libraryEntryOf, libraryToMovie } from "./addons";
 import type { LibraryEntry, Movie } from "./types";
 import { useI18n } from "./locale-context";
+import { CustomListsProvider } from "./lists-context";
 
 export type ItemFlags = {
   favorite: boolean;
@@ -217,7 +218,14 @@ export function UserDataProvider({
     [overrides, pendingIds, version, setFavorite, setPlayed, removeProgress, library],
   );
 
-  return <UserDataContext.Provider value={value}>{children}</UserDataContext.Provider>;
+  // Custom lists live next to My list: same profile, same lifetime.
+  return (
+    <UserDataContext.Provider value={value}>
+      <CustomListsProvider version={version} onError={onError}>
+        {children}
+      </CustomListsProvider>
+    </UserDataContext.Provider>
+  );
 }
 
 export function useUserData(): UserDataContextValue {

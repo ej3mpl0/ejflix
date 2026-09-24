@@ -15,8 +15,8 @@ export function ContinueCard({
   movie: Movie;
   onPlay: (movie: Movie) => void;
   onOpen: (movie: Movie) => void;
-  /** "nextUp" items get a badge instead of a progress bar. */
-  variant?: "resume" | "nextUp";
+  /** "nextUp" items get a badge instead of a progress bar; "new" ones (just aired) a "New" badge. */
+  variant?: "resume" | "nextUp" | "new";
 }) {
   const { t } = useI18n();
   const flags = useItemFlags(movie);
@@ -47,6 +47,11 @@ export function ContinueCard({
             <div className="grid h-full place-items-center px-3 text-center text-sm text-muted">{title}</div>
           )}
         </button>
+        {variant === "new" && !started ? (
+          <span className="pointer-events-none absolute top-2 left-2 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+            {t("newBadge")}
+          </span>
+        ) : null}
         {variant === "nextUp" && !started ? (
           <span className="pointer-events-none absolute top-2 left-2 rounded-[4px] bg-black/70 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase backdrop-blur-sm">
             {t("nextUpBadge")}

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Clock,
+  CalendarDays,
   Command,
   Compass,
   Film,
@@ -229,6 +230,7 @@ export function CommandPalette({
       go("home", t("home"), <HomeIcon size={16} />, "inicio home"),
       go("discover", t("discover"), <Compass size={16} />, "descubrir discover explore"),
       go("mylist", t("myList"), <Heart size={16} />, "mi lista my list favoritos favorites"),
+      go("calendar", t("calendar"), <CalendarDays size={16} />, "calendario calendar estrenos upcoming episodios episodes"),
       ...(hasTv ? [go("tv", t("liveTv"), <Tv size={16} />, "tv iptv canales channels directo live")] : []),
       ...(hasServer ? [go("myserver", t("myServer"), <Film size={16} />, "jellyfin servidor server")] : []),
       go("settings", t("settings"), <SettingsIcon size={16} />, "ajustes settings preferencias"),

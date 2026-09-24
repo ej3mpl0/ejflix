@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 
-use crate::{addons, iptv, profiles, protect, settings, AppState};
+use crate::{addons, iptv, lists, profiles, protect, settings, AppState};
 
 /// Public project values (row level security protects every table). Override at build
 /// time with EJFLIX_SUPABASE_URL / EJFLIX_SUPABASE_ANON_KEY / EJFLIX_SITE_URL.
@@ -1365,7 +1365,11 @@ async fn build_doc(
         "lists" => {
             let mut list = addons::load_library(app, uid);
             list.sort_by(|a, b| a.key.cmp(&b.key));
-            json!({ "kind": "lists", "items": list })
+            // Custom lists ride in the same document, after the saved titles, so a
+            // profile without any keeps exactly the document it always had.
+            let mut items: Vec<Value> = list.iter().filter_map(|e| serde_json::to_value(e).ok()).collect();
+            items.extend(lists::to_sync_items(&lists::load(app, uid)));
+            json!({ "kind": "lists", "items": items })
         }
         "progress" => {
             let mut items = serde_json::Map::new();
@@ -1473,11 +1477,14 @@ async fn apply_doc(
         }
         "lists" => {
             // Entry by entry: one the app cannot read must not empty the list.
-            let list: Vec<addons::LibraryEntry> = items_array(doc)
-                .into_iter()
-                .filter_map(|v| serde_json::from_value(v).ok())
+            let items = items_array(doc);
+            let list: Vec<addons::LibraryEntry> = items
+                .iter()
+                .filter(|v| !lists::is_sync_item(v))
+                .filter_map(|v| serde_json::from_value(v.clone()).ok())
                 .collect();
             addons::replace_library(app, uid, list)?;
+            lists::save(app, uid, lists::from_sync_items(&items))?;
         }
         "progress" => {
             let list: Vec<addons::ResumeEntry> = items_object(doc)
@@ -1582,6 +1589,17 @@ mod tests {
         assert_eq!(keys(&merged), vec!["a", "c", "b"]);
         let a = &doc_items(&merged)[0].1;
         assert_eq!(a["watched"], json!(true));
+    }
+
+    #[test]
+    fn custom_lists_merge_next_to_the_saved_titles() {
+        let custom = json!({ "id": "customList:x", "customList": true, "name": "Finde", "items": [], "updatedMs": 7 });
+        // A PC on an older version keeps the list it cannot read.
+        let server = list(vec![entry("a", false, 10), custom.clone()]);
+        let old_local = list(vec![entry("a", true, 20)]);
+        let merged = merge_docs("lists", &server, &old_local, Some(&base_of("lists", &old_local)));
+        assert_eq!(keys(&merged), vec!["a", "customList:x"]);
+        assert_eq!(lists::from_sync_items(&items_array(&merged))[0].name, "Finde");
     }
 
     #[test]

@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Compass, Download, Puzzle, RotateCcw, WifiOff } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Download, Puzzle, RotateCcw, WifiOff } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
-import { PosterCard } from "../components/PosterCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { Settings, type SettingsSectionId } from "./Settings";
 import { SearchPage } from "./SearchPage";
@@ -40,6 +39,9 @@ import { TrailerGate } from "../lib/trailer-autoplay";
 import { useAutoAccent } from "../lib/auto-accent";
 import { useSpatialNavigation } from "../lib/spatial-nav";
 import { requestSettingsIntent } from "../lib/settings-intent";
+import { CalendarPage } from "./CalendarPage";
+import { MyListPage } from "./MyListPage";
+import { useCalendar } from "../lib/calendar";
 
 const PAGE_EXIT_MS = 250;
 
@@ -119,6 +121,8 @@ export function Home({
   /** Ctrl+K command palette and the "?" shortcuts sheet. */
   const [palette, setPalette] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
+  /** Episodes aired since the calendar was last opened: a counter on its tab. */
+  const { fresh: newEpisodes } = useCalendar(hasServer, session.userId);
 
   // The player could not start: put the user back in front of the other sources.
   useEffect(() => {
@@ -478,32 +482,6 @@ export function Home({
     </div>
   );
 
-  const grid = (
-    title: string,
-    items: Movie[],
-    empty?: { text: string; hint: string; icon?: ReactNode; action?: { label: string; onClick: () => void; icon?: ReactNode } },
-  ) => (
-    <div className="page-enter px-page pt-24 pb-16">
-      <h2 className="mb-6 text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
-      {items.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
-          {items.map((movie, i) => (
-            <PosterCard
-              key={movie.id}
-              movie={movie}
-              onOpen={openDetails}
-              onPlay={play}
-              layout="grid"
-              delay={i * 20}
-            />
-          ))}
-        </div>
-      ) : empty ? (
-        <EmptyState title={empty.text} hint={empty.hint} icon={empty.icon} action={empty.action} />
-      ) : null}
-    </div>
-  );
-
   // Nothing at all to show (online profile without addons): point at Settings › Addons.
   const noAddons = (
     <div className="px-page pt-16">
@@ -543,6 +521,7 @@ export function Home({
         mode={session.mode}
         hasServer={hasServer}
         hasTv={tvSources.length > 0}
+        badges={{ calendar: newEpisodes.length }}
         view={view}
         onView={openView}
         libraries={pinned}
@@ -610,6 +589,8 @@ export function Home({
           />
         ) : view === "discover" ? (
           <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} onImportAddons={importAddons} />
+        ) : view === "calendar" ? (
+          <CalendarPage userId={session.userId} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (
@@ -625,12 +606,7 @@ export function Home({
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
-          grid(t("myList"), myList, {
-            text: t("emptyList"),
-            hint: t("emptyListHint"),
-            icon: <Compass size={26} />,
-            action: { label: t("exploreAction"), icon: <Compass size={16} />, onClick: () => openView("discover") },
-          })
+          <MyListPage items={myList} hasServer={hasServer} onOpen={openDetails} onPlay={play} onExplore={() => openView("discover")} />
         ) : view === "myserver" && data ? (
           <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
@@ -656,6 +632,7 @@ export function Home({
             myList={favorites ?? []}
             onlineResume={onlineResume}
             showAddons
+            personal={{ userId: session.userId, hasServer }}
             empty={noAddons}
             onOpen={openDetails}
             onPlay={play}

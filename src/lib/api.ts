@@ -45,6 +45,11 @@ import type {
   Session,
   Settings,
   SettingsPatch,
+  CalendarData,
+  CustomList,
+  ListItem,
+  Person,
+  RecommendationRow,
 } from "./types";
 
 export const api = {
@@ -277,4 +282,22 @@ export const api = {
   opensubtitlesDownload: (fileId: number) => invoke<void>("opensubtitles_download", { fileId }),
   opensubtitlesHasPassword: () => invoke<boolean>("opensubtitles_has_password"),
   opensubtitlesSetPassword: (password: string) => invoke<void>("opensubtitles_set_password", { password }),
+  // Discovery: custom lists, calendar, shuffle, recommendations
+  customListsGet: () => invoke<CustomList[]>("custom_lists_get"),
+  customListCreate: (name: string) => invoke<CustomList[]>("custom_list_create", { name }),
+  customListRename: (id: string, name: string) => invoke<CustomList[]>("custom_list_rename", { id, name }),
+  customListDelete: (id: string) => invoke<CustomList[]>("custom_list_delete", { id }),
+  /** Adds (`on`) or removes one title; returns every list. */
+  customListSetItem: (id: string, item: Omit<ListItem, "addedMs">, on: boolean) =>
+    invoke<CustomList[]>("custom_list_set_item", { id, item: { ...item, addedMs: 0 }, on }),
+  /** When the calendar was last opened (ms); 0 before the first time. */
+  calendarSeenGet: () => invoke<number>("calendar_seen_get"),
+  calendarSeenSet: (ms: number) => invoke<void>("calendar_seen_set", { ms }),
+  getItemsByIds: (ids: string[]) => invoke<Movie[]>("get_items_by_ids", { ids }),
+  /** A random episode of the series (unwatched first), none of `exclude`. */
+  getRandomEpisode: (seriesId: string, exclude: string[] = []) =>
+    invoke<Movie | null>("get_random_episode", { seriesId, exclude }),
+  getCalendar: (daysBack: number) => invoke<CalendarData>("get_calendar", { daysBack }),
+  getRecommendations: () => invoke<RecommendationRow[]>("get_recommendations"),
+  searchPeople: (query: string) => invoke<Person[]>("search_people", { query }),
 };
