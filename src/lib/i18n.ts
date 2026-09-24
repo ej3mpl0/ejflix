@@ -685,6 +685,7 @@ const es = {
   seekStepTitle: "Saltos",
   seekStep: "Salto con flechas y botones",
   seekStepHint: "Cuánto avanzan o retroceden las flechas y los botones del reproductor.",
+  note19: "La versión más grande hasta ahora: ver en grupo con amigos (código para unirse, sincronización, chat y reacciones); minirreproductor siempre encima; listas personalizadas; calendario de estrenos y aviso de episodios nuevos; reproducir todo y aleatorio; control parental por perfil; Trakt; subtítulos de OpenSubtitles; retraso de audio y subtítulos guardado por título; modo noche; recordatorios, catch-up y multi-view en TV en directo; tráileres automáticos, tarjeta al pasar el ratón, paleta de comandos (Ctrl+K) y navegación con mando. Y un repaso a fondo con decenas de errores corregidos.",
   note18: "Subtítulos a tu gusto: tamaño, color, fondo y retraso, y carga de archivos .srt; estadísticas técnicas (tecla I); tráileres; reparto que abre su filmografía; «Ver todo» en cada fila; vista previa al pasar el ratón; guía de programación en rejilla en TV en directo; buscador y nueva organización de Ajustes; y al fallar una fuente, reintentar u otra fuente sin salir. La pantalla de conexión de los torrents muestra peers y velocidad.",
   // --- profiles & integrations ---
   parentalTitle: "Control parental",
@@ -1734,6 +1735,7 @@ const en: typeof es = {
   seekStepTitle: "Seeking",
   seekStep: "Arrow and button jump",
   seekStepHint: "How far the arrows and the player buttons jump.",
+  note19: "The biggest release yet: watch together with friends (join code, sync, chat and reactions); an always-on-top mini player; custom lists; an upcoming episodes calendar with new-episode alerts; play all and shuffle; per-profile parental controls; Trakt; subtitles from OpenSubtitles; audio and subtitle delay saved per title; night mode; reminders, catch-up and multi-view in Live TV; autoplaying trailers, a hover card, a command palette (Ctrl+K) and gamepad navigation. Plus a thorough pass with dozens of bugs fixed.",
   note18: "Subtitles your way: size, colour, background and delay, plus loading .srt files; technical stats (I key); trailers; cast that opens their filmography; See all on every row; a hover preview; a programme guide grid in Live TV; a search box and a new layout in Settings; and when a source fails, retry or another source without leaving. The torrent loading screen shows peers and speed.",
   // --- profiles & integrations ---
   parentalTitle: "Parental controls",

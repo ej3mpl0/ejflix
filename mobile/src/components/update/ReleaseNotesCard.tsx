@@ -8,7 +8,7 @@ import { useI18n } from "../../lib/locale-context";
 export function ReleaseNotesCard({ style, size = 15 }: { style?: StyleProp<ViewStyle>; size?: number }) {
   const s = useStyles();
   const { t } = useI18n();
-  const notes = [t("note9"), t("note8"), t("note7"), t("note6"), t("note5"), t("note4"), t("note3"), t("note2"), t("note1")];
+  const notes = [t("note10"), t("note9"), t("note8"), t("note7"), t("note6"), t("note5"), t("note4"), t("note3"), t("note2"), t("note1")];
   return (
     <View style={[s.list, style]}>
       {notes.map((note) => (
