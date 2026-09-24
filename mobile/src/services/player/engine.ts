@@ -34,6 +34,7 @@ import { matchesLang } from "../jellyfin/languages";
 import { settingsGet } from "../settings";
 import { upsertProgress } from "../addons";
 import { resolveChannelPlayback } from "../iptv";
+import { downloadFileUri, downloadGet, downloadRecordPosition, downloadsSyncPending } from "../downloads/downloads";
 import { registerSessionCleanup } from "../session";
 import { aspectBox, isAspectMode } from "./aspect";
 import { ProgressLoop, reportTick } from "./progress";
@@ -86,7 +87,7 @@ function defaultState(): PlayerState {
 }
 
 function defaultPrefs(): PlaybackPrefs {
-  return { audioLanguage: "", subtitleLanguage: "", rememberSpeed: false, lastSpeed: 1 };
+  return { audioLanguage: "", subtitleLanguage: "", rememberSpeed: false, lastSpeed: 1, backgroundAudio: true };
 }
 
 /** Everything that belongs to the source being played and is thrown away on the next one. */
@@ -192,9 +193,9 @@ function classifyError(detail: string): PlayerErrorCode {
   return "unknown";
 }
 
-function emitError(error: unknown, url: string | null): void {
+function emitError(error: unknown, url: string | null, transcoding: boolean = isTranscoding()): void {
   if (error instanceof PlaybackError) {
-    emit("player://error", { message: error.message, detail: "", code: "unknown", url, key: error.key });
+    emit("player://error", { message: error.message, detail: "", code: "unknown", url, key: error.key, transcoding });
     return;
   }
   const detail = errorDetail(error);
@@ -203,7 +204,22 @@ function emitError(error: unknown, url: string | null): void {
     detail,
     code: classifyError(detail),
     url,
+    transcoding,
   });
+}
+
+/**
+ * Background audio and picture-in-picture need the player to stay active when the app
+ * leaves the foreground; the now-playing notification is what keeps Android's media
+ * service (and the lock-screen controls) alive meanwhile.
+ */
+function applyBackground(on: boolean): void {
+  try {
+    player.staysActiveInBackground = on;
+    player.showNowPlayingNotification = on;
+  } catch (error) {
+    console.warn("[player] could not change background playback", error);
+  }
 }
 
 /** Jellyfin stream URLs carry the access token (`api_key`): never hand them to another app. */
@@ -240,6 +256,7 @@ async function loadPrefs(): Promise<PlaybackPrefs> {
       subtitleLanguage: playback.subtitleLanguage ?? "",
       rememberSpeed: Boolean(playback.rememberSpeed),
       lastSpeed: Number.isFinite(playback.lastSpeed) ? playback.lastSpeed : 1,
+      backgroundAudio: playback.backgroundAudio !== false,
     };
   } catch {
     return defaultPrefs();
@@ -530,6 +547,7 @@ async function load(args: LoadArgs): Promise<void> {
   }
   if (g !== gen) return; // superseded meanwhile
   armed = true;
+  applyBackground(args.prefs.backgroundAudio);
   try {
     player.volume = clamp(state.volume, 0, 100) / 100;
     player.muted = state.mute;
@@ -576,6 +594,7 @@ async function stopInner(emitClose: boolean): Promise<void> {
     console.warn("[player] could not release the source", error);
   }
   deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => undefined);
+  applyBackground(false);
   state.buffering = false;
   if (current) {
     switch (current.source.kind) {
@@ -604,6 +623,20 @@ async function stopInner(emitClose: boolean): Promise<void> {
           console.warn("[player] addon progress failed", error);
         }
         break;
+      case "offline": {
+        const { downloadId, entry } = current.source;
+        // Nothing was loaded (start failed): keep the stored positions.
+        if (duration <= 0) break;
+        try {
+          downloadRecordPosition(downloadId, time, duration);
+          if (entry) upsertProgress(entry, time, duration);
+        } catch (error) {
+          console.warn("[player] offline progress failed", error);
+        }
+        // Online again? The server hears about it right away.
+        void downloadsSyncPending();
+        break;
+      }
       case "live":
         break;
     }
@@ -647,7 +680,7 @@ async function recoverFromError(g: number, detail: string): Promise<void> {
       reportStart(playback, ticksFromSeconds(time)).catch(() => undefined);
       return;
     } catch (error) {
-      emitError(error, shareableUrl(current, current.url));
+      emitError(error, shareableUrl(current, current.url), true);
       return;
     }
   }
@@ -761,8 +794,11 @@ async function playerStart(args: {
   title: string;
   startSeconds?: number;
   mediaSourceId?: string | null;
+  /** Skip direct play (the "Try transcoding" way out of a failure). */
+  forceTranscode?: boolean;
 }): Promise<PlayerState> {
   return serialized(async () => {
+    const force = args.forceTranscode === true;
     try {
       if (ctx) await stopInner(false);
       const start = Math.max(0, args.startSeconds ?? 0);
@@ -775,6 +811,7 @@ async function playerStart(args: {
         startSeconds: start,
         audioLanguage: prefs.audioLanguage,
         subtitleLanguage: prefs.subtitleLanguage,
+        forceTranscode: force,
       });
       const playback = playbackFromResolved(item.id, resolved);
       await load({
@@ -791,7 +828,7 @@ async function playerStart(args: {
           title: args.title,
           url: resolved.url,
         },
-        fallbackTried: false,
+        fallbackTried: force,
       });
       reportStart(playback, ticksFromSeconds(start)).catch((error) =>
         console.warn("[player] report start failed", error),
@@ -799,10 +836,61 @@ async function playerStart(args: {
       return snapshot();
     } catch (error) {
       // The Jellyfin URL carries the token: no "open in another app".
-      emitError(error, null);
+      emitError(error, null, force);
       throw error;
     }
   });
+}
+
+/** Plays a finished download from the device (works without network). */
+async function playerStartFile(args: {
+  downloadId: string;
+  title: string;
+  startSeconds?: number;
+  /** Online titles: their progress is also kept in the local "continue watching". */
+  entry?: ResumeEntryBase | null;
+}): Promise<PlayerState> {
+  return serialized(async () => {
+    try {
+      const download = downloadGet(args.downloadId);
+      const uri = downloadFileUri(args.downloadId);
+      if (!download || !uri) throw new Error("La descarga ya no está en el dispositivo");
+      if (ctx) await stopInner(false);
+      const prefs = await loadPrefs();
+      const start = Math.max(0, args.startSeconds ?? 0);
+      const item = download.movie;
+      await load({
+        url: uri,
+        headers: {},
+        contentType: "progressive",
+        metadata: metadataForItem(args.title, item),
+        title: args.title,
+        startSeconds: start,
+        prefs,
+        speed: speedFromPrefs(prefs),
+        ctx: {
+          source: {
+            kind: "offline",
+            downloadId: download.id,
+            itemId: download.source === "jellyfin" ? download.id : null,
+            entry: args.entry ?? null,
+          },
+          title: args.title,
+          url: uri,
+        },
+        fallbackTried: true,
+      });
+      return snapshot();
+    } catch (error) {
+      emitError(error, null, false);
+      throw error;
+    }
+  });
+}
+
+/** Settings › Playback › background audio changed while something plays. */
+function setBackgroundPlayback(on: boolean): void {
+  if (ctx) applyBackground(on);
 }
 
 async function playerStartUrl(args: {
@@ -1063,6 +1151,8 @@ export const engine = {
   player,
   playerStart,
   playerStartUrl,
+  playerStartFile,
+  setBackgroundPlayback,
   iptvPlay,
   playerStop,
   playerTogglePause,

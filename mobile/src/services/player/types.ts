@@ -13,6 +13,8 @@ export type PlaybackPrefs = {
   subtitleLanguage: string;
   rememberSpeed: boolean;
   lastSpeed: number;
+  /** Keep playing in the background / picture-in-picture (Settings › Playback). */
+  backgroundAudio: boolean;
 };
 
 /** Where playback progress is reported to. */
@@ -26,7 +28,9 @@ export type PlaybackSource =
       mediaSourceId: string | undefined;
     }
   | { kind: "addon"; entry: ResumeEntryBase }
-  | { kind: "live"; channelId: string };
+  | { kind: "live"; channelId: string }
+  /** A downloaded file; `entry` is set for online titles (their progress stays local). */
+  | { kind: "offline"; downloadId: string; itemId: string | null; entry: ResumeEntryBase | null };
 
 export type EngineContext = {
   source: PlaybackSource;

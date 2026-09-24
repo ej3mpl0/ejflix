@@ -69,6 +69,7 @@ export const KEYS = {
   lastSeenVersion: "lastSeenVersion",
   updateAuto: "updateAuto",
   updateSkipped: "updateSkipped",
+  downloads: (owner: string) => `downloads.${owner}`,
 } as const;
 
 export const SECRET = {

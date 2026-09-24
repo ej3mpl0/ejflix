@@ -10,6 +10,7 @@ import {
   ListVideo,
   Lock,
   Pause,
+  PictureInPicture2,
   Play,
   Ratio,
   RotateCcw,
@@ -141,6 +142,7 @@ export function PlayerChrome({
   onLock,
   onPanel,
   externalSub = null,
+  onPip = null,
   onZap,
   onReveal,
   onHoldUi,
@@ -172,6 +174,8 @@ export function PlayerChrome({
   onPanel: () => void;
   /** Name of the subtitle file the app is drawing itself, if one is loaded. */
   externalSub?: string | null;
+  /** Enters picture-in-picture; null when the device cannot. */
+  onPip?: (() => void) | null;
   /** Previous (−1) / next (+1) channel of the group. */
   onZap: (dir: 1 | -1) => void;
   onReveal: () => void;
@@ -305,6 +309,9 @@ export function PlayerChrome({
           </View>
         </View>
         <View style={s.topRight}>
+          {onPip ? (
+            <IconButton icon={PictureInPicture2} label={tr("pip")} onPress={onPip} size={20} hit={44} color={t.white(0.85)} />
+          ) : null}
           <IconButton icon={Lock} label={tr("lockControls")} onPress={onLock} size={19} hit={44} color={t.white(0.85)} />
           {showPanel ? (
             <IconButton

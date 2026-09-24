@@ -213,6 +213,8 @@ export type Movie = {
   mediaSources: MediaSourceInfo[];
   /** ISO-8601 date the item was added to the library. */
   dateCreated: string | null;
+  /** ISO-8601 air / release date (episodes: when it aired). */
+  premiereDate?: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
 };
@@ -415,6 +417,14 @@ export type Settings = {
     subBackground: SubBackground;
     /** Seconds a double tap or a seek button jumps: 5, 10, 15 or 30. */
     seekStep: number;
+    /** Height of the app-drawn subtitles. */
+    subPosition: SubPosition;
+    /** Picture-in-picture when the app goes to the background while playing. */
+    autoPip: boolean;
+    /** Sound keeps playing with the app in the background (and in PiP). */
+    backgroundAudio: boolean;
+    /** Vibration on player gestures, the lock and switches. */
+    haptics: boolean;
   };
   library: { pinned: string[] };
   addons: { urls: string[]; cinemeta: boolean };
@@ -445,6 +455,7 @@ export type Settings = {
 };
 
 export type SubBackground = "outline" | "shadow" | "box";
+export type SubPosition = "bottom" | "raised" | "top";
 
 /** An addon found in another app's account, offered for import. */
 export type ImportedAddon = { url: string; name: string; official: boolean };
@@ -590,6 +601,10 @@ export const DEFAULT_SETTINGS: Settings = {
     subColor: "#FFFFFF",
     subBackground: "outline",
     seekStep: 10,
+    subPosition: "bottom",
+    autoPip: true,
+    backgroundAudio: true,
+    haptics: true,
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true },

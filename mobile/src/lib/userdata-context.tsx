@@ -9,7 +9,7 @@ import React, {
   type ReactNode,
 } from "react";
 import { api } from "./api";
-import type { LibraryEntry, Movie } from "./types";
+import type { LibraryEntry, Movie, ResumeEntry } from "./types";
 import { libraryEntryOf, libraryToMovie } from "./addons";
 import { useI18n } from "./locale-context";
 
@@ -60,11 +60,26 @@ export function UserDataProvider({
   /** Online titles have no server: their saved / watched marks live in a local list. */
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
 
+  /** Local positions of online titles, so their cards show progress like Jellyfin ones. */
+  const [addonProgress, setAddonProgress] = useState<ResumeEntry[]>([]);
+
   useEffect(() => {
     api
       .addonLibraryList()
       .then(setLibrary)
       .catch(() => undefined);
+    const loadProgress = () => {
+      api
+        .addonProgressList()
+        .then(setAddonProgress)
+        .catch(() => undefined);
+    };
+    loadProgress();
+    // Positions change while playing; refresh when the player closes.
+    const unlisten = api.onPlayerClose(loadProgress);
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   const patch = useCallback((id: string, value: Partial<ItemFlags> | null) => {
@@ -159,6 +174,7 @@ export function UserDataProvider({
       }
       try {
         await api.addonProgressRemove(key);
+        setAddonProgress((list) => list.filter((p) => p.key !== key));
         setVersion((n) => n + 1);
       } catch {
         onErrorRef.current(tRef.current("watchedError"));
@@ -171,12 +187,15 @@ export function UserDataProvider({
     () => ({
       flags: (movie) => {
         const entry = movie.external ? library.find((e) => e.key === movie.external?.videoId) : null;
+        const resume =
+          movie.external && !movie.playedPercentage ? addonProgress.find((p) => p.key === movie.external?.videoId) : null;
+        const resumePct = resume && resume.durationSeconds > 0 ? Math.min(100, (resume.positionSeconds / resume.durationSeconds) * 100) : 0;
         return {
           favorite: movie.external ? Boolean(entry?.saved) : movie.favorite,
           played: movie.external ? Boolean(entry?.watched) : movie.played,
           unplayedCount: movie.unplayedCount,
-          playedPercentage: movie.playedPercentage,
-          playbackPositionTicks: movie.playbackPositionTicks,
+          playedPercentage: resumePct || movie.playedPercentage,
+          playbackPositionTicks: resume ? Math.round(resume.positionSeconds * 10_000_000) : movie.playbackPositionTicks,
           ...(movie.external ? {} : (overrides[movie.id] ?? {})),
         };
       },
@@ -188,7 +207,7 @@ export function UserDataProvider({
       version,
       clearOverrides: () => setOverrides({}),
     }),
-    [overrides, pendingIds, version, setFavorite, setPlayed, removeProgress, library],
+    [overrides, pendingIds, version, setFavorite, setPlayed, removeProgress, library, addonProgress],
   );
 
   return <UserDataContext.Provider value={value}>{children}</UserDataContext.Provider>;

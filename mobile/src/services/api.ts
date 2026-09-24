@@ -50,6 +50,7 @@ import * as addons from "./addons";
 import * as iptv from "./iptv";
 import { engine } from "./player/engine";
 import * as updates from "./updates";
+import * as downloads from "./downloads/downloads";
 
 const EXTERNAL_ALLOWLIST = ["https://github.com/", "https://discord.com/developers/", "https://introdb.app/"];
 
@@ -140,6 +141,7 @@ export const api = {
     title: string;
     startSeconds?: number;
     mediaSourceId?: string | null;
+    forceTranscode?: boolean;
   }): Promise<PlayerState> => engine.playerStart(args),
   /** `switching`: another item starts right away (keeps the player screen). */
   playerStop: (switching = false): Promise<void> => engine.playerStop(switching),
@@ -207,6 +209,24 @@ export const api = {
   settingsSet: (patch: SettingsPatch): Promise<Settings> => settings.settingsSet(patch),
   onSettingsChanged: (handler: (settings: Settings) => void): Promise<() => void> =>
     listen("settings://changed", handler),
+  // Offline downloads (mobile only)
+  /** Plays a finished download from the device. */
+  playerStartFile: (args: {
+    downloadId: string;
+    title: string;
+    startSeconds?: number;
+    entry?: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs"> | null;
+  }): Promise<PlayerState> => engine.playerStartFile(args),
+  downloadsList: () => downloads.downloadsList(),
+  downloadsKick: () => downloads.downloadsKick(),
+  downloadJellyfin: (movie: Movie) => downloads.downloadJellyfin(movie),
+  downloadAddon: (movie: Movie, stream: AddonStream) => downloads.downloadAddon(movie, stream),
+  downloadPause: (id: string) => downloads.downloadPause(id),
+  downloadResume: (id: string) => downloads.downloadResume(id),
+  downloadRemove: (id: string) => downloads.downloadRemove(id),
+  downloadsStorage: () => downloads.downloadsStorage(),
+  playableDownload: (movie: Movie) => downloads.playableDownload(movie),
+  onDownloadsChanged: (handler: () => void): Promise<() => void> => listen("downloads://changed", () => handler()),
 };
 
 export type Api = typeof api;

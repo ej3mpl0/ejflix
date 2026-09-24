@@ -1,13 +1,14 @@
 import React from "react";
 import { useNavigation } from "@react-navigation/native";
 import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
-import { LogOut, Settings as SettingsIcon, Users } from "lucide-react-native";
+import { CloudDownload, LogOut, Settings as SettingsIcon, Users } from "lucide-react-native";
 import { sessionAvatar } from "../../lib/format";
 import { useI18n } from "../../lib/locale-context";
 import { useSession } from "../../lib/session-context";
 import type { TabsParamList } from "../../navigation/types";
 import { Avatar } from "../ui/Avatar";
 import { ActionSheet, type SheetAction } from "../ui/ActionSheet";
+import { navigationRef } from "../../navigation/navigationRef";
 
 /**
  * Account menu behind the header avatar (desktop `GlassHeader` dropdown): settings,
@@ -24,6 +25,14 @@ export function AccountSheet({ visible, onClose }: { visible: boolean; onClose: 
       label: t("settings"),
       icon: SettingsIcon,
       onPress: () => navigation.navigate("SettingsTab"),
+    },
+    {
+      key: "downloads",
+      label: t("downloadsTitle"),
+      icon: CloudDownload,
+      onPress: () => {
+        if (navigationRef.isReady()) navigationRef.navigate("Main", { screen: "SettingsSection", params: { section: "downloads" } });
+      },
     },
     {
       key: "switch",

@@ -303,6 +303,7 @@ export function mapItem(value: unknown): Movie {
     mediaSourceId,
     mediaSources: mediaSources.map(({ id: sourceId, name }) => ({ id: sourceId, name })),
     dateCreated: str(item, "DateCreated"),
+    premiereDate: str(item, "PremiereDate"),
     trickplay,
     chapters,
   };
