@@ -531,17 +531,30 @@ struct OnlineChanges {
     positions: HashMap<String, usize>,
     room: usize,
     skipped: usize,
+    /// Every flag asked for, replayed onto the list as it is when the import saves.
+    log: Vec<(LibraryEntry, bool, bool, u64)>,
 }
 
 impl OnlineChanges {
     fn new(list: Vec<LibraryEntry>) -> Self {
         let positions = list.iter().enumerate().map(|(i, e)| (e.key.clone(), i)).collect();
         let room = MAX_LIBRARY.saturating_sub(list.len());
-        Self { list, positions, room, skipped: 0 }
+        Self { list, positions, room, skipped: 0, log: Vec::new() }
+    }
+
+    /// The flags applied to `current` (the list read again at save time, so changes
+    /// made while the import ran are kept). Returns it and how many found no room.
+    fn replay(self, current: Vec<LibraryEntry>) -> (Vec<LibraryEntry>, usize) {
+        let mut fresh = OnlineChanges::new(current);
+        for (entry, saved, watched, at_ms) in self.log {
+            fresh.flag(entry, saved, watched, at_ms);
+        }
+        (fresh.list, fresh.skipped)
     }
 
     /// False when the list had no room left for it.
     fn flag(&mut self, mut entry: LibraryEntry, saved: bool, watched: bool, at_ms: u64) -> bool {
+        self.log.push((entry.clone(), saved, watched, at_ms));
         if let Some(&i) = self.positions.get(&entry.key) {
             let current = &mut self.list[i];
             current.saved |= saved;
@@ -690,8 +703,10 @@ pub async fn trakt_import(app: tauri::AppHandle, state: State<'_, AppState>) -> 
         report.watched += 1;
     }
 
-    report.skipped = online.skipped;
-    crate::addons::replace_library(&app, &uid, online.list)?;
+    // Read, merge and write with no await in between, like every other library write.
+    let (list, skipped) = online.replay(crate::addons::load_library(&app, &uid));
+    report.skipped = skipped;
+    crate::addons::replace_library(&app, &uid, list)?;
     let mut stored = load(&app, &uid);
     stored.last_import_ms = now;
     save(&app, &uid, &stored)?;

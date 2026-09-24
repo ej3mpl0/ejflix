@@ -216,9 +216,13 @@ pub async fn parental_set(
     hide_unrated: bool,
     new_pin: Option<String>,
 ) -> Result<ParentalView, String> {
+    // Only the open profile: the last-used one would be changed from the profile picker.
+    if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
+        return Err(crate::errors::code("noProfile"));
+    }
     let uid = crate::settings_user(&app, &state)
         .await
-        .ok_or_else(|| "No hay sesión activa".to_string())?;
+        .ok_or_else(|| crate::errors::code("noProfile"))?;
     if !LEVELS.contains(&max_age) {
         return Err("Nivel no válido".into());
     }
