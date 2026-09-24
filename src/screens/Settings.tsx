@@ -35,12 +35,12 @@ import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
-import { Select } from "../components/Select";
 import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { fieldClass as field } from "../lib/ui";
 import { UpdatesSection } from "../components/settings/UpdatesSection";
+import { OpenSubtitlesSection, SubtitleStyleSection, WatchingSection } from "../components/settings/PlaybackExtras";
 import type { MessageKey } from "../lib/i18n";
 
 /** "language" is kept as an id (old deep links) but lives in the General section now. */
@@ -59,7 +59,7 @@ type Section =
 /** Titles and row labels of each section, for the settings search. */
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
   appearance: ["language", "appLanguage", "theme", "amoled", "posterSize"],
-  playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining"],
+  playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "subOutline", "subPosition", "subAssOverride", "playbackSpeed", "rememberSpeed", "showTimeRemaining", "whilePlayingTitle", "watchedThreshold", "nightModeDefault", "opensubtitlesTitle", "opensubtitlesApiKey"],
   addons: ["addons", "importAddons", "cinemetaRow"],
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled", "iptvWheelZap", "iptvIncludeVod"],
@@ -503,61 +503,7 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
-              <SettingsSection title={t("subStyleTitle")} description={t("subStyleHint")}>
-                {/* Preview of the look over a frame-like backdrop. */}
-                <div className="my-3 grid h-28 place-items-end justify-center rounded-btn bg-[linear-gradient(135deg,#3a4a5a,#1b232b_60%,#4a3a2a)] pb-4">
-                  <span
-                    className="rounded px-2 text-center font-semibold"
-                    style={{
-                      color: playback.subColor,
-                      fontSize: `${Math.round(18 * playback.subScale)}px`,
-                      background: playback.subBackground === "box" ? "rgb(0 0 0 / 0.7)" : "transparent",
-                      textShadow:
-                        playback.subBackground === "box"
-                          ? "none"
-                          : playback.subBackground === "shadow"
-                            ? "0 0 2px #000, 2px 2px 3px #000"
-                            : "0 0 2px #000, 0 0 2px #000, 0 0 2px #000",
-                    }}
-                  >
-                    {t("subPreview")}
-                  </span>
-                </div>
-                <SettingsRow label={t("subSize")}>
-                  <Select
-                    label={t("subSize")}
-                    value={String(playback.subScale)}
-                    onChange={(value) => void update({ playback: { subScale: Number(value) } })}
-                    className="min-w-[130px]"
-                    options={[0.7, 0.85, 1, 1.15, 1.3, 1.5, 1.75, 2].map((v) => ({ value: String(v), label: `${Math.round(v * 100)}%` }))}
-                  />
-                </SettingsRow>
-                <SettingsRow label={t("subColor")}>
-                  <SegmentedControl
-                    label={t("subColor")}
-                    value={playback.subColor}
-                    onChange={(subColor) => void update({ playback: { subColor } })}
-                    options={[
-                      { value: "#FFFFFF", label: t("colorWhite") },
-                      { value: "#FFE45C", label: t("colorYellow") },
-                      { value: "#7DF9FF", label: t("colorCyan") },
-                      { value: "#9CFF8A", label: t("colorGreen") },
-                    ]}
-                  />
-                </SettingsRow>
-                <SettingsRow label={t("subBackground")}>
-                  <SegmentedControl
-                    label={t("subBackground")}
-                    value={playback.subBackground}
-                    onChange={(subBackground) => void update({ playback: { subBackground } })}
-                    options={[
-                      { value: "outline", label: t("subBgOutline") },
-                      { value: "shadow", label: t("subBgShadow") },
-                      { value: "box", label: t("subBgBox") },
-                    ]}
-                  />
-                </SettingsRow>
-              </SettingsSection>
+              <SubtitleStyleSection />
               <SettingsSection title={t("seekStepTitle")}>
                 <SettingsRow label={t("seekStep")} hint={t("seekStepHint")}>
                   <SegmentedControl<number>
@@ -584,6 +530,8 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
+              <WatchingSection />
+              <OpenSubtitlesSection />
             </>
           ) : null}
 

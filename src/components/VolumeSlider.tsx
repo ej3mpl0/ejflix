@@ -42,7 +42,11 @@ export function VolumeSlider({
           value={mute ? 0 : volume}
           aria-label={t("volume")}
           aria-valuetext={`${Math.round(mute ? 0 : volume)}%`}
-          onChange={(e) => onVolume(Number(e.target.value))}
+          onChange={(e) => {
+            onVolume(Number(e.target.value));
+            // Dragging the slider while muted means "I want sound".
+            if (mute) onMute();
+          }}
           className={cn("vol-range mx-1 w-20 cursor-pointer appearance-none accent-accent")}
         />
       </div>

@@ -94,6 +94,23 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
     };
   }, [ext?.type, ext?.metaId, reload]);
 
+  // Back from the player: the resume position and the next episode moved.
+  useEffect(() => {
+    let alive = true;
+    const unlisten = api.onPlayerClose(() => {
+      api
+        .addonProgressList()
+        .then((list) => {
+          if (alive) setProgress(list);
+        })
+        .catch(() => undefined);
+    });
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn()).catch(() => undefined);
+    };
+  }, []);
+
   const videos = useMemo(() => (meta ? sortedVideos(meta.videos) : []), [meta]);
   const seasonNumbers = useMemo(() => {
     const set = new Set<number>();

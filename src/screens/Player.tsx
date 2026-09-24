@@ -24,6 +24,8 @@ import { usePauseInfo } from "../hooks/usePauseInfo";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { StartCover } from "../components/StartCover";
 import { StatsPanel } from "../components/StatsPanel";
+import { MiniPlayerControls } from "../components/MiniPlayerControls";
+import { SubtitleSearch } from "../components/SubtitleSearch";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -40,7 +42,13 @@ const emptyState: PlayerState = {
   cacheTime: 0,
   speed: 1,
   aspect: "auto",
+  subDelay: 0,
+  audioDelay: 0,
+  night: false,
+  mini: false,
 };
+
+const OSD_MS = 1400;
 
 const LOCK_HINT_MS = 2000;
 
@@ -51,11 +59,16 @@ export function Player({
   mode = "engine",
   onExit,
   onError,
+  fullscreen: fullscreenProp,
+  onFullscreenChange,
 }: {
   movie: Movie;
   mode?: "engine" | "overlay";
   onExit: () => void;
   onError: (message: string) => void;
+  /** Window fullscreen, kept by the overlay app so it survives the next episode's remount. */
+  fullscreen?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { t } = useI18n();
   const { settings, update: updateSettings } = useSettings();
@@ -74,7 +87,9 @@ export function Player({
   const [detail, setDetail] = useState<Movie | null>(null);
   // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
   const [visible, setVisible] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [ownFullscreen, setOwnFullscreen] = useState(false);
+  const fullscreen = fullscreenProp ?? ownFullscreen;
+  const setFullscreen = onFullscreenChange ?? setOwnFullscreen;
   const [menu, setMenu] = useState<PlayerMenu>(null);
   const [panel, setPanel] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -82,13 +97,21 @@ export function Player({
   const [flash, setFlash] = useState<Flash | null>(null);
   /** "?" overlay with the keyboard shortcuts. */
   const [help, setHelp] = useState(false);
-  /** Subtitle and audio delays of this file (mpv resets them on every load). */
-  const [delays, setDelays] = useState({ sub: 0, audio: 0 });
+  /** Subtitle and audio delays of this file (remembered per title, reapplied by Rust on start). */
+  const delays = { sub: state.subDelay, audio: state.audioDelay };
+  /** OpenSubtitles search dialog. */
+  const [subSearch, setSubSearch] = useState(false);
+  /** Short on-screen message (delay changed, night mode...). */
+  const [osd, setOsd] = useState<string | null>(null);
+  const osdTimer = useRef<number>(0);
+  const mini = state.mini;
   /** Technical numbers overlay (I). */
   const [stats, setStats] = useState(false);
   /** Subtitle track to bring back when V turns subtitles on again. */
   const lastSub = useRef<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
+  /** Last volume asked for while the HUD shows: quick wheel ticks add up before mpv reports. */
+  const volTarget = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [splash, setSplash] = useState(true);
   const remaining = settings.playback.showTimeRemaining;
@@ -172,10 +195,26 @@ export function Player({
 
   useEffect(() => {
     let cancelled = false;
+    /** Start command in flight: a stop must wait for it, or the file would load after it. */
+    let starting: Promise<unknown> | null = null;
     const unlistenState = api.onPlayerState(setState);
-    const unlistenHotkey = api.onPlayerHotkey((key) => hotkeyRef.current(key));
+    // Only the overlay handles the hotkeys; the main window hears the same global event.
+    const unlistenHotkey = overlay ? api.onPlayerHotkey((key) => hotkeyRef.current(key)) : null;
+    // The start's own state event went out before this overlay mounted (delays, mini...).
+    if (overlay) {
+      api
+        .playerState()
+        .then((current) => {
+          if (!cancelled) setState(current);
+        })
+        .catch(() => undefined);
+    }
 
     if (!overlay) {
+      // The engine player is not remounted per item: forget the previous start's leftovers.
+      setStartHint("");
+      setStartError(null);
+      setTorrentHash(null);
       const start = ticksToSeconds(movie.playbackPositionTicks);
       const title = isEpisode
         ? [movie.seriesName, episodeCode(movie, "S{s}:E{e}"), movie.name].filter(Boolean).join(" · ")
@@ -192,7 +231,9 @@ export function Player({
         try {
           if (movie.live) {
             // IPTV channel: Rust resolves the stream URL (Xtream credentials stay there).
-            const next = await api.iptvPlay(movie.live.channelId);
+            const request = api.iptvPlay(movie.live.channelId);
+            starting = request;
+            const next = await request;
             if (cancelled) return;
             void api.openPlayer(movie);
             setState(next);
@@ -241,31 +282,39 @@ export function Player({
             const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
             const entry = resumeEntryOf(full);
             if (!entry) throw new Error(tRef.current("playerStartError"));
-            const next = await api.playerStartUrl({
+            const request = api.playerStartUrl({
               url,
               title,
               headers: stream.headers,
               startSeconds: start > 5 ? start : 0,
               entry,
             });
+            starting = request;
+            const next = await request;
             if (cancelled) return;
+            // Playing: the cover no longer needs the torrent's peers.
+            setTorrentHash(null);
             void api.openPlayer(full);
             setState(next);
             return;
           }
-          const next = await api.playerStart({
+          const request = api.playerStart({
             itemId: movie.id,
             title,
             startSeconds: start > 5 ? start : 0,
             mediaSourceId: movie.mediaSourceId,
           });
+          starting = request;
+          const next = await request;
           if (cancelled) return;
           void api.openPlayer(movie);
           setState(next);
         } catch (err) {
           if (cancelled) return;
           setStartHint("");
-          setStartError(err instanceof Error ? err.message : tRef.current("playerStartError"));
+          // Tauri commands reject with the Rust message as a plain string.
+          const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+          setStartError(message || tRef.current("playerStartError"));
         }
       };
       void begin();
@@ -274,9 +323,13 @@ export function Player({
     return () => {
       cancelled = true;
       void unlistenState.then((fn) => fn());
-      void unlistenHotkey.then((fn) => fn());
+      void unlistenHotkey?.then((fn) => fn());
       // Still mounted here means the movie prop changed (next episode): keep the window.
-      if (!overlay) stopping.current = api.playerStop(mounted.current);
+      if (!overlay) {
+        const switching = mounted.current;
+        const pending = starting ? starting.catch(() => undefined) : Promise.resolve();
+        stopping.current = pending.then(() => api.playerStop(switching));
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie, overlay, attempt]);
@@ -309,13 +362,41 @@ export function Player({
   useEffect(() => {
     nextSent.current = false;
     setPanel(false);
-    setDelays({ sub: 0, audio: 0 });
+    setSubSearch(false);
   }, [movie]);
+
+  const showOsd = (text: string) => {
+    setOsd(text);
+    window.clearTimeout(osdTimer.current);
+    osdTimer.current = window.setTimeout(() => setOsd(null), OSD_MS);
+  };
 
   const changeDelay = (kind: "sub" | "audio", seconds: number) => {
     const value = Math.max(-30, Math.min(30, Math.round(seconds * 10) / 10));
-    setDelays((current) => ({ ...current, [kind]: value }));
-    void api.playerSetProp(kind === "sub" ? "sub-delay" : "audio-delay", value);
+    // Shown right away; mpv confirms it through the state events. Rust remembers it for the title.
+    setState((current) => ({ ...current, [kind === "sub" ? "subDelay" : "audioDelay"]: value }));
+    showOsd(`${t(kind === "sub" ? "subDelay" : "audioDelay")}: ${value > 0 ? "+" : ""}${value.toFixed(1)} s`);
+    void api.playerSetDelay(kind, value).catch(() => undefined);
+  };
+
+  const toggleNight = () => {
+    const on = !stateRef.current.night;
+    setState((current) => ({ ...current, night: on }));
+    showOsd(on ? t("nightModeOn") : t("nightModeOff"));
+    void api.playerSetNight(on).catch(() => undefined);
+  };
+
+  const toggleMini = async () => {
+    setMenu(null);
+    setPanel(false);
+    setHelp(false);
+    if (!stateRef.current.mini) {
+      setFullscreen(false);
+      await api.playerSetMini(true).catch(() => undefined);
+    } else {
+      const fs = await api.playerSetMini(false).catch(() => false);
+      setFullscreen(fs);
+    }
   };
 
   // Episodes: look up what comes next so the end of the file can chain into it.
@@ -338,14 +419,6 @@ export function Player({
       alive = false;
     };
   }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external]);
-
-  // End of file without anything to chain into: leave the player. With a next episode
-  // the card (below) decides whether and when to continue.
-  useEffect(() => {
-    if (!overlay || !state.eof || nextEpisode) return;
-    onExit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlay, state.eof, nextEpisode]);
 
   // First frame: the file is loaded once mpv reports a duration or advances time.
   useEffect(() => {
@@ -379,14 +452,25 @@ export function Player({
     const onKey = (e: KeyboardEvent) => keydownRef.current(e);
     const onMove = () => bump();
     const onWheel = (e: WheelEvent) => {
+      // Side panels and track menus scroll their own lists.
+      if (e.target instanceof Element && e.target.closest("[data-own-wheel]")) return;
       e.preventDefault();
       if (lockedRef.current) return;
       wheelRef.current(e.deltaY);
     };
+    // A mouse click leaves the focus on the button, and Space/Enter would press it again
+    // later (fullscreen, lock, back) instead of pausing. Keyboard clicks keep it (detail 0).
+    const onClick = (e: MouseEvent) => {
+      if (e.detail === 0 || !(e.target instanceof Element)) return;
+      const button = e.target.closest("button");
+      if (button && button === document.activeElement) button.blur();
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("click", onClick);
     return () => {
+      window.removeEventListener("click", onClick);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("wheel", onWheel);
@@ -414,14 +498,27 @@ export function Player({
     void api.playerSeek(seconds, false);
   };
 
+  const currentVolume = () => volTarget.current ?? stateRef.current.volume;
+
   const changeVolume = async (value: number) => {
-    const next = await api.playerSetVolume(value);
+    volTarget.current = Math.max(0, Math.min(100, value));
+    const next = await api.playerSetVolume(volTarget.current);
     setVolHud(next);
     window.clearTimeout(volTimer.current);
-    volTimer.current = window.setTimeout(() => setVolHud(null), 1200);
+    volTimer.current = window.setTimeout(() => {
+      volTarget.current = null;
+      setVolHud(null);
+    }, 1200);
   };
 
   const toggleFullscreen = async () => {
+    if (stateRef.current.mini) {
+      // From the mini player straight to fullscreen.
+      await api.playerSetMini(false).catch(() => false);
+      setFullscreen(true);
+      await api.playerSetFullscreen(true);
+      return;
+    }
     const next = !fullscreen;
     setFullscreen(next);
     await api.playerSetFullscreen(next);
@@ -504,12 +601,18 @@ export function Player({
 
   wheelRef.current = (deltaY) => {
     if (live && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
-    else void changeVolume(stateRef.current.volume + (deltaY < 0 ? 5 : -5));
+    else void changeVolume(currentVolume() + (deltaY < 0 ? 5 : -5));
   };
 
   // Skip intro / recap / credits and the next-episode card (overlay only).
   const segments = useSegments(movie, state.duration, overlay && !live);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
+  // Stopping inside the credits marks the title watched (decided in Rust on stop).
+  const creditsStart = outro?.startSeconds ?? null;
+  useEffect(() => {
+    if (!overlay || live) return;
+    void api.playerSetCredits(creditsStart).catch(() => undefined);
+  }, [overlay, live, creditsStart]);
   const skipPrompt = useSkipPrompt({
     segments,
     time: state.time,
@@ -529,19 +632,44 @@ export function Player({
     duration: state.duration,
     eof: state.eof,
     ready: overlay && ready,
+    paused: state.paused,
     countdownSeconds: settings.playback.nextEpisodeCountdown,
     onPlayNext: playNext,
   });
 
+  // End of file without anything to chain into (or the card dismissed there): leave the
+  // player. With a next episode the card decides whether and when to continue.
+  useEffect(() => {
+    if (!overlay || !state.eof || (nextEpisode && !nextCard.closed)) return;
+    onExit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, state.eof, nextEpisode, nextCard.closed]);
+
   const pauseInfo = usePauseInfo(state.paused, visible);
+
+  const stream = movie.external?.stream ?? null;
+  const sourceLabel = live
+    ? t("statsSourceLive", { name: live.sourceName })
+    : movie.external
+      ? stream?.infoHash && !stream.url
+        ? t("statsSourceTorrent")
+        : t("statsSourceAddon", { name: stream?.addonName ?? "" })
+      : t("statsSourceDirect");
 
   const escape = () => {
     if (help) setHelp(false);
+    else if (subSearch) setSubSearch(false);
     else if (panel) setPanel(false);
     else if (menu) setMenu(null);
+    else if (stateRef.current.mini) void toggleMini();
     else if (fullscreen) void toggleFullscreen();
     else onExit();
   };
+
+  // A panel closed under the pointer never sends its mouseleave: stop holding the controls.
+  useEffect(() => {
+    if (!panel) overUi.current = false;
+  }, [panel]);
 
   const togglePanel = () => {
     setPanel((open) => !open);
@@ -549,6 +677,8 @@ export function Player({
   };
 
   const lock = () => {
+    // The controls unmount under the pointer without a mouseleave: stop holding them.
+    overUi.current = false;
     setLocked(true);
     setMenu(null);
     setPanel(false);
@@ -566,7 +696,9 @@ export function Player({
   };
 
   const cycleAspect = () => {
-    void api.playerSetAspect(nextAspect(stateRef.current.aspect));
+    const mode = nextAspect(stateRef.current.aspect);
+    // mpv does not report the override: show it now (no state event arrives while paused).
+    void api.playerSetAspect(mode).then(() => setState((current) => ({ ...current, aspect: mode })));
   };
 
   const playFromPanel = (target: Movie) => {
@@ -591,7 +723,8 @@ export function Player({
 
   const onVideoDoubleClick = () => {
     window.clearTimeout(clickTimer.current);
-    void toggleFullscreen();
+    if (stateRef.current.mini) void toggleMini();
+    else void toggleFullscreen();
   };
 
   hotkeyRef.current = (key) => {
@@ -606,6 +739,8 @@ export function Player({
   keydownRef.current = (e) => {
     bump();
     if (lockedRef.current) return;
+    // The subtitle search dialog owns the keyboard (its field, its list, Escape).
+    if (subSearch) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     // A focused control owns its own keys: the volume slider its arrows, a button Enter/Space.
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -650,11 +785,11 @@ export function Player({
         break;
       case "ArrowUp":
         e.preventDefault();
-        void changeVolume(current.volume + 5);
+        void changeVolume(currentVolume() + 5);
         break;
       case "ArrowDown":
         e.preventDefault();
-        void changeVolume(current.volume - 5);
+        void changeVolume(currentVolume() - 5);
         break;
       case "m":
       case "M":
@@ -720,6 +855,22 @@ export function Player({
       case "x":
       case "X":
         if (!live) changeDelay("sub", delays.sub + 0.1);
+        break;
+      case "g":
+      case "G":
+        changeDelay("audio", delays.audio - 0.1);
+        break;
+      case "h":
+      case "H":
+        changeDelay("audio", delays.audio + 0.1);
+        break;
+      case "d":
+      case "D":
+        toggleNight();
+        break;
+      case "p":
+      case "P":
+        void toggleMini();
         break;
       case "i":
       case "I":
@@ -813,15 +964,25 @@ export function Player({
           </div>
         </div>
       ) : null}
+      {osd && !locked ? (
+        <div
+          className={`pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full bg-black/60 px-3.5 py-1 text-sm whitespace-nowrap tabular backdrop-blur-sm ${
+            mini ? "top-10" : "top-[72px]"
+          }`}
+          role="status"
+        >
+          {osd}
+        </div>
+      ) : null}
       {volHud != null ? (
         <div className="pointer-events-none absolute top-[72px] right-6 z-30 rounded-full bg-black/60 px-3 py-1 text-sm tabular backdrop-blur-sm">
           {Math.round(volHud)}%
         </div>
       ) : null}
-      {!locked && !live && pauseInfo && !splash && !menu && !panel ? (
+      {!locked && !mini && !live && pauseInfo && !splash && !menu && !panel ? (
         <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
-      {locked ? null : nextEpisode && nextCard.visible ? (
+      {locked || mini ? null : nextEpisode && nextCard.visible ? (
         <NextEpisodeCard
           episode={nextEpisode}
           countdown={nextCard.countdown}
@@ -838,12 +999,34 @@ export function Player({
           shifted={panel}
         />
       ) : null}
-      {stats && !locked ? (
-        <StatsPanel torrent={torrent} delays={delays} onClose={() => setStats(false)} />
+      {stats && !locked && !mini ? (
+        <StatsPanel
+          torrent={torrent}
+          delays={delays}
+          source={sourceLabel}
+          speed={state.speed}
+          night={state.night}
+          onClose={() => setStats(false)}
+        />
       ) : null}
-      {help && !locked ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {help && !locked && !mini ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {subSearch && !locked && !mini ? (
+        <SubtitleSearch movie={detail ?? movie} onClose={() => setSubSearch(false)} onLoaded={() => showOsd(t("subSearchLoaded"))} />
+      ) : null}
       {locked ? (
         <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
+      ) : mini ? (
+        <MiniPlayerControls
+          heading={heading}
+          state={state}
+          visible={visible}
+          live={Boolean(live)}
+          onTogglePause={() => void togglePause()}
+          onRestore={() => void toggleMini()}
+          onClose={onExit}
+          onVideoClick={onVideoClick}
+          onVideoDoubleClick={onVideoDoubleClick}
+        />
       ) : (
         <PlayerControls
           movie={movie}
@@ -877,11 +1060,14 @@ export function Player({
           onPanel={togglePanel}
           onReveal={bump}
           onHoldUi={holdUi}
+          onNight={toggleNight}
+          onMini={() => void toggleMini()}
+          onSearchSubs={() => setSubSearch(true)}
         />
       )}
-      {panel && !locked && live ? (
+      {panel && !locked && !mini && live ? (
         <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />
-      ) : panel && !locked ? (
+      ) : panel && !locked && !mini ? (
         <EpisodesPanel
           key={movie.id}
           movie={movie}

@@ -227,8 +227,8 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
     }
     if (!source.channelCount) return t("iptvNotLoaded");
     const parts = [
-      t("iptvChannels", { n: source.channelCount }),
-      t("iptvGroups", { n: source.groupCount }),
+      source.channelCount === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: source.channelCount }),
+      source.groupCount === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: source.groupCount }),
       source.epgChannels ? t("iptvEpgChannels", { n: source.epgChannels }) : source.epgError ? t("iptvEpgError") : t("iptvEpgNone"),
       source.updatedMs ? t("iptvUpdated", { time: formatAgo(source.updatedMs, locale) }) : null,
     ];

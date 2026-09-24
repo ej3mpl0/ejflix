@@ -21,12 +21,15 @@ export async function fetchWithTimeout(url: string, options: FetchOptions = {}):
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onOuterAbort = () => controller.abort();
-  signal?.addEventListener("abort", onOuterAbort);
+  // An already-aborted signal never fires "abort" again.
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener("abort", onOuterAbort);
   try {
     const headers = new Headers(init.headers);
     if (!headers.has("user-agent")) headers.set("user-agent", USER_AGENT);
     return await fetch(url, { ...init, headers, signal: controller.signal });
   } catch (error) {
+    if (signal?.aborted) throw new Error("Cancelado");
     if (controller.signal.aborted) throw new Error("Tiempo de espera agotado");
     throw new Error(shortError(error));
   } finally {

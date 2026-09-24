@@ -22,8 +22,9 @@ export function EpgGuide({ channels, onPlay }: { channels: Channel[]; onPlay: (c
   const [guide, setGuide] = useState<Record<string, Programme[]>>({});
   const [now, setNow] = useState(() => Date.now() / 1000);
   const scroller = useRef<HTMLDivElement>(null);
-  // Timeline origin: the last half hour boundary before "now - 30 min".
-  const origin = useMemo(() => Math.floor((Date.now() / 1000 - 1800) / 1800) * 1800, []);
+  // Timeline origin: the last half hour boundary before "now - 30 min". It follows the
+  // clock, so a guide left open does not watch "now" slide off its end.
+  const origin = Math.floor((now - 1800) / 1800) * 1800;
   const end = origin + SPAN_HOURS * 3600;
   const x = (seconds: number) => ((seconds - origin) / 3600) * HOUR_PX;
 

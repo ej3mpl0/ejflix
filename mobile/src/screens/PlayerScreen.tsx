@@ -16,7 +16,7 @@ import { errorActions, errorMessageKey, type ErrorAction, type ErrorSourceKind }
 import { offlineStartSeconds } from "../services/downloads/downloads.pure";
 import { haptic } from "../lib/haptics";
 import type { Channel, EpgNow, MediaSegment, Movie, PlayerState } from "../lib/types";
-import type { PlayerError } from "../services/events";
+import { PlaybackError, type PlayerError } from "../services/events";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { channelToMovie } from "../lib/iptv";
@@ -299,7 +299,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           let stream = ext.stream ?? null;
           if (!stream) stream = pickStream(await api.addonStreams(ext.type, ext.videoId), ext.prefer ?? null);
           if (cancelled) return;
-          if (!stream?.url) throw new Error(tRef.current("noStreams"));
+          if (!stream?.url) throw new PlaybackError("noStreams", "No streams");
           const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
           let nextMovie: Movie | null = null;
           if (ext.type === "series") {
@@ -318,7 +318,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
           if (cancelled) return;
           const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
           const entry = resumeEntryOf(full);
-          if (!entry) throw new Error(tRef.current("playerStartError"));
+          if (!entry) throw new PlaybackError("playerStartError", "No resume entry");
           const next = await api.playerStartUrl({
             url: stream.url,
             title,
@@ -343,17 +343,19 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       } catch (err) {
         if (cancelled) return;
         // Stay on the player with the error, a retry and (online) another source. The
-        // engine's own report (classified, with the URL) wins when it already arrived.
-        setPlayError(
-          (current) =>
-            current ?? {
-              message: err instanceof Error ? err.message : tRef.current("playerStartError"),
-              detail: "",
-              code: "unknown",
-              url: null,
-              transcoding: mode?.forceTranscode === true,
-            },
-        );
+        // engine already reported its own failures (with their code and URL): keep those.
+        const transcoding = mode?.forceTranscode === true;
+        const failure: PlayerError =
+          err instanceof PlaybackError
+            ? { message: err.message, detail: "", code: "unknown", url: null, key: err.key, transcoding }
+            : {
+                message: tRef.current("playerStartError"),
+                detail: err instanceof Error ? err.message : "",
+                code: "unknown",
+                url: null,
+                transcoding,
+              };
+        setPlayError((current) => current ?? failure);
       }
     };
 
@@ -434,6 +436,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
       return;
     }
     let alive = true;
+    // Never chain into the previous item's successor while this one is looked up.
+    setNextEpisode(null);
     api
       .getNextEpisode(movie.seriesId, movie.id)
       .then((next) => {
@@ -541,7 +545,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         try {
           const current = await Brightness.getBrightnessAsync();
           if (!alive) return;
-          brightness.current = current;
+          // A swipe that came first already owns the current value.
+          if (!brightnessTaken.current) brightness.current = current;
           brightnessOnEntry.current = current;
           brightnessTaken.current = true;
         } catch {
@@ -719,6 +724,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
     showHud(side === "left" ? "brightness" : "volume", pct);
     if (side === "left") {
       brightness.current = value;
+      // Changed before the entry value was read: still hand it back on the way out.
+      brightnessTaken.current = true;
       void Brightness.setBrightnessAsync(value).catch(() => undefined);
     } else {
       void api.playerSetVolume(pct);
@@ -860,7 +867,8 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
   const actions = playError
     ? errorActions({ source: errorSource, code: playError.code, transcoding: Boolean(playError.transcoding), hasUrl: Boolean(playError.url) })
     : [];
-  const errorDetail = playError ? playError.detail || playError.message : "";
+  // A translated failure (`key`) has no technical text worth showing.
+  const errorDetail = playError ? playError.detail || (playError.key ? "" : playError.message) : "";
   const actionMeta: Record<ErrorAction, { label: string; icon: typeof RotateCcw }> = {
     transcode: { label: t("tryTranscoding"), icon: Cpu },
     stream: { label: t("streamOnline"), icon: Globe },
@@ -983,7 +991,7 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
             <View style={s.errorOverlay}>
               <View style={s.errorCard}>
                 <Text style={s.errorTitle}>{t("playbackFailed")}</Text>
-                <Text style={s.errorBody}>{t(errorMessageKey(playError.code))}</Text>
+                <Text style={s.errorBody}>{t(playError.key ?? errorMessageKey(playError.code))}</Text>
                 <View style={s.errorActions}>
                   {actions.map((action, i) => (
                     <Pill

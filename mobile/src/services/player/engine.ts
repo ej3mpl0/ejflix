@@ -19,7 +19,7 @@ import * as ScreenOrientation from "expo-screen-orientation";
 import * as NavigationBar from "expo-navigation-bar";
 import { Platform } from "react-native";
 import type { Movie, PlayerState, PlayerTrack } from "../../lib/types";
-import { emit, type PlayerErrorCode } from "../events";
+import { emit, PlaybackError, type PlayerErrorCode } from "../events";
 import { clamp, ticksFromSeconds } from "../util";
 import { getItem } from "../jellyfin/library";
 import {
@@ -194,6 +194,10 @@ function classifyError(detail: string): PlayerErrorCode {
 }
 
 function emitError(error: unknown, url: string | null, transcoding: boolean = isTranscoding()): void {
+  if (error instanceof PlaybackError) {
+    emit("player://error", { message: error.message, detail: "", code: "unknown", url, key: error.key, transcoding });
+    return;
+  }
   const detail = errorDetail(error);
   emit("player://error", {
     message: detail ? `${START_ERROR}: ${detail}` : START_ERROR,
@@ -216,6 +220,11 @@ function applyBackground(on: boolean): void {
   } catch (error) {
     console.warn("[player] could not change background playback", error);
   }
+}
+
+/** Jellyfin stream URLs carry the access token (`api_key`): never hand them to another app. */
+function shareableUrl(current: EngineContext | null, url: string | null): string | null {
+  return current?.source.kind === "jellyfin" ? null : url;
 }
 
 let chain: Promise<unknown> = Promise.resolve();
@@ -606,6 +615,8 @@ async function stopInner(emitClose: boolean): Promise<void> {
         break;
       }
       case "addon":
+        // Nothing was loaded (start failed): keep the stored entry and its duration.
+        if (duration <= 0) break;
         try {
           upsertProgress(current.source.entry, time, duration);
         } catch (error) {
@@ -614,6 +625,8 @@ async function stopInner(emitClose: boolean): Promise<void> {
         break;
       case "offline": {
         const { downloadId, entry } = current.source;
+        // Nothing was loaded (start failed): keep the stored positions.
+        if (duration <= 0) break;
         try {
           downloadRecordPosition(downloadId, time, duration);
           if (entry) upsertProgress(entry, time, duration);
@@ -628,7 +641,8 @@ async function stopInner(emitClose: boolean): Promise<void> {
         break;
     }
   }
-  if (emitClose) emit("player://close");
+  // A second stop (screen exit + unmount) has nothing to close.
+  if (emitClose && current) emit("player://close");
 }
 
 /** Direct play failed: try once more through the transcoder, else surface the error. */
@@ -666,11 +680,11 @@ async function recoverFromError(g: number, detail: string): Promise<void> {
       reportStart(playback, ticksFromSeconds(time)).catch(() => undefined);
       return;
     } catch (error) {
-      emitError(error, current.url, true);
+      emitError(error, shareableUrl(current, current.url), true);
       return;
     }
   }
-  emitError(detail, current.url);
+  emitError(detail, shareableUrl(current, current.url));
 }
 
 function metadataForItem(title: string, item: Movie): VideoMetadata {
@@ -784,7 +798,6 @@ async function playerStart(args: {
   forceTranscode?: boolean;
 }): Promise<PlayerState> {
   return serialized(async () => {
-    let url: string | null = null;
     const force = args.forceTranscode === true;
     try {
       if (ctx) await stopInner(false);
@@ -800,7 +813,6 @@ async function playerStart(args: {
         subtitleLanguage: prefs.subtitleLanguage,
         forceTranscode: force,
       });
-      url = resolved.url;
       const playback = playbackFromResolved(item.id, resolved);
       await load({
         url: resolved.url,
@@ -823,7 +835,8 @@ async function playerStart(args: {
       );
       return snapshot();
     } catch (error) {
-      emitError(error, url, force);
+      // The Jellyfin URL carries the token: no "open in another app".
+      emitError(error, null, force);
       throw error;
     }
   });
@@ -889,8 +902,10 @@ async function playerStartUrl(args: {
 }): Promise<PlayerState> {
   return serialized(async () => {
     try {
-      if (!/^https?:\/\//i.test(args.url)) throw new Error("Solo se pueden reproducir enlaces http o https");
-      if (!args.entry?.key) throw new Error("Falta el identificador del título");
+      if (!/^https?:\/\//i.test(args.url)) {
+        throw new PlaybackError("playErrHttpOnly", "Solo se pueden reproducir enlaces http o https");
+      }
+      if (!args.entry?.key) throw new PlaybackError("playErrMissingTitle", "Falta el identificador del título");
       if (ctx) await stopInner(false);
       const prefs = await loadPrefs();
       const start = Math.max(0, args.startSeconds ?? 0);
@@ -1082,7 +1097,7 @@ async function switchTranscodeTrack(kind: TrackKind, id: number): Promise<void> 
     });
     reportStart(playback, ticksFromSeconds(time)).catch(() => undefined);
   } catch (error) {
-    emitError(error, current.url);
+    emitError(error, null);
   }
 }
 
@@ -1090,7 +1105,11 @@ async function switchTranscodeTrack(kind: TrackKind, id: number): Promise<void> 
 async function playerSetTrack(kind: string, id: number): Promise<void> {
   const k = normalizeKind(kind);
   if (!k || !ctx) return;
-  if (isTranscoding()) return serialized(() => switchTranscodeTrack(k, id));
+  if (isTranscoding()) {
+    // Asking for the track already playing would restart the transcode for nothing.
+    if (Math.max(0, id) === (k === "audio" ? state.aid : state.sid)) return;
+    return serialized(() => switchTranscodeTrack(k, id));
+  }
   try {
     if (k === "audio") {
       const track = id <= 0 ? null : (scratch.audioMap.get(id) ?? null);
@@ -1153,9 +1172,8 @@ export const engine = {
 export type Engine = typeof engine;
 
 try {
-  registerSessionCleanup(() => {
-    void engine.playerStop(false);
-  });
+  // Returned so logout waits for the final report before the session goes away.
+  registerSessionCleanup(() => engine.playerStop(false));
 } catch (error) {
   console.warn("[player] could not register the session cleanup", error);
 }

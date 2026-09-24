@@ -415,13 +415,28 @@ impl TorrentEngine {
         let Some((hash, idx)) = parse_path(&request.path) else {
             return respond(&mut socket, 404, "Not Found", &[]).await;
         };
-        let handle = {
+        let found = {
             let map = self.active.lock().unwrap();
-            map.get(&hash).map(|a| a.handle.clone())
+            map.get(&hash).map(|a| (a.handle.clone(), a.paused))
         };
-        let Some(handle) = handle else {
+        let Some((handle, paused)) = found else {
             return respond(&mut socket, 404, "Not Found", &[]).await;
         };
+        // Counted from here on, so the idle watcher cannot pause it under this request.
+        let _reader = Reader::open(self.clone(), &hash);
+        if paused {
+            // Paused while mpv had no connection open (a long pause, a seek later on):
+            // without this the reads below would wait for pieces that never come.
+            let session = self.session.lock().await.clone();
+            if let Some(session) = session {
+                if session.unpause(&handle).await.is_ok() {
+                    if let Some(active) = self.active.lock().unwrap().get_mut(&hash) {
+                        active.paused = false;
+                        active.last_used = Instant::now();
+                    }
+                }
+            }
+        }
         let Ok(mut file) = handle.clone().stream(idx).await else {
             return respond(&mut socket, 404, "Not Found", &[]).await;
         };
@@ -452,7 +467,6 @@ impl TorrentEngine {
             return socket.shutdown().await;
         }
 
-        let _reader = Reader::open(self.clone(), &hash);
         file.seek(SeekFrom::Start(start)).await?;
         let mut remaining = body_len;
         let mut buf = vec![0u8; READ_CHUNK];

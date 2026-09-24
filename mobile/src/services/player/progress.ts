@@ -25,9 +25,11 @@ export async function reportTick(ctx: EngineContext, snap: PlayerState): Promise
         });
         break;
       case "addon":
-        upsertProgress(ctx.source.entry, snap.time, snap.duration);
+        // Before the duration is known the stored entry (and its duration) is kept.
+        if (snap.duration > 0) upsertProgress(ctx.source.entry, snap.time, snap.duration);
         break;
       case "offline":
+        if (snap.duration <= 0) break;
         downloadRecordPosition(ctx.source.downloadId, snap.time, snap.duration);
         if (ctx.source.entry) upsertProgress(ctx.source.entry, snap.time, snap.duration);
         break;

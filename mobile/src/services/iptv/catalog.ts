@@ -221,13 +221,15 @@ export function epgUrlFor(source: StoredSource, password: string, headerEpg: str
 
 /**
  * Downloads the guide, streams it into SQLite and links the channels. Failures end up in
- * `catalog.epgError` (the playlist stays usable).
+ * `catalog.epgError` (the playlist stays usable). When `isCurrent` turns false (the source
+ * was removed or the profile left meanwhile) the staged rows are dropped, not committed.
  */
 export async function attachEpg(
   catalog: Catalog,
   source: StoredSource,
   password: string,
   headerEpg: string | null,
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   const url = epgUrlFor(source, password, headerEpg);
   if (url === null) return;
@@ -241,11 +243,16 @@ export async function attachEpg(
     const epg = new EpgWriter(source.id);
     writer = epg;
     await streamTextFile(file, (text) => {
+      if (!isCurrent()) throw new Error("superseded");
       scanner.push(text);
       epg.insert(scanner.drain());
     });
     scanner.finish();
     epg.insert(scanner.drain());
+    if (!isCurrent()) {
+      epg.abort();
+      return;
+    }
     catalog.channelEpg = linkGuide(catalog.channels, scanner.names, scanner.idsWithProgrammes);
     epg.commit();
     catalog.epgError = null;
