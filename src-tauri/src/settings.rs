@@ -334,9 +334,26 @@ pub fn load(app: &tauri::AppHandle, user_id: &str) -> Result<Settings, String> {
     let Some(value) = store.get(key(user_id)) else {
         return Ok(Settings::default());
     };
-    let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_default();
-    legacy_done(&value, &mut settings);
-    Ok(settings.sanitized())
+    Ok(from_stored(&value).sanitized())
+}
+
+/// The stored object as `Settings`. A section that no longer reads (hand-edited, or a
+/// field whose type changed) falls back to its defaults alone instead of taking every
+/// other section with it.
+fn from_stored(value: &Value) -> Settings {
+    let mut settings: Settings = serde_json::from_value(value.clone()).unwrap_or_else(|_| {
+        let mut kept = serde_json::Map::new();
+        for (key, section) in value.as_object().into_iter().flatten() {
+            let mut probe = serde_json::Map::new();
+            probe.insert(key.clone(), section.clone());
+            if serde_json::from_value::<Settings>(Value::Object(probe)).is_ok() {
+                kept.insert(key.clone(), section.clone());
+            }
+        }
+        serde_json::from_value(Value::Object(kept)).unwrap_or_default()
+    });
+    legacy_done(value, &mut settings);
+    settings
 }
 
 /// Deep-merges `patch` into the stored object, validates and saves. Returns the result.
@@ -352,16 +369,12 @@ pub fn merge_and_save(
         return Err("Ajustes demasiado grandes".into());
     }
     let store = app.store(crate::store_path()).map_err(|e| e.to_string())?;
-    // Start from what the store holds as the app reads it (a damaged file falls back
-    // to the defaults, as `load` does), then apply the patch; one it cannot read is
-    // refused rather than resetting every setting.
+    // Start from what the store holds as the app reads it (a damaged section falls back
+    // to its defaults, as `load` does), then apply the patch; a patch the app cannot
+    // read is refused.
     let stored: Settings = store
         .get(key(user_id))
-        .and_then(|v| {
-            let mut settings: Settings = serde_json::from_value(v.clone()).ok()?;
-            legacy_done(&v, &mut settings);
-            Some(settings)
-        })
+        .map(|v| from_stored(&v))
         .unwrap_or_default();
     let mut current = serde_json::to_value(&stored).map_err(|e| e.to_string())?;
     deep_merge(&mut current, patch);

@@ -41,6 +41,43 @@ pub fn store_path() -> std::path::PathBuf {
     }
 }
 
+/// Guards `session.json` against a torn write (the store plugin overwrites it in place
+/// and, when it cannot parse it, starts empty and saves that over everything). Runs
+/// before anything opens the store: a file that reads is copied to `session.json.bak`;
+/// one that does not is set aside as `session.json.corrupt` and the backup put back.
+fn protect_store_file(app: &tauri::AppHandle) {
+    let Ok(path) = app.path().resolve(store_path(), tauri::path::BaseDirectory::AppData) else {
+        return;
+    };
+    let with_suffix = |suffix: &str| {
+        let mut name = path.clone().into_os_string();
+        name.push(suffix);
+        std::path::PathBuf::from(name)
+    };
+    let (backup, corrupt) = (with_suffix(".bak"), with_suffix(".corrupt"));
+    let reads = |file: &std::path::Path| {
+        std::fs::read(file)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(&bytes).ok())
+            .is_some()
+    };
+    if !path.exists() {
+        return;
+    }
+    if reads(&path) {
+        // Copy then rename, so the backup itself is never half written.
+        let tmp = with_suffix(".bak.tmp");
+        if std::fs::copy(&path, &tmp).is_ok() {
+            let _ = std::fs::rename(&tmp, &backup);
+        }
+        return;
+    }
+    let _ = std::fs::rename(&path, &corrupt);
+    if reads(&backup) {
+        let _ = std::fs::copy(&backup, &path);
+    }
+}
+
 pub struct AppState {
     pub jellyfin: JellyfinClient,
     pub player: Arc<Player>,
@@ -2232,6 +2269,7 @@ pub fn run() {
         .setup(|app| {
             let state = app.state::<AppState>();
             let handle = app.handle().clone();
+            protect_store_file(&handle);
             if let Some(window) = app.get_webview_window("main") {
                 if let Err(err) = create_player_overlay(&handle, &window) {
                     eprintln!("player overlay: {err}");
