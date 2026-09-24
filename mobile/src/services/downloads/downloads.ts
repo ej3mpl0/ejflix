@@ -12,6 +12,7 @@ import { emit } from "../events";
 import { KEYS, store } from "../store";
 import { settingsUser } from "../settings";
 import { registerSessionCleanup } from "../session";
+import { registerProfileDeleteHook } from "../profiles";
 import { currentRule } from "../parental";
 import { jellyfin, authHeaders } from "../jellyfin/client";
 import { mediaSourceContainer } from "../jellyfin/items";
@@ -183,10 +184,17 @@ function run(profile: string, id: string): void {
   running.set(id, slot);
   dispatch(profile, { type: "status", id, status: "downloading", now: Date.now() });
 
+  /** Removed meanwhile: a late write must not leave the file behind (unless it was added again). */
+  const dropLeftover = () => {
+    if (!running.has(id) && !lists.get(profile)?.some((entry) => entry.id === id)) deleteFile(file);
+  };
   const transfer = usedResume ? task.resumeAsync() : task.downloadAsync();
   transfer
     .then((result) => {
-      if (slot.cancelled) return;
+      if (slot.cancelled) {
+        dropLeftover();
+        return;
+      }
       if (result == null) {
         // Paused: keep what the native side needs to continue later (not the headers).
         let resume: ResumeState | null = null;
@@ -209,7 +217,10 @@ function run(profile: string, id: string): void {
       dispatch(profile, { type: "status", id, status: "done", now: Date.now() });
     })
     .catch((error) => {
-      if (slot.cancelled) return;
+      if (slot.cancelled) {
+        dropLeftover();
+        return;
+      }
       if (slot.usedResume) {
         // Stale resume data (server restarted, file moved): start over once from zero.
         dispatch(profile, { type: "resumeState", id, resume: null });
@@ -492,6 +503,33 @@ try {
   });
 } catch (error) {
   console.warn("[downloads] could not register the session cleanup", error);
+}
+
+// A deleted profile takes its downloads (files included) with it.
+try {
+  registerProfileDeleteHook((profileId) => {
+    for (const [id, slot] of Array.from(running.entries())) {
+      if (slot.owner !== profileId) continue;
+      slot.cancelled = true;
+      running.delete(id);
+      try {
+        slot.task.cancel();
+      } catch {
+        /* already stopped */
+      }
+    }
+    try {
+      const dir = new Directory(Paths.document, "downloads", safeSegment(profileId));
+      if (dir.exists) dir.delete();
+    } catch (error) {
+      console.warn("[downloads] could not delete the profile's files", error);
+    }
+    lists.delete(profileId);
+    lastPersist.delete(profileId);
+    store.remove(KEYS.downloads(profileId));
+  });
+} catch (error) {
+  console.warn("[downloads] could not register the profile cleanup", error);
 }
 
 // Back in the foreground is the natural moment to catch up with the server.
