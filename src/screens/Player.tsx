@@ -51,11 +51,16 @@ export function Player({
   mode = "engine",
   onExit,
   onError,
+  fullscreen: fullscreenProp,
+  onFullscreenChange,
 }: {
   movie: Movie;
   mode?: "engine" | "overlay";
   onExit: () => void;
   onError: (message: string) => void;
+  /** Window fullscreen, kept by the overlay app so it survives the next episode's remount. */
+  fullscreen?: boolean;
+  onFullscreenChange?: (fullscreen: boolean) => void;
 }) {
   const { t } = useI18n();
   const { settings, update: updateSettings } = useSettings();
@@ -74,7 +79,9 @@ export function Player({
   const [detail, setDetail] = useState<Movie | null>(null);
   // Controls stay hidden on start (Nuvio); any mouse or key activity reveals them.
   const [visible, setVisible] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
+  const [ownFullscreen, setOwnFullscreen] = useState(false);
+  const fullscreen = fullscreenProp ?? ownFullscreen;
+  const setFullscreen = onFullscreenChange ?? setOwnFullscreen;
   const [menu, setMenu] = useState<PlayerMenu>(null);
   const [panel, setPanel] = useState(false);
   const [locked, setLocked] = useState(false);
@@ -89,6 +96,8 @@ export function Player({
   /** Subtitle track to bring back when V turns subtitles on again. */
   const lastSub = useRef<number | null>(null);
   const [volHud, setVolHud] = useState<number | null>(null);
+  /** Last volume asked for while the HUD shows: quick wheel ticks add up before mpv reports. */
+  const volTarget = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
   const [splash, setSplash] = useState(true);
   const remaining = settings.playback.showTimeRemaining;
@@ -172,10 +181,17 @@ export function Player({
 
   useEffect(() => {
     let cancelled = false;
+    /** Start command in flight: a stop must wait for it, or the file would load after it. */
+    let starting: Promise<unknown> | null = null;
     const unlistenState = api.onPlayerState(setState);
-    const unlistenHotkey = api.onPlayerHotkey((key) => hotkeyRef.current(key));
+    // Only the overlay handles the hotkeys; the main window hears the same global event.
+    const unlistenHotkey = overlay ? api.onPlayerHotkey((key) => hotkeyRef.current(key)) : null;
 
     if (!overlay) {
+      // The engine player is not remounted per item: forget the previous start's leftovers.
+      setStartHint("");
+      setStartError(null);
+      setTorrentHash(null);
       const start = ticksToSeconds(movie.playbackPositionTicks);
       const title = isEpisode
         ? [movie.seriesName, episodeCode(movie, "S{s}:E{e}"), movie.name].filter(Boolean).join(" · ")
@@ -192,7 +208,9 @@ export function Player({
         try {
           if (movie.live) {
             // IPTV channel: Rust resolves the stream URL (Xtream credentials stay there).
-            const next = await api.iptvPlay(movie.live.channelId);
+            const request = api.iptvPlay(movie.live.channelId);
+            starting = request;
+            const next = await request;
             if (cancelled) return;
             void api.openPlayer(movie);
             setState(next);
@@ -241,31 +259,39 @@ export function Player({
             const full: Movie = { ...movie, external: { ...ext, stream, prefer, next: nextMovie } };
             const entry = resumeEntryOf(full);
             if (!entry) throw new Error(tRef.current("playerStartError"));
-            const next = await api.playerStartUrl({
+            const request = api.playerStartUrl({
               url,
               title,
               headers: stream.headers,
               startSeconds: start > 5 ? start : 0,
               entry,
             });
+            starting = request;
+            const next = await request;
             if (cancelled) return;
+            // Playing: the cover no longer needs the torrent's peers.
+            setTorrentHash(null);
             void api.openPlayer(full);
             setState(next);
             return;
           }
-          const next = await api.playerStart({
+          const request = api.playerStart({
             itemId: movie.id,
             title,
             startSeconds: start > 5 ? start : 0,
             mediaSourceId: movie.mediaSourceId,
           });
+          starting = request;
+          const next = await request;
           if (cancelled) return;
           void api.openPlayer(movie);
           setState(next);
         } catch (err) {
           if (cancelled) return;
           setStartHint("");
-          setStartError(err instanceof Error ? err.message : tRef.current("playerStartError"));
+          // Tauri commands reject with the Rust message as a plain string.
+          const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+          setStartError(message || tRef.current("playerStartError"));
         }
       };
       void begin();
@@ -274,9 +300,13 @@ export function Player({
     return () => {
       cancelled = true;
       void unlistenState.then((fn) => fn());
-      void unlistenHotkey.then((fn) => fn());
+      void unlistenHotkey?.then((fn) => fn());
       // Still mounted here means the movie prop changed (next episode): keep the window.
-      if (!overlay) stopping.current = api.playerStop(mounted.current);
+      if (!overlay) {
+        const switching = mounted.current;
+        const pending = starting ? starting.catch(() => undefined) : Promise.resolve();
+        stopping.current = pending.then(() => api.playerStop(switching));
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [movie, overlay, attempt]);
@@ -339,14 +369,6 @@ export function Player({
     };
   }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external]);
 
-  // End of file without anything to chain into: leave the player. With a next episode
-  // the card (below) decides whether and when to continue.
-  useEffect(() => {
-    if (!overlay || !state.eof || nextEpisode) return;
-    onExit();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [overlay, state.eof, nextEpisode]);
-
   // First frame: the file is loaded once mpv reports a duration or advances time.
   useEffect(() => {
     if (!ready && (state.duration > 0 || state.time > 0)) setReady(true);
@@ -379,14 +401,25 @@ export function Player({
     const onKey = (e: KeyboardEvent) => keydownRef.current(e);
     const onMove = () => bump();
     const onWheel = (e: WheelEvent) => {
+      // Side panels and track menus scroll their own lists.
+      if (e.target instanceof Element && e.target.closest("[data-own-wheel]")) return;
       e.preventDefault();
       if (lockedRef.current) return;
       wheelRef.current(e.deltaY);
     };
+    // A mouse click leaves the focus on the button, and Space/Enter would press it again
+    // later (fullscreen, lock, back) instead of pausing. Keyboard clicks keep it (detail 0).
+    const onClick = (e: MouseEvent) => {
+      if (e.detail === 0 || !(e.target instanceof Element)) return;
+      const button = e.target.closest("button");
+      if (button && button === document.activeElement) button.blur();
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("mousemove", onMove);
     window.addEventListener("wheel", onWheel, { passive: false });
+    window.addEventListener("click", onClick);
     return () => {
+      window.removeEventListener("click", onClick);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("wheel", onWheel);
@@ -414,11 +447,17 @@ export function Player({
     void api.playerSeek(seconds, false);
   };
 
+  const currentVolume = () => volTarget.current ?? stateRef.current.volume;
+
   const changeVolume = async (value: number) => {
-    const next = await api.playerSetVolume(value);
+    volTarget.current = Math.max(0, Math.min(100, value));
+    const next = await api.playerSetVolume(volTarget.current);
     setVolHud(next);
     window.clearTimeout(volTimer.current);
-    volTimer.current = window.setTimeout(() => setVolHud(null), 1200);
+    volTimer.current = window.setTimeout(() => {
+      volTarget.current = null;
+      setVolHud(null);
+    }, 1200);
   };
 
   const toggleFullscreen = async () => {
@@ -504,7 +543,7 @@ export function Player({
 
   wheelRef.current = (deltaY) => {
     if (live && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
-    else void changeVolume(stateRef.current.volume + (deltaY < 0 ? 5 : -5));
+    else void changeVolume(currentVolume() + (deltaY < 0 ? 5 : -5));
   };
 
   // Skip intro / recap / credits and the next-episode card (overlay only).
@@ -529,9 +568,18 @@ export function Player({
     duration: state.duration,
     eof: state.eof,
     ready: overlay && ready,
+    paused: state.paused,
     countdownSeconds: settings.playback.nextEpisodeCountdown,
     onPlayNext: playNext,
   });
+
+  // End of file without anything to chain into (or the card dismissed there): leave the
+  // player. With a next episode the card decides whether and when to continue.
+  useEffect(() => {
+    if (!overlay || !state.eof || (nextEpisode && !nextCard.closed)) return;
+    onExit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, state.eof, nextEpisode, nextCard.closed]);
 
   const pauseInfo = usePauseInfo(state.paused, visible);
 
@@ -543,12 +591,19 @@ export function Player({
     else onExit();
   };
 
+  // A panel closed under the pointer never sends its mouseleave: stop holding the controls.
+  useEffect(() => {
+    if (!panel) overUi.current = false;
+  }, [panel]);
+
   const togglePanel = () => {
     setPanel((open) => !open);
     setMenu(null);
   };
 
   const lock = () => {
+    // The controls unmount under the pointer without a mouseleave: stop holding them.
+    overUi.current = false;
     setLocked(true);
     setMenu(null);
     setPanel(false);
@@ -566,7 +621,9 @@ export function Player({
   };
 
   const cycleAspect = () => {
-    void api.playerSetAspect(nextAspect(stateRef.current.aspect));
+    const mode = nextAspect(stateRef.current.aspect);
+    // mpv does not report the override: show it now (no state event arrives while paused).
+    void api.playerSetAspect(mode).then(() => setState((current) => ({ ...current, aspect: mode })));
   };
 
   const playFromPanel = (target: Movie) => {
@@ -650,11 +707,11 @@ export function Player({
         break;
       case "ArrowUp":
         e.preventDefault();
-        void changeVolume(current.volume + 5);
+        void changeVolume(currentVolume() + 5);
         break;
       case "ArrowDown":
         e.preventDefault();
-        void changeVolume(current.volume - 5);
+        void changeVolume(currentVolume() - 5);
         break;
       case "m":
       case "M":

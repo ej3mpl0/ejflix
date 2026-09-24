@@ -65,12 +65,17 @@ export function SettingsProvider({
   const update = useCallback(async (patch: SettingsPatch) => {
     const previous = settingsRef.current;
     const optimistic = mergePatch(previous, patch);
+    // Kept in step at once, so a second update before the next render builds on this one.
+    settingsRef.current = optimistic;
     setSettings(optimistic);
     try {
       const saved = await api.settingsSet(patch);
       setSettings(saved);
     } catch (err) {
-      setSettings(previous);
+      // Roll back to what Rust holds: a snapshot would also undo updates made meanwhile.
+      const current = await api.settingsGet().catch(() => previous);
+      settingsRef.current = current;
+      setSettings(current);
       onErrorRef.current?.(err instanceof Error ? err.message : String(err));
     }
   }, []);

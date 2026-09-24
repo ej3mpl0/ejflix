@@ -80,6 +80,7 @@ export function ChannelsPanel({
 
   return (
     <aside
+      data-own-wheel
       className="panel-in absolute inset-y-0 right-0 z-[35] flex w-[400px] flex-col border-l border-white/10 bg-surface/95 text-text shadow-[-24px_0_48px_rgb(0_0_0_/_0.45)] backdrop-blur-md"
       onClick={(e) => e.stopPropagation()}
       onDoubleClick={(e) => e.stopPropagation()}

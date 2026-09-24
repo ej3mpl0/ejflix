@@ -90,6 +90,7 @@ export function SearchPage({
   const request = useRef(0);
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const lastError = useRef("");
 
   // Searchable addon catalogs, resolved once instead of on every keystroke.
   useEffect(() => {
@@ -128,10 +129,19 @@ export function SearchPage({
     setLoading(true);
     const handle = window.setTimeout(async () => {
       const serverJob = hasServer
-        ? api.searchItems(trimmed).catch((err) => {
-            onErrorRef.current(err instanceof Error ? err.message : String(err));
-            return [] as Movie[];
-          })
+        ? api
+            .searchItems(trimmed)
+            .then((list) => {
+              lastError.current = "";
+              return list;
+            })
+            .catch((err) => {
+              // Once per failure streak, not on every keystroke.
+              const message = err instanceof Error ? err.message : String(err);
+              if (message !== lastError.current) onErrorRef.current(message);
+              lastError.current = message;
+              return [] as Movie[];
+            })
         : Promise.resolve([] as Movie[]);
       const onlineJob = Promise.all(
         catalogs.map((c) =>
@@ -185,12 +195,14 @@ export function SearchPage({
   const active = genre ? genres.find((row) => row.id === genre) : null;
   const showDiscover = query.trim().length < 2;
   const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail";
-  const nothing = searched && !loading && !results.length && !online.length;
-  const ofKind = (list: Movie[]) => (kind === "all" ? list : list.filter((movie) => movie.kind === kind));
-  const shownResults = ofKind(results);
-  const shownOnline = ofKind(online);
   const kinds = new Set([...results, ...online].map((movie) => movie.kind));
   const canFilter = kinds.has("Movie") && kinds.has("Series");
+  // The filter only applies while it is on screen: a query with one kind shows everything.
+  const shownKind = canFilter ? kind : "all";
+  const ofKind = (list: Movie[]) => (shownKind === "all" ? list : list.filter((movie) => movie.kind === shownKind));
+  const shownResults = ofKind(results);
+  const shownOnline = ofKind(online);
+  const nothing = searched && !loading && !shownResults.length && !shownOnline.length;
 
   return (
     <div className="page-enter px-page pt-24 pb-16">
@@ -267,7 +279,7 @@ export function SearchPage({
         <section className={cn("transition-opacity duration-200", loading && searched && "opacity-70")}>
           {/* Announced to screen readers once a search settles. */}
           <p className="sr-only" role="status" aria-live="polite">
-            {searched && !loading ? t("resultsCount", { n: results.length + online.length }) : ""}
+            {searched && !loading ? (shownResults.length + shownOnline.length === 1 ? t("resultsCountOne") : t("resultsCount", { n: shownResults.length + shownOnline.length })) : ""}
           </p>
           {canFilter ? (
             <div className="mb-6">

@@ -145,6 +145,18 @@ export function PlayerControls({
       ? `-${formatClock(Math.max(0, state.duration - shownTime))}`
       : `${formatClock(shownTime)} / ${formatClock(state.duration)}`;
 
+  // Only the bars hold the controls on screen; the layer between them is the video.
+  const holdHandlers = {
+    onMouseEnter: () => {
+      overChrome.current = true;
+      onHoldUi(true);
+    },
+    onMouseLeave: () => {
+      overChrome.current = false;
+      onHoldUi(false);
+    },
+  };
+
   const toggleMenu = (next: Exclude<PlayerMenu, null>) => onMenu(menu === next ? null : next);
   const isEpisode = isSeriesEpisode(movie);
   const heading = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
@@ -182,22 +194,18 @@ export function PlayerControls({
         style={{ opacity: visible ? 1 : 0, pointerEvents: visible ? "auto" : "none" }}
         onClick={(e) => {
           e.stopPropagation();
-          if (e.target === e.currentTarget && menu) onMenu(null);
+          // The empty area is the video: close what is open, else play / pause.
+          if (e.target === e.currentTarget) onVideoClick();
         }}
-        onDoubleClick={(e) => e.stopPropagation()}
-        onMouseEnter={() => {
-          overChrome.current = true;
-          onHoldUi(true);
-        }}
-        onMouseLeave={() => {
-          overChrome.current = false;
-          onHoldUi(false);
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (e.target === e.currentTarget) onVideoDoubleClick();
         }}
       >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[160px] bg-gradient-to-b from-black/80 via-black/40 to-transparent" />
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[280px] bg-gradient-to-t from-black via-black/70 to-transparent" />
 
-        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4">
+        <div className="absolute top-0 inset-x-0 flex items-center gap-3 px-5 py-4" {...holdHandlers}>
           <button
             type="button"
             className="icon-hit grid h-10 w-10 place-items-center text-white"
@@ -250,7 +258,7 @@ export function PlayerControls({
           </div>
         </div>
 
-        <div className="absolute inset-x-0 bottom-0 px-6 pb-4">
+        <div className="absolute inset-x-0 bottom-0 px-6 pb-4" {...holdHandlers}>
           {live ? (
             live.now ? (
               <div className="mb-2 px-1">

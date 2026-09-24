@@ -111,8 +111,8 @@ export function Profiles({
     setSelected(user);
   };
 
-  const enterLocal = async (profile: LocalProfile, pin?: string) => {
-    if (editing) {
+  const enterLocal = async (profile: LocalProfile, pin?: string, force = false) => {
+    if (editing && !force) {
       setEditor(profile);
       return;
     }
@@ -195,7 +195,11 @@ export function Profiles({
               onSaved={(profile, pin) => {
                 setEditor(null);
                 void loadLocals();
-                if (!initial) void enterLocal(profile, pin ?? undefined);
+                if (!initial) {
+                  // Created from edit mode too: enter it, not its editor.
+                  setEditing(false);
+                  void enterLocal(profile, pin ?? undefined, true);
+                }
               }}
               onDeleted={() => {
                 setEditor(null);

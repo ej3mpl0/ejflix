@@ -83,6 +83,8 @@ export function LiveTv({
 
   const loadChannels = useCallback(
     async (first: boolean) => {
+      // A next page while the first one of a new filter loads would land on the old list.
+      if (!first && loading) return;
       const id = ++request.current;
       if (first) setLoading(true);
       else setLoadingMore(true);
@@ -109,7 +111,7 @@ export function LiveTv({
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [selection, sourceId, query, items.length],
+    [selection, sourceId, query, items.length, loading],
   );
 
   // Reload when the playlists change (refresh finished) or the filters do.
@@ -203,7 +205,7 @@ export function LiveTv({
           <p className="mt-1 text-[13px] text-dim">
             {anyLoading && !ready
               ? t("iptvLoading")
-              : `${t("iptvChannels", { n: channelTotal })} · ${t("iptvGroups", { n: groupTotal })}`}
+              : `${channelTotal === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: channelTotal })} · ${groupTotal === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: groupTotal })}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -333,7 +335,7 @@ export function LiveTv({
               <EpgGuide channels={items} onPlay={play} />
               {items.length < total ? (
                 <LoadMoreButton
-                  loading={loadingMore}
+                  loading={loading || loadingMore}
                   onLoad={() => void loadChannels(false)}
                   remaining={total - items.length}
                 />
@@ -355,7 +357,7 @@ export function LiveTv({
               </div>
               {items.length < total ? (
                 <LoadMoreButton
-                  loading={loadingMore}
+                  loading={loading || loadingMore}
                   onLoad={() => void loadChannels(false)}
                   remaining={total - items.length}
                 />

@@ -913,7 +913,8 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
                                 .get("title")
                                 .and_then(|v| v.as_str())
                                 .or_else(|| t.get("lang").and_then(|v| v.as_str()))
-                                .unwrap_or("Pista")
+                                // No name: the UI shows a translated "Track N".
+                                .unwrap_or("")
                                 .to_string(),
                             lang: t.get("lang").and_then(|v| v.as_str()).map(|s| s.to_string()),
                             selected: t.get("selected").and_then(|v| v.as_bool()).unwrap_or(false),

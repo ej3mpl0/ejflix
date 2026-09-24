@@ -45,6 +45,7 @@ const es = {
   subtitles: "Subt\u00edtulos",
   subtitlesOff: "Desactivados",
   noTracks: "Sin pistas",
+  trackNumber: "Pista {n}",
   cannotConnect: "No se puede conectar a Jellyfin",
   retry: "Reintentar",
   close: "Cerrar",
@@ -685,6 +686,12 @@ const es = {
   seekStep: "Salto con flechas y botones",
   seekStepHint: "Cuánto avanzan o retroceden las flechas y los botones del reproductor.",
   note18: "Subtítulos a tu gusto: tamaño, color, fondo y retraso, y carga de archivos .srt; estadísticas técnicas (tecla I); tráileres; reparto que abre su filmografía; «Ver todo» en cada fila; vista previa al pasar el ratón; guía de programación en rejilla en TV en directo; buscador y nueva organización de Ajustes; y al fallar una fuente, reintentar u otra fuente sin salir. La pantalla de conexión de los torrents muestra peers y velocidad.",
+  // Singular forms of counted strings (the plain key is the plural).
+  iptvChannelsOne: "1 canal",
+  iptvGroupsOne: "1 grupo",
+  resultsCountOne: "1 resultado",
+  importResultOne: "1 addon importado",
+  importFailedOne: "1 no se pudo a\u00f1adir",
 };
 
 const en: typeof es = {
@@ -732,6 +739,7 @@ const en: typeof es = {
   subtitles: "Subtitles",
   subtitlesOff: "Off",
   noTracks: "No tracks",
+  trackNumber: "Track {n}",
   cannotConnect: "Can't connect to Jellyfin",
   retry: "Retry",
   close: "Close",
@@ -1372,6 +1380,12 @@ const en: typeof es = {
   seekStep: "Arrow and button jump",
   seekStepHint: "How far the arrows and the player buttons jump.",
   note18: "Subtitles your way: size, colour, background and delay, plus loading .srt files; technical stats (I key); trailers; cast that opens their filmography; See all on every row; a hover preview; a programme guide grid in Live TV; a search box and a new layout in Settings; and when a source fails, retry or another source without leaving. The torrent loading screen shows peers and speed.",
+  // Singular forms of counted strings (the plain key is the plural).
+  iptvChannelsOne: "1 channel",
+  iptvGroupsOne: "1 group",
+  resultsCountOne: "1 result",
+  importResultOne: "1 addon imported",
+  importFailedOne: "1 could not be added",
 };
 
 export const dictionaries = { es, en };
