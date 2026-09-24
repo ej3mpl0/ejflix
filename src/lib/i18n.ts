@@ -1035,6 +1035,11 @@ const es = {
   partyErrOffline: "No se ha podido conectar. Revisa tu conexión a Internet.",
   partyErrRateLimited: "Vas muy rápido: espera un momento.",
   partyErrGeneric: "No se ha podido conectar con la sesión.",
+  // --- playback review ---
+  errMultiviewCount: "Elige entre 2 y 4 canales.",
+  errMultiviewConnections: "Tu cuenta permite {detail} conexiones a la vez.",
+  errMultiviewTooFew: "No se han podido abrir suficientes canales.",
+  errMultiviewNoAudio: "Este canal no tiene sonido.",
 };
 
 const en: typeof es = {
@@ -2072,6 +2077,11 @@ const en: typeof es = {
   partyErrOffline: "Couldn't connect. Check your internet connection.",
   partyErrRateLimited: "Slow down a little.",
   partyErrGeneric: "Couldn't connect to the party.",
+  // --- playback review ---
+  errMultiviewCount: "Pick between 2 and 4 channels.",
+  errMultiviewConnections: "Your account allows {detail} connections at a time.",
+  errMultiviewTooFew: "Couldn't open enough channels.",
+  errMultiviewNoAudio: "This channel has no sound.",
 };
 
 export const dictionaries = { es, en };

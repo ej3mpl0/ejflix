@@ -2509,7 +2509,7 @@ struct MultiviewStart {
 async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: Vec<String>) -> Result<MultiviewStart, String> {
     let uid = iptv_user(&app, &state).await?;
     if !(2..=4).contains(&ids.len()) {
-        return Err("Elige entre 2 y 4 canales".into());
+        return Err(crate::errors::code("multiviewCount"));
     }
     let sources = iptv::list_sources(&app, &uid);
     let mut resolved = Vec::new();
@@ -2534,7 +2534,7 @@ async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: 
         if let Some(max) = account.as_ref().and_then(|a| a.max_connections).filter(|&m| m > 0) {
             let wanted = resolved.iter().filter(|(_, c, ..)| c.source_id == channel.source_id).count();
             if wanted > max as usize {
-                return Err(format!("Tu cuenta permite {max} conexiones a la vez"));
+                return Err(crate::errors::detail("multiviewConnections", max));
             }
         }
     }
@@ -2543,7 +2543,7 @@ async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: 
     let alive = state.iptv.probe(&targets).await;
     let resolved: Vec<_> = resolved.into_iter().zip(alive).filter(|(_, ok)| *ok).map(|(r, _)| r).collect();
     if resolved.len() < 2 {
-        return Err("No se pudieron abrir suficientes canales".into());
+        return Err(crate::errors::code("multiviewTooFew"));
     }
     let urls: Vec<String> = resolved.iter().map(|(_, _, url, ..)| url.clone()).collect();
     let names: Vec<String> = resolved.iter().map(|(_, c, ..)| c.name.clone()).collect();

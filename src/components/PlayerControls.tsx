@@ -372,7 +372,13 @@ export function PlayerControls({
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
                   {live.catchup ? t("catchup") : t("liveBadge")}
                 </span>
-              ) : (
+              ) : null}
+              {live?.catchup ? (
+                <span className="ml-2 min-w-0 truncate text-[13px] whitespace-nowrap text-white/90 tabular">
+                  {formatClock(shownTime)} /{" "}
+                  {formatClock(state.duration > 0 ? state.duration : live.now ? live.now.stop - live.now.start : 0)}
+                </span>
+              ) : live ? null : (
                 <button
                   type="button"
                   className="icon-hit ml-2 min-w-0 truncate rounded px-1.5 py-1 text-[13px] whitespace-nowrap text-white/90 tabular hover:bg-white/8"
@@ -388,11 +394,11 @@ export function PlayerControls({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && !live.catchup && "invisible")}
                 onClick={() => onSeek(-seekStep)}
                 aria-label={t("seekBack")}
                 title={`${t("seekBack")} (J)`}
-                tabIndex={live ? -1 : undefined}
+                tabIndex={live && !live.catchup ? -1 : undefined}
               >
                 <RotateCcw size={20} />
               </button>
@@ -418,11 +424,11 @@ export function PlayerControls({
               </button>
               <button
                 type="button"
-                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && "invisible")}
+                className={cn("icon-hit grid h-10 w-10 place-items-center text-white", live && !live.catchup && "invisible")}
                 onClick={() => onSeek(seekStep)}
                 aria-label={t("seekForward")}
                 title={`${t("seekForward")} (L)`}
-                tabIndex={live ? -1 : undefined}
+                tabIndex={live && !live.catchup ? -1 : undefined}
               >
                 <RotateCw size={20} />
               </button>
