@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
+  Clapperboard,
   Clock,
   CalendarDays,
   Command,
@@ -16,6 +17,7 @@ import {
   Puzzle,
   Search,
   Settings as SettingsIcon,
+  ShieldCheck,
   Sparkles,
   Tv,
   Users,
@@ -94,6 +96,8 @@ const SECTIONS: Array<{ id: SettingsSectionId; label: MessageKey; icon: ReactNod
   { id: "iptv", label: "iptv", icon: <Tv size={16} /> },
   { id: "discord", label: "discord", icon: <Globe size={16} /> },
   { id: "account", label: "account", icon: <Users size={16} /> },
+  { id: "parental", label: "parentalTitle", icon: <ShieldCheck size={16} /> },
+  { id: "trakt", label: "traktTitle", icon: <Clapperboard size={16} /> },
   { id: "updates", label: "updates", icon: <Sparkles size={16} /> },
   { id: "about", label: "about", icon: <SettingsIcon size={16} /> },
 ];

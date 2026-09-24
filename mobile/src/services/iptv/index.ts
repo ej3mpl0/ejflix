@@ -23,6 +23,7 @@ import { xtreamCheck } from "./catalog";
 import * as sources from "./sources";
 import * as state from "./state";
 import { parseXtreamUrl } from "./xtream";
+import { BLOCKED, hidesAdult, isAdultChannel } from "../parental";
 
 function requireUser(): string {
   const uid = settingsUser();
@@ -155,6 +156,7 @@ export async function resolveChannelPlayback(channelId: string): Promise<{
   const uid = requireUser();
   const found = state.find(channelId);
   if (!found) throw new PlaybackError("playErrChannelNotFound", "Canal no encontrado");
+  if (hidesAdult() && isAdultChannel(found.channel)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
   const source = sources.listSources(uid).find((s) => s.id === found.channel.sourceId);
   if (!source) throw new PlaybackError("playErrChannelListGone", "La lista de este canal ya no existe");
   const password = await sources.passwordOf(source);

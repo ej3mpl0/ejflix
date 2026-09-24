@@ -23,6 +23,7 @@ import { channelToMovie } from "../lib/iptv";
 import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { openInExternalPlayer } from "../lib/external-player";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
 import { useSettings } from "../lib/settings-context";
 import { useToast } from "../lib/toast-context";
 import { decodeSubtitleBytes, parseSubtitles, type Cue } from "../lib/subtitles";
@@ -345,8 +346,16 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         // Stay on the player with the error, a retry and (online) another source. The
         // engine already reported its own failures (with their code and URL): keep those.
         const transcoding = mode?.forceTranscode === true;
-        const failure: PlayerError =
-          err instanceof PlaybackError
+        const failure: PlayerError = isParentalBlocked(err)
+          ? {
+              message: tRef.current("parentalBlockedTitle"),
+              detail: "",
+              code: "unknown",
+              url: null,
+              key: "parentalBlockedTitle",
+              transcoding,
+            }
+          : err instanceof PlaybackError
             ? { message: err.message, detail: "", code: "unknown", url: null, key: err.key, transcoding }
             : {
                 message: tRef.current("playerStartError"),

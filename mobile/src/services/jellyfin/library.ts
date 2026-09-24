@@ -7,6 +7,9 @@ import { launchSeed, mapLimit, urlencodingLite, validItemId } from "../util";
 import { jellyfin, type JellyfinSession } from "./client";
 import { DETAIL_FIELDS, ITEM_FIELDS, mapItem } from "./items";
 import { parseIntroSkipper, parseJellyfinSegments, type RawJellyfinSegment } from "../segments.pure";
+import { BLOCKED, currentRule } from "../parental";
+import { allowsRating } from "../parental.pure";
+import { onSessionChange } from "../session";
 
 function requireSession(): JellyfinSession {
   const session = jellyfin.session;
@@ -25,12 +28,55 @@ function itemsOf(value: unknown): unknown[] {
   return Array.isArray(items) ? items : [];
 }
 
+/** Series id -> its official rating: episodes and seasons rarely carry their own. */
+const seriesRatings = new Map<string, string | null>();
+onSessionChange(() => seriesRatings.clear());
+
+/**
+ * Drops what the open profile's parental restriction does not allow (`parental.rs`).
+ * An episode or season without a rating is judged by its series' rating.
+ */
+async function restrict(items: Movie[]): Promise<Movie[]> {
+  const rule = currentRule();
+  if (!rule) return items;
+  const session = requireSession();
+  const missing = [
+    ...new Set(
+      items
+        .filter((m) => !m.officialRating && m.seriesId && validItemId(m.seriesId) && !seriesRatings.has(m.seriesId))
+        .map((m) => m.seriesId as string),
+    ),
+  ];
+  for (let i = 0; i < missing.length; i += 40) {
+    const chunk = missing.slice(i, i + 40);
+    try {
+      const response = await jellyfin.getResponse(
+        `/Users/${session.userId}/Items?Ids=${chunk.join(",")}&Fields=OfficialRating&EnableImages=false&EnableUserData=false`,
+      );
+      if (!response.ok) continue;
+      const value: unknown = await response.json();
+      for (const id of chunk) seriesRatings.set(id, null);
+      for (const raw of itemsOf(value)) {
+        const item = raw != null && typeof raw === "object" ? (raw as Json) : null;
+        if (typeof item?.Id !== "string") continue;
+        const rating = typeof item.OfficialRating === "string" && item.OfficialRating.trim() ? item.OfficialRating : null;
+        seriesRatings.set(item.Id, rating);
+      }
+    } catch {
+      /* judged without the series rating */
+    }
+  }
+  return items.filter((m) =>
+    allowsRating(rule, m.officialRating ?? (m.seriesId ? (seriesRatings.get(m.seriesId) ?? null) : null)),
+  );
+}
+
 async function itemsQuery(path: string): Promise<Movie[]> {
   requireSession();
   const response = await jellyfin.getResponse(path);
   if (!response.ok) throw new Error(`Jellyfin ${path}: ${response.status}`);
   const value: unknown = await response.json();
-  return itemsOf(value).map(mapItem);
+  return restrict(itemsOf(value).map(mapItem));
 }
 
 /** Library browse with genre / year filters (Discover tab). */
@@ -59,7 +105,14 @@ export async function browseItems(args: BrowseArgs): Promise<Movie[]> {
   if (genre) path += `&Genres=${urlencodingLite(genre)}`;
   const year = args.year;
   if (typeof year === "number" && Number.isInteger(year) && year >= 1880 && year <= 2100) path += `&Years=${year}`;
-  return itemsQuery(path);
+  if (!currentRule()) return itemsQuery(path);
+  // A restricted profile can filter a whole page away; Discover would take the empty
+  // page for the end of the library, so look a few pages further first.
+  for (let attempt = 0, from = start; attempt < 4; attempt++, from += limit) {
+    const list = await itemsQuery(path.replace(`&StartIndex=${start}&`, `&StartIndex=${from}&`));
+    if (list.length) return list;
+  }
+  return [];
 }
 
 /** Genre names of the whole library (movies and series). */
@@ -178,7 +231,9 @@ export async function getItem(id: string): Promise<Movie> {
   const session = requireSession();
   const response = await jellyfin.getResponse(`/Users/${session.userId}/Items/${id}?Fields=${DETAIL_FIELDS}`);
   if (!response.ok) throw new Error("No se encontró la película");
-  return mapItem(await response.json());
+  const [allowed] = await restrict([mapItem(await response.json())]);
+  if (!allowed) throw new Error(BLOCKED);
+  return allowed;
 }
 
 export async function getSeasons(seriesId: string): Promise<Movie[]> {

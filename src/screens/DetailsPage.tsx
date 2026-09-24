@@ -9,6 +9,8 @@ import { chapterImageUrl, hasChapterImages } from "../lib/trickplay";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
+import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
 import { Pill } from "../components/Pill";
@@ -71,6 +73,8 @@ export function DetailsPage({
   const [showTrailer, setShowTrailer] = useState(false);
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   /** Seasons or episodes failed: shown in the episodes section with a retry, not as an endless skeleton. */
   const [listError, setListError] = useState("");
   const [reload, setReload] = useState(0);
@@ -93,7 +97,8 @@ export function DetailsPage({
         if (alive) setDetail(full);
       })
       .catch((err) => {
-        if (alive && !route.seed) setError(err instanceof Error ? err.message : String(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive && !route.seed) setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       alive = false;
@@ -202,6 +207,8 @@ export function DetailsPage({
     }
     if (movie) onPlay(movie);
   };
+
+  if (blocked) return <RestrictedNotice leaving={route.leaving} top={top} onBack={onBack} />;
 
   return (
     <div

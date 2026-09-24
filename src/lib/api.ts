@@ -50,6 +50,11 @@ import type {
   ListItem,
   Person,
   RecommendationRow,
+  ParentalStatus,
+  TraktDeviceCode,
+  TraktImportReport,
+  TraktPoll,
+  TraktStatus,
 } from "./types";
 
 export const api = {
@@ -67,11 +72,14 @@ export const api = {
   logoutServer: () => invoke<void>("logout_server"),
   // Local (online) profiles
   localProfilesList: () => invoke<LocalProfile[]>("local_profiles_list"),
-  localProfileCreate: (name: string, avatar: string, pin?: string | null) =>
-    invoke<LocalProfile>("local_profile_create", { name, avatar, pin: pin ?? null }),
+  /** `parentalPin` is asked for while a profile has a parental restriction. */
+  localProfileCreate: (name: string, avatar: string, pin?: string | null, parentalPin?: string | null) =>
+    invoke<LocalProfile>("local_profile_create", { name, avatar, pin: pin ?? null, parentalPin: parentalPin ?? null }),
   localProfileUpdate: (id: string, patch: ProfilePatch) =>
     invoke<LocalProfile>("local_profile_update", { id, patch }),
-  localProfileDelete: (id: string) => invoke<void>("local_profile_delete", { id }),
+  /** `pin`: the profile's own PIN (unless it is open); `parentalPin` when it is restricted. */
+  localProfileDelete: (id: string, pin?: string | null, parentalPin?: string | null) =>
+    invoke<void>("local_profile_delete", { id, pin: pin ?? null, parentalPin: parentalPin ?? null }),
   /** Opens a local profile; `pin` is required when the profile has one. */
   localProfileEnter: (id: string, pin?: string | null) =>
     invoke<Session>("local_profile_enter", { id, pin: pin ?? null }),
@@ -265,6 +273,26 @@ export const api = {
   /** A sync finished; `pulled` names the kinds this PC took from the account. */
   onAccountSynced: (handler: (report: SyncReport) => void): Promise<UnlistenFn> =>
     listen<SyncReport>("account://synced", (event) => handler(event.payload)),
+  // --- profiles & integrations ---
+  /** Checks a profile's PIN without opening it (rejects with "PIN incorrecto"). */
+  localProfileCheckPin: (id: string, pin: string) => invoke<void>("local_profile_check_pin", { id, pin }),
+  parentalStatus: () => invoke<ParentalStatus>("parental_status"),
+  /** `pin` is the parental PIN, or the new one when none exists yet. */
+  parentalSet: (pin: string, maxAge: number, hideUnrated: boolean, newPin?: string | null) =>
+    invoke<ParentalStatus>("parental_set", { pin, maxAge, hideUnrated, newPin: newPin ?? null }),
+  onParentalChanged: (handler: (status: ParentalStatus) => void): Promise<UnlistenFn> =>
+    listen<ParentalStatus>("parental://changed", (event) => handler(event.payload)),
+  traktStatus: () => invoke<TraktStatus>("trakt_status"),
+  traktSetApp: (clientId: string, clientSecret: string) =>
+    invoke<TraktStatus>("trakt_set_app", { clientId, clientSecret }),
+  traktDeviceStart: () => invoke<TraktDeviceCode>("trakt_device_start"),
+  traktDevicePoll: () => invoke<TraktPoll>("trakt_device_poll"),
+  traktDisconnect: () => invoke<TraktStatus>("trakt_disconnect"),
+  traktSetSyncBack: (on: boolean) => invoke<TraktStatus>("trakt_set_sync_back", { on }),
+  traktImport: () => invoke<TraktImportReport>("trakt_import"),
+  traktOpen: (url: string) => invoke<void>("trakt_open", { url }),
+  onTraktImported: (handler: (report: TraktImportReport) => void): Promise<UnlistenFn> =>
+    listen<TraktImportReport>("trakt://imported", (event) => handler(event.payload)),
   // player
   /** Subtitle ("sub") or audio delay; remembered for the title playing. Returns the value applied. */
   playerSetDelay: (kind: "sub" | "audio", seconds: number) => invoke<number>("player_set_delay", { kind, seconds }),

@@ -36,6 +36,11 @@ export function PinScreen({ route, navigation }: AuthScreenProps<"Pin">) {
     setSigning(true);
     setMessage("");
     try {
+      if (route.params.edit) {
+        await api.localProfileCheckPin(route.params.profileId, pin);
+        navigation.replace("ProfileEditor", { profileId: route.params.profileId, from: "profiles", unlockPin: pin });
+        return;
+      }
       setSession(await api.localProfileEnter(route.params.profileId, pin));
     } catch (err) {
       setPinError(true);

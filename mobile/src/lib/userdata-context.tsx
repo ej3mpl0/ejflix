@@ -64,10 +64,12 @@ export function UserDataProvider({
   const [addonProgress, setAddonProgress] = useState<ResumeEntry[]>([]);
 
   useEffect(() => {
-    api
-      .addonLibraryList()
-      .then(setLibrary)
-      .catch(() => undefined);
+    const load = () =>
+      api
+        .addonLibraryList()
+        .then(setLibrary)
+        .catch(() => undefined);
+    void load();
     const loadProgress = () => {
       api
         .addonProgressList()
@@ -77,8 +79,15 @@ export function UserDataProvider({
     loadProgress();
     // Positions change while playing; refresh when the player closes.
     const unlisten = api.onPlayerClose(loadProgress);
+    // A new parental limit changes what every row may show.
+    const unlistenParental = api.onParentalChanged(() => {
+      void load();
+      loadProgress();
+      setVersion((n) => n + 1);
+    });
     return () => {
       void unlisten.then((fn) => fn());
+      void unlistenParental.then((fn) => fn());
     };
   }, []);
 

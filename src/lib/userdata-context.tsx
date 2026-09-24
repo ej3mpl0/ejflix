@@ -75,6 +75,16 @@ export function UserDataProvider({
     const unlisten = api.onAccountSynced((report) => {
       if (report.pulled.includes("lists")) void load();
     });
+    // A Trakt import filled My list and the watched marks (online and on the server).
+    const unlistenTrakt = api.onTraktImported(() => {
+      void load();
+      setVersion((n) => n + 1);
+    });
+    // A new parental limit changes what every row may show.
+    const unlistenParental = api.onParentalChanged(() => {
+      void load();
+      setVersion((n) => n + 1);
+    });
     // The player marked something watched on stop (past the threshold or in the credits).
     const watched = api.onPlayerWatched((target) => {
       if (target.key) void load();
@@ -90,6 +100,8 @@ export function UserDataProvider({
     return () => {
       alive = false;
       void unlisten.then((fn) => fn());
+      void unlistenTrakt.then((fn) => fn());
+      void unlistenParental.then((fn) => fn());
       void watched.then((fn) => fn());
     };
   }, []);

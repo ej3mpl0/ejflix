@@ -157,6 +157,7 @@ impl AccountState {
 
     /// Loads the account sealed for `user_id` (a profile just opened) and syncs soon.
     pub async fn activate(&self, app: &tauri::AppHandle, user_id: &str) {
+        crate::parental::activate(app, user_id);
         let account = load_account(app, user_id);
         {
             // Both fields under the `user` lock: a sync still running for the previous
@@ -178,6 +179,7 @@ impl AccountState {
 
     /// The profile closed: forget the decrypted account (the store keeps it).
     pub async fn deactivate(&self) {
+        crate::parental::deactivate();
         let mut user = self.user.write().await;
         *self.current.write().await = None;
         *user = None;

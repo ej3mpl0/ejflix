@@ -14,6 +14,8 @@ mod segments;
 mod settings;
 mod torrent;
 mod update;
+mod parental;
+mod trakt;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -432,7 +434,9 @@ fn local_profile_create(
     name: String,
     avatar: String,
     pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<LocalProfileView, String> {
+    parental::check_create(&app, parental_pin.as_deref())?;
     let profile = profiles::create(&app, &name, &avatar, pin.as_deref())?;
     Ok(profile.view(&app))
 }
@@ -444,6 +448,15 @@ async fn local_profile_update(
     id: String,
     patch: ProfilePatch,
 ) -> Result<LocalProfileView, String> {
+    // Changing or removing the PIN of a profile that is not open takes that PIN:
+    // otherwise anyone could clear it from the profile picker and walk in.
+    if patch.pin.is_some() || patch.clear_pin {
+        let open = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+        let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+        if !open && !profile.verify_pin(patch.current_pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
     let updated = profiles::update(&app, &id, patch)?;
     let mut active = state.local.write().await;
     if active.as_ref().is_some_and(|p| p.id == id) {
@@ -457,8 +470,16 @@ async fn local_profile_delete(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
+    pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<(), String> {
     let is_active = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+    if let Some(profile) = profiles::get(&app, &id)? {
+        if !is_active && !profile.verify_pin(pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
+    parental::check_delete(&app, &id, parental_pin.as_deref())?;
     if is_active {
         let _ = state.player.stop().await;
         *state.local.write().await = None;
@@ -467,6 +488,17 @@ async fn local_profile_delete(
     }
     account::forget_profile(&app, &id);
     profiles::delete(&app, &id)
+}
+
+/// Checks a profile's PIN without opening it (editing it from the profile picker).
+#[tauri::command]
+fn local_profile_check_pin(app: tauri::AppHandle, id: String, pin: String) -> Result<(), String> {
+    let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+    if profile.verify_pin(Some(&pin)) {
+        Ok(())
+    } else {
+        Err("PIN incorrecto".into())
+    }
 }
 
 /// Opens a local profile (after checking its PIN) and restores its linked Jellyfin
@@ -821,8 +853,15 @@ async fn set_favorite(
 }
 
 #[tauri::command]
-async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<bool, String> {
-    state.jellyfin.set_played(&item_id, played).await
+async fn set_played(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+    played: bool,
+) -> Result<bool, String> {
+    let confirmed = state.jellyfin.set_played(&item_id, played).await?;
+    trakt::spawn_jellyfin_history(&app, &item_id, confirmed);
+    Ok(confirmed)
 }
 
 #[derive(Deserialize)]
@@ -913,6 +952,9 @@ async fn player_stop(
                 media_source_id,
                 play_session_id,
             } => {
+                if watched {
+                    trakt::spawn_jellyfin_history(&app, &item_id, true);
+                }
                 let _ = state
                     .jellyfin
                     .report_stop(
@@ -929,6 +971,7 @@ async fn player_stop(
                 }
             }
             PlaybackSource::Addon { entry } if watched => {
+                trakt::spawn_resume_history(&app, &entry);
                 if let Some(uid) = uid {
                     let _ = addons::remove_progress(&app, &uid, &entry.key);
                     let library = addons::LibraryEntry {
@@ -1884,6 +1927,10 @@ async fn addon_streams(
 
 #[tauri::command]
 async fn addon_progress_list(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ResumeEntry>, String> {
+    // Local entries carry no rating: a profile that hides unrated titles hides them.
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_progress(&app, &uid),
         None => vec![],
@@ -1920,6 +1967,9 @@ async fn addon_library_list(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_library(&app, &uid),
         None => vec![],
@@ -1942,10 +1992,13 @@ async fn addon_library_set(
     state: State<'_, AppState>,
     args: LibraryFlagArgs,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
-    match settings_user(&app, &state).await {
-        Some(uid) => addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched),
-        None => Err("No hay ningún perfil activo".into()),
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+    if let Some(watched) = args.watched {
+        trakt::spawn_entry_history(&app, &args.entry, watched);
     }
+    addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched)
 }
 
 #[derive(Deserialize)]
@@ -2191,6 +2244,9 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         .find(&id)
         .await
         .ok_or_else(|| "Canal no encontrado".to_string())?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
@@ -2503,6 +2559,18 @@ pub fn run() {
             torrent_cache_clear,
             torrent_pause_all,
             addons_all,
+            // profiles & integrations
+            local_profile_check_pin,
+            parental::parental_status,
+            parental::parental_set,
+            trakt::trakt_status,
+            trakt::trakt_set_app,
+            trakt::trakt_device_start,
+            trakt::trakt_device_poll,
+            trakt::trakt_disconnect,
+            trakt::trakt_set_sync_back,
+            trakt::trakt_import,
+            trakt::trakt_open,
             // player
             player_set_delay,
             player_set_night,

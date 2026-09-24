@@ -1,4 +1,4 @@
-import type { Movie, PlayerState, Settings, UpdateProgress } from "../lib/types";
+import type { Movie, ParentalStatus, PlayerState, Settings, UpdateProgress } from "../lib/types";
 import type { MessageKey } from "../lib/i18n";
 
 /** What went wrong, so the UI can offer the right way out. */
@@ -42,6 +42,7 @@ export type EventMap = {
   "iptv://changed": void;
   "settings://changed": Settings;
   "update://progress": UpdateProgress;
+  "parental://changed": ParentalStatus;
   /** The offline downloads list (or one transfer's progress) changed. */
   "downloads://changed": void;
 };

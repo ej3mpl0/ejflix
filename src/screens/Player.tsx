@@ -5,6 +5,7 @@ import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
 import { SkipButton } from "../components/SkipButton";
 import { NextEpisodeCard } from "../components/NextEpisodeCard";
+import { isParentalBlocked } from "../lib/parental";
 import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
@@ -315,7 +316,9 @@ export function Player({
           setStartHint("");
           // Tauri commands reject with the Rust message as a plain string.
           const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
-          setStartError(message || tRef.current("playerStartError"));
+          setStartError(
+            isParentalBlocked(err) ? tRef.current("parentalBlockedTitle") : message || tRef.current("playerStartError"),
+          );
         }
       };
       void begin();

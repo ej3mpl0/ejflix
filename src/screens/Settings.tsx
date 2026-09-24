@@ -18,6 +18,8 @@ import {
   Magnet,
   RefreshCw,
   Search,
+  ShieldCheck,
+  Clapperboard,
 } from "lucide-react";
 import { AddonsSection } from "../components/settings/AddonsSection";
 import { IptvSection } from "../components/settings/IptvSection";
@@ -42,6 +44,8 @@ import { fieldClass as field } from "../lib/ui";
 import { UpdatesSection } from "../components/settings/UpdatesSection";
 import { OpenSubtitlesSection, SubtitleStyleSection, WatchingSection } from "../components/settings/PlaybackExtras";
 import type { MessageKey } from "../lib/i18n";
+import { ParentalSection } from "../components/settings/ParentalSection";
+import { TraktSection } from "../components/settings/TraktSection";
 
 /** "language" is kept as an id (old deep links) but lives in the General section now. */
 type Section =
@@ -54,7 +58,9 @@ type Section =
   | "language"
   | "account"
   | "updates"
-  | "about";
+  | "about"
+  | "parental"
+  | "trakt";
 
 /** Titles and row labels of each section, for the settings search. */
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
@@ -67,6 +73,8 @@ const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
   account: ["account", "accountEjflix", "accountCredentials", "accountSignOutAccount", "accountDelete", "jellyfinServer", "switchProfile", "signOut"],
   updates: ["updates", "updateAuto"],
   about: ["about", "version", "sourceCode"],
+  parental: ["parentalTitle", "parentalMaxRating", "parentalHideUnrated", "parentalChangePin"],
+  trakt: ["traktTitle", "traktImport", "traktSyncBack", "traktClientId"],
 };
 export type SettingsSectionId = Section;
 
@@ -328,6 +336,8 @@ export function Settings({
     { id: "iptv", label: t("iptv"), icon: Tv },
     { id: "discord", label: t("discord"), icon: MessageCircle },
     { id: "account", label: t("account"), icon: Users },
+    { id: "parental", label: t("parentalTitle"), icon: ShieldCheck },
+    { id: "trakt", label: t("traktTitle"), icon: Clapperboard },
     { id: "updates", label: t("updates"), icon: RefreshCw },
     { id: "about", label: t("about"), icon: Info },
   ];
@@ -601,6 +611,10 @@ export function Settings({
           ) : null}
 
           {section === "about" ? <AboutSection version={version} withUpdates={false} /> : null}
+
+          {section === "parental" ? <ParentalSection onToast={onToast} /> : null}
+
+          {section === "trakt" ? <TraktSection onToast={onToast} /> : null}
         </div>
       </div>
     </div>

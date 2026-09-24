@@ -1,7 +1,7 @@
 import React from "react";
 import { View } from "react-native";
 import type { LucideIcon } from "lucide-react-native";
-import { CloudDownload, Palette, Play, Puzzle, RefreshCw, Tv, UserRound } from "lucide-react-native";
+import { CloudDownload, Palette, Play, Puzzle, RefreshCw, ShieldCheck, Tv, UserRound } from "lucide-react-native";
 import type { MessageKey } from "../../lib/i18n";
 import { AccountSection } from "./AccountSection";
 import { AddonsSection } from "./AddonsSection";
@@ -11,9 +11,19 @@ import { IptvSection } from "./IptvSection";
 import { LanguageSection } from "./LanguageSection";
 import { PlaybackSection } from "./PlaybackSection";
 import { UpdatesSection } from "./UpdatesSection";
+import { ParentalSection } from "./ParentalSection";
 
 /** "language" stays a valid id (old links) but now lives inside General ("appearance"). */
-export type SettingsSectionId = "appearance" | "playback" | "downloads" | "addons" | "iptv" | "language" | "account" | "updates";
+export type SettingsSectionId =
+  | "appearance"
+  | "playback"
+  | "downloads"
+  | "addons"
+  | "iptv"
+  | "language"
+  | "account"
+  | "updates"
+  | "parental";
 
 /** The settings sections in display order (Discord is desktop-only). */
 export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; icon: LucideIcon; labelKey: MessageKey; hintKey: MessageKey }> = [
@@ -23,6 +33,7 @@ export const SETTINGS_SECTIONS: ReadonlyArray<{ id: SettingsSectionId; icon: Luc
   { id: "addons", icon: Puzzle, labelKey: "addons", hintKey: "addonsShortHint" },
   { id: "iptv", icon: Tv, labelKey: "iptv", hintKey: "iptvShortHint" },
   { id: "account", icon: UserRound, labelKey: "account", hintKey: "accountHint" },
+  { id: "parental", icon: ShieldCheck, labelKey: "parentalTitle", hintKey: "parentalShortHint" },
   { id: "updates", icon: RefreshCw, labelKey: "updates", hintKey: "updatesHint" },
 ];
 
@@ -35,6 +46,7 @@ export const SETTINGS_SEARCH: Record<Exclude<SettingsSectionId, "language">, Mes
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled"],
   account: ["account", "switchProfile", "jellyfinServer"],
   updates: ["updates", "updateAuto"],
+  parental: ["parentalTitle", "parentalMaxRating", "parentalHideUnrated", "parentalChangePin"],
 };
 
 export function isSettingsSectionId(value: unknown): value is SettingsSectionId {
@@ -64,6 +76,8 @@ export function SettingsSectionContent({ section }: { section: SettingsSectionId
       return <AccountSection />;
     case "updates":
       return <UpdatesSection />;
+    case "parental":
+      return <ParentalSection />;
     default:
       return null;
   }
