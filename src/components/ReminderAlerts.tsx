@@ -23,6 +23,8 @@ export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch
     const timers = new Set<number>();
     const unlisten = api.onIptvReminder((reminder) => {
       const key = reminderKey(reminder.channelId, reminder.start);
+      // The clock only ticks while cards are up: a new one must not read a stale "now".
+      setNow(Date.now());
       setAlerts((list) => [...list.filter((r) => reminderKey(r.channelId, r.start) !== key), reminder]);
       const handle = window.setTimeout(() => {
         timers.delete(handle);
