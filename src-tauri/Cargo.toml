@@ -1,6 +1,6 @@
 [package]
 name = "ejflix"
-version = "0.7.0"
+version = "0.7.1"
 description = "Cliente Jellyfin ligero para Windows 11"
 license = "MIT"
 repository = "https://github.com/ej3mpl0/ejflix"
