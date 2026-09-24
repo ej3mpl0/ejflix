@@ -4,6 +4,7 @@
  */
 import type { XtreamAccount } from "../../lib/types";
 import { percentEncode } from "../addons.pure";
+import { LocalizedError } from "../errors";
 import { MAX_CHANNELS, cleanName, utf8Lossy, type IptvChannel } from "./m3u";
 import { xtreamCatchup } from "./catchup";
 
@@ -15,10 +16,10 @@ function isObject(v: Json): v is Record<string, Json> {
 
 export function normalizeHttpUrl(raw: string): string {
   const trimmed = raw.trim();
-  if (trimmed === "" || trimmed.length > 4096) throw new Error("URL no válida");
-  if (/[\p{Cc}\s]/u.test(trimmed)) throw new Error("URL no válida");
+  if (trimmed === "" || trimmed.length > 4096) throw new LocalizedError("iptvErrBadUrl", "URL no válida");
+  if (/[\p{Cc}\s]/u.test(trimmed)) throw new LocalizedError("iptvErrBadUrl", "URL no válida");
   const url = trimmed.includes("://") ? trimmed : `http://${trimmed}`;
-  if (!url.startsWith("http://") && !url.startsWith("https://")) throw new Error("Solo se permiten URLs http o https");
+  if (!url.startsWith("http://") && !url.startsWith("https://")) throw new LocalizedError("iptvErrUrlHttpOnly", "Solo se permiten URLs http o https");
   return url;
 }
 
@@ -66,13 +67,13 @@ export type ParsedXtreamUrl = { base: string; username: string | null; password:
 export function parseXtreamUrl(raw: string): ParsedXtreamUrl {
   const url = normalizeHttpUrl(raw);
   const sep = url.indexOf("://");
-  if (sep < 0) throw new Error("URL no válida");
+  if (sep < 0) throw new LocalizedError("iptvErrBadUrl", "URL no válida");
   const scheme = url.slice(0, sep);
   const rest = url.slice(sep + 3);
   const slash = rest.indexOf("/");
   const authority = slash >= 0 ? rest.slice(0, slash) : rest;
   const tail = slash >= 0 ? rest.slice(slash) : "";
-  if (authority === "") throw new Error("Falta el servidor");
+  if (authority === "") throw new LocalizedError("iptvErrNoServer", "Falta el servidor");
   const base = `${scheme}://${authority}`;
   const q = tail.indexOf("?");
   const query = q >= 0 ? tail.slice(q + 1) : "";
@@ -158,7 +159,7 @@ export function jsonU64(v: Json, key: string): number | null {
 
 export function parseAccount(value: Json): XtreamAccount {
   const info = isObject(value) && isObject(value.user_info) ? value.user_info : null;
-  if (!info) throw new Error("El servidor no respondió como Xtream Codes");
+  if (!info) throw new LocalizedError("iptvErrNotXtream", "El servidor no respondió como Xtream Codes");
   const rawAuth = info.auth;
   let auth = false;
   if (typeof rawAuth === "number") auth = rawAuth === 1;
@@ -168,13 +169,13 @@ export function parseAccount(value: Json): XtreamAccount {
   if (!auth) {
     switch (status.toLowerCase()) {
       case "expired":
-        throw new Error("La cuenta ha caducado");
+        throw new LocalizedError("iptvErrAccountExpired", "La cuenta ha caducado");
       case "banned":
-        throw new Error("La cuenta está bloqueada");
+        throw new LocalizedError("iptvErrAccountBanned", "La cuenta está bloqueada");
       case "disabled":
-        throw new Error("La cuenta está desactivada");
+        throw new LocalizedError("iptvErrAccountDisabled", "La cuenta está desactivada");
       default:
-        throw new Error("Usuario o contraseña incorrectos");
+        throw new LocalizedError("errWrongCredentials", "Usuario o contraseña incorrectos");
     }
   }
   const exp = jsonU64(info, "exp_date");

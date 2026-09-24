@@ -1,4 +1,5 @@
-import type { Channel, EpgNow, Movie, Programme, Reminder } from "./types";
+import type { Channel, EpgNow, IptvSource, Movie, Programme, Reminder } from "./types";
+import type { Translate } from "../services/errors";
 import { emptyMovie } from "./addons";
 
 /** Id prefix of live channels inside the app (never a Jellyfin id). */
@@ -176,4 +177,10 @@ export function formatWhen(unixSeconds: number, locale: string, nowMs = Date.now
   if (dayDiff === -1) return `${en ? "yesterday" : "ayer"} ${time}`;
   const day = date.toLocaleDateString(en ? "en-GB" : "es-ES", { weekday: "short", day: "numeric" });
   return `${day} ${time}`;
+}
+
+/** Last failure of a source, translated when it can be. */
+export function sourceErrorText(source: Pick<IptvSource, "error" | "errorKey">, t: Translate): string | null {
+  if (!source.error) return null;
+  return source.errorKey ? t(source.errorKey.key, source.errorKey.vars) : source.error;
 }

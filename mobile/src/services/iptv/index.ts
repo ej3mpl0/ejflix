@@ -71,7 +71,7 @@ export async function iptvSourceSave(input: IptvSourceInput): Promise<IptvSource
   if (source.enabled) state.spawnRefresh(source, prefs.epg);
   else emit("iptv://changed");
   const view = state.views([source])[0];
-  if (!view) throw new Error("No se pudo guardar la lista");
+  if (!view) throw new LocalizedError("iptvErrSaveFailed", "No se pudo guardar la lista");
   return view;
 }
 
@@ -88,7 +88,7 @@ export async function iptvSourceImport(args: {
   state.forget(source.id);
   state.spawnRefresh(source, prefs.epg);
   const view = state.views([source])[0];
-  if (!view) throw new Error("No se pudo importar la lista");
+  if (!view) throw new LocalizedError("iptvErrImportFailed", "No se pudo importar la lista");
   return view;
 }
 
@@ -119,7 +119,7 @@ export async function iptvXtreamCheck(args: {
   const parsed = parseXtreamUrl(args.url);
   const username = args.username.trim() === "" ? (parsed.username ?? "") : args.username.trim();
   const password = args.password === "" ? (parsed.password ?? "") : args.password;
-  if (username === "" || password === "") throw new Error("Xtream Codes necesita usuario y contraseña");
+  if (username === "" || password === "") throw new LocalizedError("iptvErrXtreamCredentials", "Xtream Codes necesita usuario y contraseña");
   return xtreamCheck({ url: parsed.base, username, userAgent: args.userAgent ?? "" }, password);
 }
 
