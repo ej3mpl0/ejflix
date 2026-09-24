@@ -24,6 +24,8 @@ import { usePauseInfo } from "../hooks/usePauseInfo";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { StartCover } from "../components/StartCover";
 import { StatsPanel } from "../components/StatsPanel";
+import { MiniPlayerControls } from "../components/MiniPlayerControls";
+import { SubtitleSearch } from "../components/SubtitleSearch";
 
 const emptyState: PlayerState = {
   time: 0,
@@ -40,7 +42,13 @@ const emptyState: PlayerState = {
   cacheTime: 0,
   speed: 1,
   aspect: "auto",
+  subDelay: 0,
+  audioDelay: 0,
+  night: false,
+  mini: false,
 };
+
+const OSD_MS = 1400;
 
 const LOCK_HINT_MS = 2000;
 
@@ -89,8 +97,14 @@ export function Player({
   const [flash, setFlash] = useState<Flash | null>(null);
   /** "?" overlay with the keyboard shortcuts. */
   const [help, setHelp] = useState(false);
-  /** Subtitle and audio delays of this file (mpv resets them on every load). */
-  const [delays, setDelays] = useState({ sub: 0, audio: 0 });
+  /** Subtitle and audio delays of this file (remembered per title, reapplied by Rust on start). */
+  const delays = { sub: state.subDelay, audio: state.audioDelay };
+  /** OpenSubtitles search dialog. */
+  const [subSearch, setSubSearch] = useState(false);
+  /** Short on-screen message (delay changed, night mode...). */
+  const [osd, setOsd] = useState<string | null>(null);
+  const osdTimer = useRef<number>(0);
+  const mini = state.mini;
   /** Technical numbers overlay (I). */
   const [stats, setStats] = useState(false);
   /** Subtitle track to bring back when V turns subtitles on again. */
@@ -186,6 +200,15 @@ export function Player({
     const unlistenState = api.onPlayerState(setState);
     // Only the overlay handles the hotkeys; the main window hears the same global event.
     const unlistenHotkey = overlay ? api.onPlayerHotkey((key) => hotkeyRef.current(key)) : null;
+    // The start's own state event went out before this overlay mounted (delays, mini...).
+    if (overlay) {
+      api
+        .playerState()
+        .then((current) => {
+          if (!cancelled) setState(current);
+        })
+        .catch(() => undefined);
+    }
 
     if (!overlay) {
       // The engine player is not remounted per item: forget the previous start's leftovers.
@@ -339,13 +362,41 @@ export function Player({
   useEffect(() => {
     nextSent.current = false;
     setPanel(false);
-    setDelays({ sub: 0, audio: 0 });
+    setSubSearch(false);
   }, [movie]);
+
+  const showOsd = (text: string) => {
+    setOsd(text);
+    window.clearTimeout(osdTimer.current);
+    osdTimer.current = window.setTimeout(() => setOsd(null), OSD_MS);
+  };
 
   const changeDelay = (kind: "sub" | "audio", seconds: number) => {
     const value = Math.max(-30, Math.min(30, Math.round(seconds * 10) / 10));
-    setDelays((current) => ({ ...current, [kind]: value }));
-    void api.playerSetProp(kind === "sub" ? "sub-delay" : "audio-delay", value);
+    // Shown right away; mpv confirms it through the state events. Rust remembers it for the title.
+    setState((current) => ({ ...current, [kind === "sub" ? "subDelay" : "audioDelay"]: value }));
+    showOsd(`${t(kind === "sub" ? "subDelay" : "audioDelay")}: ${value > 0 ? "+" : ""}${value.toFixed(1)} s`);
+    void api.playerSetDelay(kind, value).catch(() => undefined);
+  };
+
+  const toggleNight = () => {
+    const on = !stateRef.current.night;
+    setState((current) => ({ ...current, night: on }));
+    showOsd(on ? t("nightModeOn") : t("nightModeOff"));
+    void api.playerSetNight(on).catch(() => undefined);
+  };
+
+  const toggleMini = async () => {
+    setMenu(null);
+    setPanel(false);
+    setHelp(false);
+    if (!stateRef.current.mini) {
+      setFullscreen(false);
+      await api.playerSetMini(true).catch(() => undefined);
+    } else {
+      const fs = await api.playerSetMini(false).catch(() => false);
+      setFullscreen(fs);
+    }
   };
 
   // Episodes: look up what comes next so the end of the file can chain into it.
@@ -461,6 +512,13 @@ export function Player({
   };
 
   const toggleFullscreen = async () => {
+    if (stateRef.current.mini) {
+      // From the mini player straight to fullscreen.
+      await api.playerSetMini(false).catch(() => false);
+      setFullscreen(true);
+      await api.playerSetFullscreen(true);
+      return;
+    }
     const next = !fullscreen;
     setFullscreen(next);
     await api.playerSetFullscreen(next);
@@ -549,6 +607,12 @@ export function Player({
   // Skip intro / recap / credits and the next-episode card (overlay only).
   const segments = useSegments(movie, state.duration, overlay && !live);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
+  // Stopping inside the credits marks the title watched (decided in Rust on stop).
+  const creditsStart = outro?.startSeconds ?? null;
+  useEffect(() => {
+    if (!overlay || live) return;
+    void api.playerSetCredits(creditsStart).catch(() => undefined);
+  }, [overlay, live, creditsStart]);
   const skipPrompt = useSkipPrompt({
     segments,
     time: state.time,
@@ -583,10 +647,21 @@ export function Player({
 
   const pauseInfo = usePauseInfo(state.paused, visible);
 
+  const stream = movie.external?.stream ?? null;
+  const sourceLabel = live
+    ? t("statsSourceLive", { name: live.sourceName })
+    : movie.external
+      ? stream?.infoHash && !stream.url
+        ? t("statsSourceTorrent")
+        : t("statsSourceAddon", { name: stream?.addonName ?? "" })
+      : t("statsSourceDirect");
+
   const escape = () => {
     if (help) setHelp(false);
+    else if (subSearch) setSubSearch(false);
     else if (panel) setPanel(false);
     else if (menu) setMenu(null);
+    else if (stateRef.current.mini) void toggleMini();
     else if (fullscreen) void toggleFullscreen();
     else onExit();
   };
@@ -648,7 +723,8 @@ export function Player({
 
   const onVideoDoubleClick = () => {
     window.clearTimeout(clickTimer.current);
-    void toggleFullscreen();
+    if (stateRef.current.mini) void toggleMini();
+    else void toggleFullscreen();
   };
 
   hotkeyRef.current = (key) => {
@@ -663,6 +739,8 @@ export function Player({
   keydownRef.current = (e) => {
     bump();
     if (lockedRef.current) return;
+    // The subtitle search dialog owns the keyboard (its field, its list, Escape).
+    if (subSearch) return;
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     // A focused control owns its own keys: the volume slider its arrows, a button Enter/Space.
     const target = e.target instanceof HTMLElement ? e.target : null;
@@ -778,6 +856,22 @@ export function Player({
       case "X":
         if (!live) changeDelay("sub", delays.sub + 0.1);
         break;
+      case "g":
+      case "G":
+        changeDelay("audio", delays.audio - 0.1);
+        break;
+      case "h":
+      case "H":
+        changeDelay("audio", delays.audio + 0.1);
+        break;
+      case "d":
+      case "D":
+        toggleNight();
+        break;
+      case "p":
+      case "P":
+        void toggleMini();
+        break;
       case "i":
       case "I":
         setStats((open) => !open);
@@ -870,15 +964,25 @@ export function Player({
           </div>
         </div>
       ) : null}
+      {osd && !locked ? (
+        <div
+          className={`pointer-events-none absolute left-1/2 z-30 -translate-x-1/2 rounded-full bg-black/60 px-3.5 py-1 text-sm whitespace-nowrap tabular backdrop-blur-sm ${
+            mini ? "top-10" : "top-[72px]"
+          }`}
+          role="status"
+        >
+          {osd}
+        </div>
+      ) : null}
       {volHud != null ? (
         <div className="pointer-events-none absolute top-[72px] right-6 z-30 rounded-full bg-black/60 px-3 py-1 text-sm tabular backdrop-blur-sm">
           {Math.round(volHud)}%
         </div>
       ) : null}
-      {!locked && !live && pauseInfo && !splash && !menu && !panel ? (
+      {!locked && !mini && !live && pauseInfo && !splash && !menu && !panel ? (
         <PauseInfo movie={detail ?? movie} heading={heading} />
       ) : null}
-      {locked ? null : nextEpisode && nextCard.visible ? (
+      {locked || mini ? null : nextEpisode && nextCard.visible ? (
         <NextEpisodeCard
           episode={nextEpisode}
           countdown={nextCard.countdown}
@@ -895,12 +999,34 @@ export function Player({
           shifted={panel}
         />
       ) : null}
-      {stats && !locked ? (
-        <StatsPanel torrent={torrent} delays={delays} onClose={() => setStats(false)} />
+      {stats && !locked && !mini ? (
+        <StatsPanel
+          torrent={torrent}
+          delays={delays}
+          source={sourceLabel}
+          speed={state.speed}
+          night={state.night}
+          onClose={() => setStats(false)}
+        />
       ) : null}
-      {help && !locked ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {help && !locked && !mini ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {subSearch && !locked && !mini ? (
+        <SubtitleSearch movie={detail ?? movie} onClose={() => setSubSearch(false)} onLoaded={() => showOsd(t("subSearchLoaded"))} />
+      ) : null}
       {locked ? (
         <LockScreen hint={lockHint} onUnlock={unlock} onHint={showLockHint} />
+      ) : mini ? (
+        <MiniPlayerControls
+          heading={heading}
+          state={state}
+          visible={visible}
+          live={Boolean(live)}
+          onTogglePause={() => void togglePause()}
+          onRestore={() => void toggleMini()}
+          onClose={onExit}
+          onVideoClick={onVideoClick}
+          onVideoDoubleClick={onVideoDoubleClick}
+        />
       ) : (
         <PlayerControls
           movie={movie}
@@ -934,11 +1060,14 @@ export function Player({
           onPanel={togglePanel}
           onReveal={bump}
           onHoldUi={holdUi}
+          onNight={toggleNight}
+          onMini={() => void toggleMini()}
+          onSearchSubs={() => setSubSearch(true)}
         />
       )}
-      {panel && !locked && live ? (
+      {panel && !locked && !mini && live ? (
         <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />
-      ) : panel && !locked ? (
+      ) : panel && !locked && !mini ? (
         <EpisodesPanel
           key={movie.id}
           movie={movie}

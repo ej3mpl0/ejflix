@@ -213,6 +213,40 @@ pub struct Playback {
     pub sub_background: String,
     /// Seconds the arrow keys and the seek buttons jump: 5, 10, 15 or 30.
     pub seek_step: u32,
+    /// Percentage of the runtime past which stopping marks the title watched
+    /// (80, 85, 90 or 95); stopping inside the detected credits counts too.
+    #[serde(default = "default_watched_threshold")]
+    pub watched_threshold: u32,
+    /// Night mode (dynamic range compression) on when playback starts.
+    #[serde(default)]
+    pub night_mode: bool,
+    /// Vertical subtitle position (mpv sub-pos): 100 = bottom, lower = higher up.
+    #[serde(default = "default_sub_pos")]
+    pub sub_pos: f64,
+    /// Subtitle outline thickness (mpv sub-outline-size), 0 to 6.
+    #[serde(default = "default_sub_outline")]
+    pub sub_outline: f64,
+    /// Apply the look to styled (ASS/SSA) subtitles as well.
+    #[serde(default)]
+    pub sub_ass_override: bool,
+    /// OpenSubtitles.com API key for the online subtitle search ("" = not set).
+    #[serde(default)]
+    pub opensubtitles_api_key: String,
+    /// Optional OpenSubtitles.com username (the password is kept apart, encrypted).
+    #[serde(default)]
+    pub opensubtitles_user: String,
+}
+
+fn default_watched_threshold() -> u32 {
+    90
+}
+
+fn default_sub_pos() -> f64 {
+    100.0
+}
+
+fn default_sub_outline() -> f64 {
+    3.0
 }
 
 impl Default for Playback {
@@ -231,6 +265,13 @@ impl Default for Playback {
             sub_color: "#FFFFFF".into(),
             sub_background: "outline".into(),
             seek_step: 10,
+            watched_threshold: default_watched_threshold(),
+            night_mode: false,
+            sub_pos: default_sub_pos(),
+            sub_outline: default_sub_outline(),
+            sub_ass_override: false,
+            opensubtitles_api_key: String::new(),
+            opensubtitles_user: String::new(),
         }
     }
 }
@@ -272,6 +313,27 @@ impl Settings {
         if !["outline", "shadow", "box"].contains(&self.playback.sub_background.as_str()) {
             self.playback.sub_background = "outline".into();
         }
+        if ![80, 85, 90, 95].contains(&self.playback.watched_threshold) {
+            self.playback.watched_threshold = default_watched_threshold();
+        }
+        self.playback.sub_pos = if self.playback.sub_pos.is_finite() {
+            self.playback.sub_pos.clamp(50.0, 100.0).round()
+        } else {
+            default_sub_pos()
+        };
+        self.playback.sub_outline = if self.playback.sub_outline.is_finite() {
+            self.playback.sub_outline.clamp(0.0, 6.0)
+        } else {
+            default_sub_outline()
+        };
+        // API keys are short alphanumeric tokens; anything else is a paste accident.
+        let key = self.playback.opensubtitles_api_key.trim();
+        self.playback.opensubtitles_api_key = if key.len() <= 128 && key.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            key.to_string()
+        } else {
+            String::new()
+        };
+        self.playback.opensubtitles_user = self.playback.opensubtitles_user.trim().chars().take(100).collect();
         self.library.pinned.retain(|id| crate::jellyfin::valid_item_id(id));
         let mut seen = std::collections::HashSet::new();
         self.library.pinned.retain(|id| seen.insert(id.clone()));
