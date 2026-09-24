@@ -45,6 +45,10 @@ export type BrowseArgs = {
   sort?: BrowseSort;
   start?: number;
   limit?: number;
+  /** Minimum community rating (0-10). */
+  minRating?: number | null;
+  /** Only titles this person takes part in (Jellyfin person id). */
+  personId?: string | null;
 };
 
 export type PublicInfo = {
@@ -224,6 +228,10 @@ export type Movie = {
   dateCreated: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
+  /** ISO-8601 air / release date (Jellyfin `PremiereDate`). */
+  premiereDate?: string | null;
+  /** Play all / shuffle: what comes after this item instead of the next episode. */
+  queue?: PlayQueue | null;
 };
 
 export type GenreRow = {
@@ -715,3 +723,54 @@ export const DEFAULT_SETTINGS: Settings = {
   // Until the real settings arrive nothing asks for the setup step.
   onboarding: { setupDone: true },
 };
+
+// --- discovery ---
+
+/** One title in a custom list (Jellyfin item or online title). */
+export type ListItem = {
+  /** "jf:<item id>" for a Jellyfin item, the Stremio video id for an online title. */
+  key: string;
+  source: "jellyfin" | "online";
+  /** Jellyfin: "Movie" | "Series" | "Episode"; online: "movie" | "series". */
+  type: string;
+  itemId: string | null;
+  metaId: string | null;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  year: number | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  addedMs: number;
+};
+
+export type CustomList = {
+  id: string;
+  name: string;
+  /** Newest first. */
+  items: ListItem[];
+  createdMs: number;
+  updatedMs: number;
+};
+
+/** Jellyfin episodes around today and the series the user follows. */
+export type CalendarData = {
+  episodes: Movie[];
+  followed: string[];
+};
+
+/** A Jellyfin recommendation row and the title (or person) it grew from. */
+export type RecommendationRow = {
+  kind: string;
+  baseline: string;
+  items: Movie[];
+};
+
+/**
+ * What plays after the current item when it was started from "Play all" / "Shuffle".
+ * `list`: the rest of a list, in order. `shuffle`: another random episode of the series.
+ */
+export type PlayQueue =
+  | { mode: "list"; items: Movie[] }
+  | { mode: "shuffle"; seriesId: string | null; metaId: string | null; seen: string[] };

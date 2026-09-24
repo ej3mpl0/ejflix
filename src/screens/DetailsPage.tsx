@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clapperboard, Globe, Play, RotateCcw } from "lucide-react";
+import { Clapperboard, Globe, ListPlus, ListVideo, Play, RotateCcw, Shuffle } from "lucide-react";
 import type { Movie, Person } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
@@ -25,6 +25,8 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { ScrollRow } from "../components/ScrollRow";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { PersonDialog } from "../components/PersonDialog";
+import { useCustomLists } from "../lib/lists-context";
+import { startShuffle } from "../lib/play-queue";
 
 /**
  * Full details page (movie or series) stacked over Home. Owns its scroller so Home keeps
@@ -50,6 +52,10 @@ export function DetailsPage({
   const { t } = useI18n();
   const { settings } = useSettings();
   const { version: userDataVersion } = useUserData();
+  const { openPicker } = useCustomLists();
+  /** "Play all" / "Shuffle" waiting for the server. */
+  const [starting, setStarting] = useState<"all" | "shuffle" | null>(null);
+  const [startError, setStartError] = useState("");
   const [detail, setDetail] = useState<Movie | null>(route.seed);
   const [seasons, setSeasons] = useState<Movie[]>([]);
   const [seasonId, setSeasonId] = useState<string | null>(route.seasonId);
@@ -154,6 +160,31 @@ export function DetailsPage({
     if (ref) onOnline({ ...item, external: ref });
   };
 
+  /** Play all from the first episode of the first regular season (the chain goes on from there). */
+  const playAll = async () => {
+    const first = seasons.find((season) => season.seasonNumber !== 0) ?? seasons[0];
+    if (!first) return;
+    const list = first.id === seasonId && episodes ? episodes : await api.getEpisodes(route.id, first.id);
+    const episode = list.find((item) => item.seasonNumber !== 0) ?? list[0];
+    if (episode) onPlay(episode);
+  };
+
+  const begin = (kind: "all" | "shuffle") => {
+    if (!movie || starting) return;
+    setStarting(kind);
+    setStartError("");
+    const job =
+      kind === "all"
+        ? playAll()
+        : startShuffle(movie).then((episode) => {
+            if (episode) onPlay(episode);
+            else setStartError(t("noEpisodes"));
+          });
+    job
+      .catch((err) => setStartError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setStarting(null));
+  };
+
   const play = () => {
     if (isSeries) {
       if (startEpisode) onPlay(startEpisode);
@@ -256,7 +287,36 @@ export function DetailsPage({
                     </Pill>
                   ) : null}
                   <FavoriteButton movie={movie} pill className="h-12" />
+                  <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
+                    {t("listsButton")}
+                  </Pill>
                   <WatchedButton movie={movie} pill className="h-12" />
+                  {isSeries && seasons.length ? (
+                    <>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<ListVideo size={17} />}
+                        disabled={starting != null}
+                        title={t("playAllHint")}
+                        onClick={() => begin("all")}
+                      >
+                        {t("playAll")}
+                      </Pill>
+                      <Pill
+                        variant="tonal"
+                        pill
+                        size="lg"
+                        icon={<Shuffle size={16} />}
+                        disabled={starting != null}
+                        title={t("shuffleHint")}
+                        onClick={() => begin("shuffle")}
+                      >
+                        {t("shuffle")}
+                      </Pill>
+                    </>
+                  ) : null}
                   {trailer ? (
                     <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
                       {t("trailer")}
@@ -268,6 +328,7 @@ export function DetailsPage({
                     </Pill>
                   ) : null}
                 </div>
+                {startError ? <p className="mt-3 text-[13px] text-danger" role="alert">{startError}</p> : null}
               </div>
             </section>
 
@@ -384,7 +445,7 @@ export function DetailsPage({
               ) : null}
 
               <div className="-mx-page">
-                <SimilarRail itemId={movie.id} onOpen={onPush} onPlay={onPlay} />
+                <SimilarRail itemId={movie.id} name={movie.name} onOpen={onPush} onPlay={onPlay} />
               </div>
             </div>
           </>

@@ -5,6 +5,7 @@ mod downloads;
 mod inflate;
 mod iptv;
 mod jellyfin;
+mod lists;
 mod player;
 mod profiles;
 mod protect;
@@ -2105,6 +2106,106 @@ async fn download_reveal(state: State<'_, AppState>, id: String) -> Result<(), S
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// ---- discovery: custom lists, calendar, shuffle, recommendations ----
+
+/// Profile whose lists are being edited; unlike reads, writes need an active one.
+async fn lists_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
+    if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
+        return Err("No hay ningún perfil activo".into());
+    }
+    settings_user(app, state).await.ok_or_else(|| "No hay ningún perfil activo".to_string())
+}
+
+#[tauri::command]
+async fn custom_lists_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<lists::CustomList>, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::load(&app, &uid),
+        None => vec![],
+    })
+}
+
+#[tauri::command]
+async fn custom_list_create(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::create(&app, &uid, &name)
+}
+
+#[tauri::command]
+async fn custom_list_rename(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::rename(&app, &uid, &id, &name)
+}
+
+#[tauri::command]
+async fn custom_list_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::delete(&app, &uid, &id)
+}
+
+#[tauri::command]
+async fn custom_list_set_item(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    item: lists::ListItem,
+    on: bool,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_item(&app, &uid, &id, item, on)
+}
+
+#[tauri::command]
+async fn calendar_seen_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::calendar_seen(&app, &uid),
+        None => 0,
+    })
+}
+
+#[tauri::command]
+async fn calendar_seen_set(app: tauri::AppHandle, state: State<'_, AppState>, ms: u64) -> Result<(), String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_calendar_seen(&app, &uid, ms)
+}
+
+#[tauri::command]
+async fn get_items_by_ids(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<Movie>, String> {
+    state.jellyfin.items_by_ids(&ids).await
+}
+
+#[tauri::command]
+async fn get_random_episode(
+    state: State<'_, AppState>,
+    series_id: String,
+    exclude: Vec<String>,
+) -> Result<Option<Movie>, String> {
+    state.jellyfin.random_episode(&series_id, &exclude).await
+}
+
+#[tauri::command]
+async fn get_calendar(state: State<'_, AppState>, days_back: u32) -> Result<jellyfin::CalendarData, String> {
+    state.jellyfin.calendar(days_back).await
+}
+
+#[tauri::command]
+async fn get_recommendations(state: State<'_, AppState>) -> Result<Vec<jellyfin::RecommendationRow>, String> {
+    state.jellyfin.recommendations().await
+}
+
+#[tauri::command]
+async fn search_people(state: State<'_, AppState>, query: String) -> Result<Vec<jellyfin::Person>, String> {
+    state.jellyfin.search_people(&query).await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -2228,6 +2329,19 @@ pub fn run() {
             torrent_cache_clear,
             torrent_pause_all,
             addons_all,
+            // discovery
+            custom_lists_get,
+            custom_list_create,
+            custom_list_rename,
+            custom_list_delete,
+            custom_list_set_item,
+            calendar_seen_get,
+            calendar_seen_set,
+            get_items_by_ids,
+            get_random_episode,
+            get_calendar,
+            get_recommendations,
+            search_people,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();

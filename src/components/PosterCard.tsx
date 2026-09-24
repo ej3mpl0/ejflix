@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Globe, Play } from "lucide-react";
+import { Globe, ListPlus, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { cn, formatRuntime, isRecentlyAdded } from "../lib/format";
 import { QualityBadges } from "./QualityBadge";
@@ -8,6 +8,8 @@ import { WatchedBadge } from "./WatchedBadge";
 import { useI18n } from "../lib/locale-context";
 import { useItemFlags } from "../lib/userdata-context";
 import { PosterPreview } from "./PosterPreview";
+import { KebabMenu, type MenuAction } from "./KebabMenu";
+import { listKeyOf, useCustomLists } from "../lib/lists-context";
 
 const PREVIEW_DELAY_MS = 750;
 /** Only a real mouse gets the hover card (touch screens and pens would trip it on tap). */
@@ -29,14 +31,21 @@ export function PosterCard({
   onPlay,
   delay = 0,
   layout = "row",
+  menu = [],
 }: {
   movie: Movie;
   onOpen: (movie: Movie) => void;
   onPlay?: (movie: Movie) => void;
   delay?: number;
   layout?: "row" | "grid" | "wall";
+  /** Extra entries of the card's menu ("Remove from this list" on a list page). */
+  menu?: MenuAction[];
 }) {
   const { t } = useI18n();
+  const { openPicker } = useCustomLists();
+  const actions: MenuAction[] = listKeyOf(movie)
+    ? [{ id: "lists", label: t("addToLists"), icon: <ListPlus size={15} />, onSelect: () => openPicker(movie) }, ...menu]
+    : menu;
   const flags = useItemFlags(movie);
   const [loaded, setLoaded] = useState(false);
   const runtime = formatRuntime(movie.runtimeTicks);
@@ -124,6 +133,15 @@ export function PosterCard({
             variant="icon"
             className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 focus-visible:opacity-100"
           />
+          {actions.length ? (
+            <div className="opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100">
+              <KebabMenu
+                label={t("moreOptions")}
+                className="bg-black/60 text-white/90 backdrop-blur-sm hover:bg-black/80"
+                actions={actions}
+              />
+            </div>
+          ) : null}
         </div>
         <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/55 to-transparent p-2.5 pt-14 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
           {wall ? (

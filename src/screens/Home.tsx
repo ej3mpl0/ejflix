@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Puzzle, RotateCcw, WifiOff } from "lucide-react";
 import { GlassHeader, libraryView, type NavView } from "../components/GlassHeader";
 import { Feed } from "../components/Feed";
-import { PosterCard } from "../components/PosterCard";
 import { HeroSkeleton, RowSkeleton } from "../components/Skeletons";
 import { Settings, type SettingsSectionId } from "./Settings";
 import { SearchPage } from "./SearchPage";
@@ -34,6 +33,9 @@ import { SeeAllContext, type SeeAllRequest } from "../lib/see-all-context";
 import { SeeAllPage } from "./SeeAllPage";
 import { handlePosterArrows } from "../lib/poster-nav";
 import { Shimmer } from "../components/Shimmer";
+import { CalendarPage } from "./CalendarPage";
+import { MyListPage } from "./MyListPage";
+import { useCalendar } from "../lib/calendar";
 
 const PAGE_EXIT_MS = 250;
 
@@ -104,6 +106,8 @@ export function Home({
   const [seeAll, setSeeAll] = useState<SeeAllRequest | null>(null);
   const firstRefresh = useRef(true);
   const { featured: addonFeatured, catalogs: addonCatalogs } = useAddonFeatured();
+  /** Episodes aired since the calendar was last opened: a counter on its tab. */
+  const { fresh: newEpisodes } = useCalendar(hasServer, session.userId);
 
   // The player could not start: put the user back in front of the other sources.
   useEffect(() => {
@@ -412,28 +416,6 @@ export function Home({
     </div>
   );
 
-  const grid = (title: string, items: Movie[], empty?: { text: string; hint: string }) => (
-    <div className="page-enter px-page pt-24 pb-16">
-      <h2 className="mb-6 text-[22px] font-semibold tracking-[-0.01em]">{title}</h2>
-      {items.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
-          {items.map((movie, i) => (
-            <PosterCard
-              key={movie.id}
-              movie={movie}
-              onOpen={openDetails}
-              onPlay={play}
-              layout="grid"
-              delay={i * 20}
-            />
-          ))}
-        </div>
-      ) : empty ? (
-        <EmptyState title={empty.text} hint={empty.hint} />
-      ) : null}
-    </div>
-  );
-
   // Nothing at all to show (online profile without addons): point at Settings › Addons.
   const noAddons = (
     <div className="px-page pt-16">
@@ -466,6 +448,7 @@ export function Home({
         mode={session.mode}
         hasServer={hasServer}
         hasTv={tvSources.length > 0}
+        badges={{ calendar: newEpisodes.length }}
         view={view}
         onView={openView}
         libraries={pinned}
@@ -524,6 +507,8 @@ export function Home({
           />
         ) : view === "discover" ? (
           <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} />
+        ) : view === "calendar" ? (
+          <CalendarPage userId={session.userId} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (
@@ -539,7 +524,7 @@ export function Home({
         ) : homeLoading ? (
           skeleton
         ) : view === "mylist" ? (
-          grid(t("myList"), myList, { text: t("emptyList"), hint: t("emptyListHint") })
+          <MyListPage items={myList} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
         ) : view === "myserver" && data ? (
           <Feed key="myserver" data={data} tv={false} myList={favorites ?? []} onOpen={openDetails} onPlay={play} />
         ) : activeLibrary ? (
@@ -565,6 +550,7 @@ export function Home({
             myList={favorites ?? []}
             onlineResume={onlineResume}
             showAddons
+            personal={{ userId: session.userId, hasServer }}
             empty={noAddons}
             onOpen={openDetails}
             onPlay={play}

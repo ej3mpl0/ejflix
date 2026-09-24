@@ -44,7 +44,7 @@ export function NextEpisodeCard({
         </span>
         <span className="min-w-0 flex-1 pr-6">
           <span className="block text-[11px] font-semibold tracking-[0.08em] text-white/60 uppercase">
-            {t("nextEpisode")}
+            {episode.kind === "Episode" ? t("nextEpisode") : t("upNextQueue")}
           </span>
           <span className="block truncate text-[13px] font-medium">
             {[code, episode.name].filter(Boolean).join(" · ")}
