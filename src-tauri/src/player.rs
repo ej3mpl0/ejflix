@@ -558,7 +558,7 @@ impl Player {
         prefs: PlaybackPrefs,
     ) -> Result<(), String> {
         let Some((first, rest)) = urls.split_first() else {
-            return Err("No hay canales".into());
+            return Err(crate::errors::code("multiviewTooFew"));
         };
         self.start_with(app, first, rest, headers, title, 0.0, context, prefs).await
     }
@@ -568,7 +568,7 @@ impl Player {
     pub async fn multiview_audio(&self, index: usize) -> Result<(), String> {
         let urls = self.multiview.lock().unwrap().clone();
         let Some(url) = urls.get(index).cloned() else {
-            return Err("Canal no válido".into());
+            return Err(crate::errors::code("invalidChannel"));
         };
         let reply = tokio::time::timeout(Duration::from_secs(2), self.command(json!(["get_property", "track-list"]), true))
             .await
@@ -586,7 +586,7 @@ impl Player {
                 }
             })
             .and_then(|t| t.get("id").and_then(|v| v.as_i64()))
-            .ok_or_else(|| "Este canal no tiene audio".to_string())?;
+            .ok_or_else(|| crate::errors::code("multiviewNoAudio"))?;
         self.command(json!(["set_property", "aid", id]), false).await?;
         Ok(())
     }

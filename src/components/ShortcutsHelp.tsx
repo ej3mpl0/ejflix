@@ -35,6 +35,7 @@ const LIVE: Array<[string[], MessageKey]> = [
   [["M"], "keyMute"],
   [["F"], "keyFullscreen"],
   [["C"], "keyChannels"],
+  [["G", "H"], "keyAudioDelay"],
   [["D"], "keyNight"],
   [["P"], "keyMini"],
   [["?"], "keyHelp"],
@@ -59,10 +60,27 @@ const APP: Array<[string[], MessageKey]> = [
  * "?" overlay: every keyboard shortcut of the current mode. In the player (`live` picks
  * the TV set); with `app`, the browsing shortcuts over the whole window.
  */
-export function ShortcutsHelp({ live = false, app = false, onClose }: { live?: boolean; app?: boolean; onClose: () => void }) {
+export function ShortcutsHelp({
+  live = false,
+  catchup = false,
+  app = false,
+  onClose,
+}: {
+  live?: boolean;
+  /** A past programme from the archive: the arrows seek instead of changing channel. */
+  catchup?: boolean;
+  app?: boolean;
+  onClose: () => void;
+}) {
   const { t } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
-  const rows = app ? APP : live ? LIVE : VOD;
+  const rows = app
+    ? APP
+    : live
+      ? catchup
+        ? LIVE.map(([keys, label]): [string[], MessageKey] => (label === "keyZap" ? [keys, "keySeek"] : [keys, label]))
+        : LIVE
+      : VOD;
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;

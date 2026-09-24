@@ -710,8 +710,12 @@ export function Player({
     if (target) playChannel(target);
   };
 
+  /** A past programme from the archive plays like a file: arrows and wheel seek in it. */
+  const zapping = live != null && !live.catchup;
+
   wheelRef.current = (deltaY) => {
-    if (live && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
+    if (live?.catchup && settings.iptv.wheelZap) seekBy(deltaY > 0 ? settings.playback.seekStep : -settings.playback.seekStep);
+    else if (zapping && settings.iptv.wheelZap) zap(deltaY > 0 ? 1 : -1);
     else void changeVolume(currentVolume() + (deltaY < 0 ? 5 : -5));
   };
 
@@ -889,13 +893,13 @@ export function Player({
       case "ArrowLeft":
       case "j":
       case "J":
-        if (live) zap(-1);
+        if (zapping) zap(-1);
         else seekBy(-settings.playback.seekStep);
         break;
       case "ArrowRight":
       case "l":
       case "L":
-        if (live) zap(1);
+        if (zapping) zap(1);
         else seekBy(settings.playback.seekStep);
         break;
       case "PageUp":
@@ -1012,7 +1016,7 @@ export function Player({
         setMenu(null);
         break;
       default:
-        if (!live && /^[0-9]$/.test(e.key) && current.duration > 0) {
+        if ((!live || live.catchup) && /^[0-9]$/.test(e.key) && current.duration > 0) {
           seekTo((current.duration * Number(e.key)) / 10);
         }
     }
@@ -1140,7 +1144,7 @@ export function Player({
           onClose={() => setStats(false)}
         />
       ) : null}
-      {help && !locked && !mini ? <ShortcutsHelp live={Boolean(live)} onClose={() => setHelp(false)} /> : null}
+      {help && !locked && !mini ? <ShortcutsHelp live={Boolean(live)} catchup={Boolean(live?.catchup)} onClose={() => setHelp(false)} /> : null}
       {subSearch && !locked && !mini ? (
         <SubtitleSearch movie={detail ?? movie} onClose={() => setSubSearch(false)} onLoaded={() => showOsd(t("subSearchLoaded"))} />
       ) : null}

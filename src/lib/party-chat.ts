@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { CHAT_MAX, PARTY_REACTIONS, partyApi } from "./party";
+import { CHAT_MAX, PARTY_REACTIONS, partyApi, type PartyStatus } from "./party";
 
 /**
  * Chat and reactions of the watch party, kept per window outside React: the overlay's
@@ -19,6 +19,8 @@ let seq = 0;
 let started = false;
 let reading = false;
 const listeners = new Set<() => void>();
+/** Names by member id, from presence: what a peer writes as its own name is not trusted. */
+let names = new Map<string, string>();
 
 function set(next: Partial<Snapshot>) {
   snapshot = { ...snapshot, ...next };
@@ -50,7 +52,7 @@ function start() {
   started = true;
   void partyApi.onMessage((message) => {
     const data = (message.data ?? {}) as Record<string, unknown>;
-    const name = cleanText(data.name, 40) || "?";
+    const name = names.get(message.from) || "?";
     if (message.event === "chat") {
       const text = cleanText(data.text, CHAT_MAX);
       if (text) addLine({ from: message.from, name, text, mine: false });
@@ -59,8 +61,22 @@ function start() {
       if ((PARTY_REACTIONS as readonly string[]).includes(emoji)) addReaction(emoji, name);
     }
   });
+  const remember = (status: PartyStatus) => {
+    // Someone who just left keeps the name their last lines were shown with.
+    const next = new Map(names);
+    for (const member of status.members) next.set(member.id, member.name);
+    names = status.active ? next : new Map();
+  };
+  void partyApi
+    .status()
+    // Only adds names: an event heard meanwhile is newer than this answer.
+    .then((status) => {
+      if (status.active) remember(status);
+    })
+    .catch(() => undefined);
   // A new party starts with an empty conversation.
   void partyApi.onStatus((status) => {
+    remember(status);
     if (!status.active && (snapshot.lines.length || snapshot.unread)) set({ lines: [], unread: 0 });
   });
 }

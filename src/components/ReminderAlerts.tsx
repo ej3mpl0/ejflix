@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { BellRing, Play, X } from "lucide-react";
 import type { Reminder } from "../lib/types";
 import { api } from "../lib/api";
@@ -9,6 +9,41 @@ import { useI18n } from "../lib/locale-context";
 const SHOW_MS = 3 * 60_000;
 
 /**
+ * The cards of this window, kept outside React: the player overlay remounts on every
+ * channel change and next episode, and a card still waiting must survive that.
+ */
+let pending: Reminder[] = [];
+let listening = false;
+const listeners = new Set<() => void>();
+
+function setPending(next: Reminder[]) {
+  pending = next;
+  for (const listener of listeners) listener();
+}
+
+function drop(key: string) {
+  setPending(pending.filter((r) => reminderKey(r.channelId, r.start) !== key));
+}
+
+function listen() {
+  if (listening) return;
+  listening = true;
+  void api.onIptvReminder((reminder) => {
+    const key = reminderKey(reminder.channelId, reminder.start);
+    setPending([...pending.filter((r) => reminderKey(r.channelId, r.start) !== key), reminder]);
+    window.setTimeout(() => drop(key), SHOW_MS);
+  });
+  // Answered in the other window (main or player overlay): gone here too.
+  void api.onIptvReminderDismissed(drop);
+}
+
+function subscribe(listener: () => void) {
+  listen();
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+/**
  * Cards for the reminders Rust announces (`iptv://reminder`, a minute before the start):
  * logo, programme and "Watch now". Both windows mount it; each shows it only while it is
  * the one in front (`enabled`): the main window when nothing plays, the player overlay
@@ -16,32 +51,13 @@ const SHOW_MS = 3 * 60_000;
  */
 export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch: (reminder: Reminder) => void }) {
   const { t, locale } = useI18n();
-  const [alerts, setAlerts] = useState<Reminder[]>([]);
+  const alerts = useSyncExternalStore(subscribe, () => pending);
   const [now, setNow] = useState(() => Date.now());
 
+  // A new card must not read a stale "now" (the clock only ticks while cards are up).
   useEffect(() => {
-    const timers = new Set<number>();
-    const unlisten = api.onIptvReminder((reminder) => {
-      const key = reminderKey(reminder.channelId, reminder.start);
-      // The clock only ticks while cards are up: a new one must not read a stale "now".
-      setNow(Date.now());
-      setAlerts((list) => [...list.filter((r) => reminderKey(r.channelId, r.start) !== key), reminder]);
-      const handle = window.setTimeout(() => {
-        timers.delete(handle);
-        setAlerts((list) => list.filter((r) => reminderKey(r.channelId, r.start) !== key));
-      }, SHOW_MS);
-      timers.add(handle);
-    });
-    // Answered in the other window (main or player overlay): gone here too.
-    const unlistenDismissed = api.onIptvReminderDismissed((key) =>
-      setAlerts((list) => list.filter((r) => reminderKey(r.channelId, r.start) !== key)),
-    );
-    return () => {
-      void unlisten.then((fn) => fn());
-      void unlistenDismissed.then((fn) => fn());
-      timers.forEach((handle) => window.clearTimeout(handle));
-    };
-  }, []);
+    setNow(Date.now());
+  }, [alerts]);
 
   // "Starts in a minute" turns into "Already started" on its own.
   useEffect(() => {
@@ -53,7 +69,7 @@ export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch
   if (!enabled || !alerts.length) return null;
 
   const dismiss = (reminder: Reminder) => {
-    setAlerts((list) => list.filter((r) => r !== reminder));
+    drop(reminderKey(reminder.channelId, reminder.start));
     void api.dismissIptvReminder(reminderKey(reminder.channelId, reminder.start));
   };
 
