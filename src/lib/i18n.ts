@@ -1035,6 +1035,13 @@ const es = {
   partyErrOffline: "No se ha podido conectar. Revisa tu conexión a Internet.",
   partyErrRateLimited: "Vas muy rápido: espera un momento.",
   partyErrGeneric: "No se ha podido conectar con la sesión.",
+  // --- review fixes (browsing) ---
+  errListNameEmpty: "La lista necesita un nombre.",
+  errTooManyLists: "Has llegado al máximo de listas.",
+  errListGone: "La lista ya no existe.",
+  errListItemNoKey: "Este título no se puede añadir a una lista.",
+  errListFull: "La lista está llena.",
+  keyCardMenu: "Menú del póster (añadir a una lista…)",
 };
 
 const en: typeof es = {
@@ -2072,6 +2079,13 @@ const en: typeof es = {
   partyErrOffline: "Couldn't connect. Check your internet connection.",
   partyErrRateLimited: "Slow down a little.",
   partyErrGeneric: "Couldn't connect to the party.",
+  // --- review fixes (browsing) ---
+  errListNameEmpty: "The list needs a name.",
+  errTooManyLists: "You've reached the maximum number of lists.",
+  errListGone: "That list no longer exists.",
+  errListItemNoKey: "This title can't be added to a list.",
+  errListFull: "The list is full.",
+  keyCardMenu: "Poster menu (add to a list…)",
 };
 
 export const dictionaries = { es, en };

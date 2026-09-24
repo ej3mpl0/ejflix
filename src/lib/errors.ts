@@ -63,6 +63,11 @@ const CODES: Record<string, MessageKey> = {
   subFormat: "errSubFormat",
   traktStatus: "errTraktStatus",
   linkNotAllowed: "errLinkNotAllowed",
+  listNameEmpty: "errListNameEmpty",
+  tooManyLists: "errTooManyLists",
+  listGone: "errListGone",
+  listItemNoKey: "errListItemNoKey",
+  listFull: "errListFull",
 };
 
 /**

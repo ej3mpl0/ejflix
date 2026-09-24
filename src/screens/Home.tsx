@@ -39,7 +39,7 @@ import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { TrailerGate } from "../lib/trailer-autoplay";
 import { useAutoAccent } from "../lib/auto-accent";
 import { useSpatialNavigation } from "../lib/spatial-nav";
-import { requestSettingsIntent } from "../lib/settings-intent";
+import { clearSettingsIntent, requestSettingsIntent } from "../lib/settings-intent";
 import { CalendarPage } from "./CalendarPage";
 import { MyListPage } from "./MyListPage";
 import { useCalendar } from "../lib/calendar";
@@ -325,7 +325,10 @@ export function Home({
   const openView = (next: NavView) => {
     setStack([]);
     setSeeAll(null);
-    if (next !== "settings") setSettingsSection(undefined);
+    if (next !== "settings") {
+      setSettingsSection(undefined);
+      clearSettingsIntent();
+    }
     // Leaving the search view empties the box, so the header stops showing a stale query.
     if (next !== "search") setSearch("");
     if (next === view) return;
@@ -340,6 +343,7 @@ export function Home({
     if (previous !== "search") setSearch("");
     // A deep link into Settings (e.g. TV › configure) only holds for that visit.
     setSettingsSection(undefined);
+    clearSettingsIntent();
     setView(previous);
     const top = scrollOf.current.get(previous) ?? 0;
     // Wait for the previous view to render before putting it back where it was.
@@ -351,6 +355,7 @@ export function Home({
     if (view === "search") return;
     setStack([]);
     setSettingsSection(undefined);
+    clearSettingsIntent();
     remember();
     setSeeAll(null);
     setView("search");
@@ -665,6 +670,7 @@ export function Home({
           key={seeAll.title}
           request={seeAll}
           top={!hasStack && !picker}
+          hasServer={hasServer}
           onBack={() => setSeeAll(null)}
           onOpen={openDetails}
           onPlay={play}

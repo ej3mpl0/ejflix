@@ -100,6 +100,14 @@ export function PosterCard({
       ref={cardRef}
       onMouseMove={armPreview}
       onMouseLeave={dropPreview}
+      onKeyDown={(e) => {
+        // The context-menu key or Shift+F10 opens the card's menu (its button only shows on hover).
+        if (e.key !== "ContextMenu" && !(e.key === "F10" && e.shiftKey)) return;
+        const button = cardRef.current?.querySelector<HTMLElement>('[aria-haspopup="menu"]');
+        if (!button) return;
+        e.preventDefault();
+        button.click();
+      }}
     >
       <div className="poster-card card-depth relative overflow-hidden rounded-poster bg-surface">
         <button

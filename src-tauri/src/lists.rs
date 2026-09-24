@@ -162,7 +162,7 @@ pub fn save(app: &tauri::AppHandle, user_id: &str, mut lists: Vec<CustomList>) -
 fn clean_name(name: &str) -> Result<String, String> {
     let name: String = name.trim().chars().take(MAX_NAME).collect();
     if name.is_empty() {
-        return Err("La lista necesita un nombre".into());
+        return Err(crate::errors::code("listNameEmpty"));
     }
     Ok(name)
 }
@@ -171,7 +171,7 @@ pub fn create(app: &tauri::AppHandle, user_id: &str, name: &str) -> Result<Vec<C
     let name = clean_name(name)?;
     let mut lists = load(app, user_id);
     if lists.len() >= MAX_LISTS {
-        return Err("Has llegado al máximo de listas".into());
+        return Err(crate::errors::code("tooManyLists"));
     }
     let now = now_ms();
     lists.push(CustomList {
@@ -188,7 +188,7 @@ pub fn create(app: &tauri::AppHandle, user_id: &str, name: &str) -> Result<Vec<C
 pub fn rename(app: &tauri::AppHandle, user_id: &str, id: &str, name: &str) -> Result<Vec<CustomList>, String> {
     let name = clean_name(name)?;
     let mut lists = load(app, user_id);
-    let list = lists.iter_mut().find(|l| l.id == id).ok_or("La lista ya no existe")?;
+    let list = lists.iter_mut().find(|l| l.id == id).ok_or_else(|| crate::errors::code("listGone"))?;
     list.name = name;
     list.updated_ms = now_ms();
     save(app, user_id, lists)
@@ -214,14 +214,14 @@ pub fn set_item(
     on: bool,
 ) -> Result<Vec<CustomList>, String> {
     if item.key.is_empty() {
-        return Err("La entrada no tiene identificador".into());
+        return Err(crate::errors::code("listItemNoKey"));
     }
     let mut lists = load(app, user_id);
-    let list = lists.iter_mut().find(|l| l.id == id).ok_or("La lista ya no existe")?;
+    let list = lists.iter_mut().find(|l| l.id == id).ok_or_else(|| crate::errors::code("listGone"))?;
     let present = list.items.iter().any(|i| i.key == item.key);
     if on && !present {
         if list.items.len() >= MAX_ITEMS {
-            return Err("La lista está llena".into());
+            return Err(crate::errors::code("listFull"));
         }
         item.added_ms = now_ms();
         list.removed.retain(|r| r.key != item.key);
