@@ -27,6 +27,7 @@ import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked, useParental } from "../lib/parental";
 import { useSettings } from "../lib/settings-context";
 import { THEMES } from "../lib/theme";
 import type { MessageKey } from "../lib/i18n";
@@ -139,6 +140,10 @@ export function CommandPalette({
   const [loading, setLoading] = useState(false);
   const [catalogs, setCatalogs] = useState<AddonCatalog[]>([]);
   const [recent, setRecent] = useState<Recent[]>(() => loadRecent(userId));
+  const parental = useParental();
+  // Recent titles wait for the parental check: one remembered before a limit was set
+  // (or tightened) must not show up, not even for a moment.
+  const [recentChecked, setRecentChecked] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const request = useRef(0);
   const trimmed = query.trim();
@@ -160,6 +165,44 @@ export function CommandPalette({
       alive = false;
     };
   }, []);
+
+  // Re-validates the recent titles with the same checks their details page makes; the
+  // ones now refused are forgotten. Other failures (offline, gone) keep them.
+  useEffect(() => {
+    if (!parental) return;
+    if (!parental.active) {
+      setRecentChecked(true);
+      return;
+    }
+    let alive = true;
+    setRecentChecked(false);
+    const movies = loadRecent(userId).flatMap((item) => (item.kind === "title" ? [item.movie] : []));
+    const allowed = async (movie: Movie) => {
+      if (movie.live) return true;
+      try {
+        if (movie.external) await api.addonMeta(movie.external.type, movie.external.metaId);
+        else await api.getItem(movie.id);
+        return true;
+      } catch (err) {
+        return !isParentalBlocked(err);
+      }
+    };
+    void Promise.all(movies.map(async (movie) => ((await allowed(movie)) ? null : movie.id))).then((ids) => {
+      if (!alive) return;
+      const blocked = new Set(ids.filter((id): id is string => id != null));
+      if (blocked.size) {
+        setRecent((list) => {
+          const next = list.filter((item) => !(item.kind === "title" && blocked.has(item.movie.id)));
+          saveRecent(userId, next);
+          return next;
+        });
+      }
+      setRecentChecked(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [parental, userId]);
 
   // Titles: server first, then online ones it does not have.
   useEffect(() => {
@@ -308,7 +351,9 @@ export function CommandPalette({
       const recents = recent
         .map((item) =>
           item.kind === "title"
-            ? titleEntry(item.movie, "recent")
+            ? recentChecked
+              ? titleEntry(item.movie, "recent")
+              : null
             : byId.has(item.id)
               ? { ...byId.get(item.id)!, group: "recent" as const }
               : null,
@@ -327,7 +372,7 @@ export function CommandPalette({
     };
     return [...titles.map((movie) => titleEntry(movie, "titles")), search, ...matching];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trimmed, titles, commands, recent]);
+  }, [trimmed, titles, commands, recent, recentChecked]);
 
   useEffect(() => setActive(0), [trimmed]);
   const current = Math.min(active, Math.max(0, entries.length - 1));
