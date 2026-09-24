@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Compass, X } from "lucide-react";
+import { Compass, Download, SearchX, X } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -7,7 +7,7 @@ import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
 import { Select } from "../components/Select";
-import { Shimmer } from "../components/Shimmer";
+import { PosterGridItemsSkeleton } from "../components/Skeletons";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
@@ -54,11 +54,14 @@ export function Discover({
   onOpen,
   onPlay,
   onError,
+  onImportAddons,
 }: {
   hasServer: boolean;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
   onError: (message: string) => void;
+  /** Settings › Addons with the import panel up (offered when there is nothing to browse). */
+  onImportAddons?: () => void;
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
@@ -344,9 +347,7 @@ export function Discover({
       {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
       {loading && !visible.length ? (
         <div className={grid}>
-          {Array.from({ length: 18 }).map((_, i) => (
-            <Shimmer key={i} className="aspect-[2/3] rounded-poster" delay={i * 40} />
-          ))}
+          <PosterGridItemsSkeleton count={18} />
         </div>
       ) : visible.length ? (
         <>
@@ -361,13 +362,32 @@ export function Discover({
                 delay={Math.min(i, 24) * 20}
               />
             ))}
+            {loadingMore ? <PosterGridItemsSkeleton count={6} /> : null}
           </div>
           {more ? (
             <LoadMoreButton loading={loadingMore} onLoad={() => void fetchPage(false)} />
           ) : null}
         </>
       ) : (
-        <EmptyState title={t("noDiscoverResults")} hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined} />
+        <EmptyState
+          icon={<SearchX size={26} />}
+          title={t("noDiscoverResults")}
+          hint={!hasServer && !hasAddons ? t("noAddonsYetHint") : undefined}
+          action={
+            !hasServer && !hasAddons && onImportAddons
+              ? { label: t("importAddons"), icon: <Download size={16} />, onClick: onImportAddons }
+              : genre != null || year != null
+                ? {
+                    label: t("clearFilters"),
+                    icon: <X size={16} />,
+                    onClick: () => {
+                      setGenre(null);
+                      setYear(null);
+                    },
+                  }
+                : undefined
+          }
+        />
       )}
     </div>
   );

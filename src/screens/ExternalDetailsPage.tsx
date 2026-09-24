@@ -21,6 +21,9 @@ import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { SeasonChips } from "../components/SeasonChips";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { useUserData } from "../lib/userdata-context";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
+import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useArtworkAccent } from "../lib/auto-accent";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -57,6 +60,10 @@ export function ExternalDetailsPage({
   const movie = meta ? metaFullToMovie(meta) : seed;
   const tint = useDominantColor(movie?.backdropUrl);
   const tintValue = settings.appearance.amoled ? null : tint;
+  const trailerGate = useTrailerGate();
+  const [trailerMuted, setTrailerMuted] = useState(true);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  useArtworkAccent(`details:${route.key}`, route.leaving ? null : movie?.backdropUrl);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -206,6 +213,13 @@ export function ExternalDetailsPage({
                 ) : (
                   <div className="absolute inset-0 bg-surface" />
                 )}
+                <TrailerBackdrop
+                  url={trailer}
+                  active={top && !route.leaving && !showTrailer && trailerGate.pages}
+                  muted={trailerMuted}
+                  loop
+                  onPhase={setTrailerPhase}
+                />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
               <div
@@ -260,6 +274,13 @@ export function ExternalDetailsPage({
                   ) : null}
                 </div>
               </div>
+              {trailerPhase === "playing" ? (
+                <TrailerMuteButton
+                  muted={trailerMuted}
+                  onToggle={() => setTrailerMuted((v) => !v)}
+                  className="absolute right-page bottom-8"
+                />
+              ) : null}
             </section>
 
             <div

@@ -6,6 +6,10 @@ import { useI18n } from "../lib/locale-context";
 import { Pill } from "./Pill";
 import { FavoriteButton } from "./FavoriteButton";
 import { QualityBadges } from "./QualityBadge";
+import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "./TrailerBackdrop";
+import { useTrailerGate, useTrailerUrl } from "../lib/trailer-autoplay";
+import { useSettings } from "../lib/settings-context";
+import { useArtworkAccent } from "../lib/auto-accent";
 
 const AUTO_ADVANCE_MS = 8000;
 const DRAG_THRESHOLD = 60;
@@ -14,7 +18,9 @@ const FADE_MS = 700;
 /**
  * Full-bleed hero carousel (Nuvio style): cross-fading backdrops with scroll parallax,
  * logo or title, meta line, actions and stretchy page dots. Auto-advances every 8 s
- * unless hovered, hidden or the user prefers reduced motion.
+ * unless hovered, hidden or the user prefers reduced motion. After a few seconds on a
+ * slide its trailer (when it has one) plays muted behind it, holding the rotation until
+ * it ends.
  */
 export function HeroCarousel({
   items,
@@ -41,6 +47,13 @@ export function HeroCarousel({
   const count = items.length;
   const safeIndex = count ? index % count : 0;
   const current = items[safeIndex];
+  const { settings } = useSettings();
+  const gate = useTrailerGate();
+  const trailer = useTrailerUrl(current, gate.hero && settings.appearance.autoplayTrailers && !reduced.current);
+  const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
+  const [muted, setMuted] = useState(true);
+  const trailerBusy = trailerPhase === "loading" || trailerPhase === "playing";
+  useArtworkAccent("hero", gate.hero ? current?.backdropUrl ?? null : null);
 
   const go = (delta: 1 | -1) => {
     if (count < 2) return;
@@ -64,14 +77,14 @@ export function HeroCarousel({
   }, [previous]);
 
   useEffect(() => {
-    if (count < 2 || hover || focused || paused || reduced.current) return;
+    if (count < 2 || hover || focused || paused || trailerBusy || reduced.current) return;
     const handle = window.setInterval(() => {
       if (document.hidden) return;
       go(1);
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count, hover, focused, paused, safeIndex]);
+  }, [count, hover, focused, paused, trailerBusy, safeIndex]);
 
   if (!current) return null;
 
@@ -95,8 +108,11 @@ export function HeroCarousel({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onKeyDown={(e) => {
-        if (e.key === "ArrowRight") go(1);
-        if (e.key === "ArrowLeft") go(-1);
+        // Only on the carousel itself or its dots: on the action buttons the arrows move focus.
+        const own = e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-hero-dots]");
+        if (!own || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
+        e.preventDefault();
+        go(e.key === "ArrowRight" ? 1 : -1);
       }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
@@ -144,6 +160,17 @@ export function HeroCarousel({
             style={{ ["--hero-dx" as string]: dir > 0 ? "3%" : "-3%" }}
           />
         ) : null}
+        <TrailerBackdrop
+          key={current.id}
+          url={trailer}
+          active={gate.hero}
+          muted={muted}
+          onPhase={(phase) => {
+            setTrailerPhase(phase);
+            // Played to the end: on to the next slide instead of sitting on its last frame.
+            if (phase === "ended") go(1);
+          }}
+        />
       </div>
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-base)_2%,transparent)_0%,color-mix(in_oklab,var(--color-base)_12%,transparent)_40%,color-mix(in_oklab,var(--color-base)_34%,transparent)_70%,color-mix(in_oklab,var(--color-base)_78%,transparent)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[220px] bg-gradient-to-t from-base to-transparent" />
@@ -198,9 +225,12 @@ export function HeroCarousel({
         </div>
       </div>
 
-      {count > 1 ? (
-        <div className="absolute right-page bottom-16 flex items-center gap-2">
-          {reduced.current ? null : (
+      {count > 1 || trailerPhase === "playing" ? (
+        <div className="absolute right-page bottom-16 flex items-center gap-2" data-hero-dots>
+          {trailerPhase === "playing" ? (
+            <TrailerMuteButton muted={muted} onToggle={() => setMuted((v) => !v)} className="mr-2 h-8 w-8" />
+          ) : null}
+          {reduced.current || count < 2 ? null : (
             <button
               type="button"
               onClick={() => setPaused((v) => !v)}
@@ -212,7 +242,7 @@ export function HeroCarousel({
               {paused ? <Play size={12} fill="currentColor" /> : <Pause size={12} fill="currentColor" />}
             </button>
           )}
-          {items.map((item, i) => (
+          {count < 2 ? null : items.map((item, i) => (
             <button
               key={item.id}
               type="button"

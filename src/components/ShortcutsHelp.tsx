@@ -1,7 +1,9 @@
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { useI18n } from "../lib/locale-context";
 import type { MessageKey } from "../lib/i18n";
 import { useSettings } from "../lib/settings-context";
+import { cn } from "../lib/format";
 
 const VOD: Array<[string[], MessageKey]> = [
   [["Space", "K"], "keyPlayPause"],
@@ -33,14 +35,56 @@ const LIVE: Array<[string[], MessageKey]> = [
   [["Esc"], "keyBack"],
 ];
 
-/** "?" overlay in the player: every keyboard shortcut of the current mode. */
-export function ShortcutsHelp({ live, onClose }: { live: boolean; onClose: () => void }) {
+/** Browsing the app (Home, pages, settings), with the keyboard or a gamepad. */
+const APP: Array<[string[], MessageKey]> = [
+  [["Ctrl", "K"], "keyPalette"],
+  [["/"], "keySearch"],
+  [["←", "↑", "→", "↓"], "keyNavigate"],
+  [["Enter"], "keyOpen"],
+  [["Esc", "⌫"], "back"],
+  [["?"], "keyHelp"],
+  [["✚", "L"], "keyPadNavigate"],
+  [["A"], "keyPadOpen"],
+  [["B"], "keyPadBack"],
+  [["Start"], "keyPadPlay"],
+];
+
+/**
+ * "?" overlay: every keyboard shortcut of the current mode. In the player (`live` picks
+ * the TV set); with `app`, the browsing shortcuts over the whole window.
+ */
+export function ShortcutsHelp({ live = false, app = false, onClose }: { live?: boolean; app?: boolean; onClose: () => void }) {
   const { t } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
-  const rows = live ? LIVE : VOD;
+  const rows = app ? APP : live ? LIVE : VOD;
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // Over the app nothing else closes it: Escape (before the page behind sees it) and focus.
+  useEffect(() => {
+    if (!app) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" && e.key !== "?") return;
+      e.preventDefault();
+      e.stopPropagation();
+      onCloseRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      if (previous?.isConnected) previous.focus();
+    };
+  }, [app]);
+
   return (
     <div
-      className="absolute inset-0 z-40 grid place-items-center bg-black/55 p-6 backdrop-blur-[2px]"
+      className={cn(
+        "inset-0 grid place-items-center bg-black/55 p-6 backdrop-blur-[2px]",
+        app ? "fixed z-[80]" : "absolute z-40",
+      )}
       onClick={(e) => {
         e.stopPropagation();
         onClose();
@@ -58,6 +102,7 @@ export function ShortcutsHelp({ live, onClose }: { live: boolean; onClose: () =>
             {t("keyboardShortcuts")}
           </h2>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             aria-label={t("close")}

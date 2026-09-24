@@ -58,7 +58,7 @@ type Section =
 
 /** Titles and row labels of each section, for the settings search. */
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
-  appearance: ["language", "appLanguage", "theme", "amoled", "posterSize"],
+  appearance: ["language", "appLanguage", "theme", "themeAuto", "amoled", "posterSize", "autoplayTrailers"],
   playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "playbackSpeed", "rememberSpeed", "showTimeRemaining"],
   addons: ["addons", "importAddons", "cinemetaRow"],
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
@@ -421,7 +421,9 @@ export function Settings({
                 <SettingsRow label={t("theme")} stacked>
                   <ThemePicker
                     value={appearance.theme}
-                    onChange={(theme) => void update({ appearance: { theme } })}
+                    onChange={(theme) => void update({ appearance: { theme, autoAccent: false } })}
+                    auto={appearance.autoAccent}
+                    onAuto={() => void update({ appearance: { autoAccent: true } })}
                   />
                 </SettingsRow>
                 <SettingsRow label={t("amoled")} hint={t("amoledHint")}>
@@ -443,6 +445,15 @@ export function Settings({
                       { value: "large", label: t("sizeLarge") },
                     ]}
                     onChange={(posterSize) => void update({ appearance: { posterSize } })}
+                  />
+                </SettingsRow>
+              </SettingsSection>
+              <SettingsSection title={t("trailersTitle")}>
+                <SettingsRow label={t("autoplayTrailers")} hint={t("autoplayTrailersHint")}>
+                  <Toggle
+                    checked={appearance.autoplayTrailers}
+                    onChange={(autoplayTrailers) => void update({ appearance: { autoplayTrailers } })}
+                    label={t("autoplayTrailers")}
                   />
                 </SettingsRow>
               </SettingsSection>

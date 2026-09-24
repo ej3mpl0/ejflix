@@ -424,7 +424,15 @@ export type Countdown = 0 | 5 | 10 | 15;
 
 /** Per-profile settings, mirrored from `src-tauri/src/settings.rs`. */
 export type Settings = {
-  appearance: { theme: ThemeId; amoled: boolean; posterSize: PosterSize };
+  appearance: {
+    theme: ThemeId;
+    amoled: boolean;
+    posterSize: PosterSize;
+    /** Muted trailers behind the Home hero and the details backdrop. */
+    autoplayTrailers: boolean;
+    /** The accent follows the artwork on screen (the theme is the fallback). */
+    autoAccent: boolean;
+  };
   playback: {
     skipIntro: SkipMode;
     skipRecap: SkipMode;
@@ -682,7 +690,7 @@ export type MfaEnrollment = {
 export type SyncReport = { pushed: string[]; pulled: string[]; skipped: string | null };
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: "crimson", amoled: false, posterSize: "medium" },
+  appearance: { theme: "crimson", amoled: false, posterSize: "medium", autoplayTrailers: true, autoAccent: false },
   playback: {
     skipIntro: "ask",
     skipRecap: "ask",

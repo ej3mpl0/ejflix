@@ -129,14 +129,14 @@ export function GlassHeader({
   const folded = Number.isFinite(fit) ? entries.slice(fit) : [];
   const foldedActive = folded.some((entry) => entry.id === view);
 
-  // "/" or Ctrl+K jumps to the search box from anywhere in the app (not while typing).
+  // "/" jumps to the search box from anywhere in the app (not while typing); Ctrl+K opens
+  // the command palette instead (Home).
   useEffect(() => {
     if (hidden) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
-      const combo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k";
-      if (!combo && (e.key !== "/" || typing || e.ctrlKey || e.altKey || e.metaKey)) return;
+      if (e.key !== "/" || typing || e.ctrlKey || e.altKey || e.metaKey || e.defaultPrevented) return;
       e.preventDefault();
       searchRef.current?.focus();
       searchRef.current?.select();
