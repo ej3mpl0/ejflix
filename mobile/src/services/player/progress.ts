@@ -6,6 +6,7 @@
 import type { PlayerState } from "../../lib/types";
 import { reportProgress } from "../jellyfin/playback";
 import { upsertProgress } from "../addons";
+import { downloadRecordPosition } from "../downloads/downloads";
 import { ticksFromSeconds } from "../util";
 import type { EngineContext } from "./types";
 
@@ -25,6 +26,10 @@ export async function reportTick(ctx: EngineContext, snap: PlayerState): Promise
         break;
       case "addon":
         upsertProgress(ctx.source.entry, snap.time, snap.duration);
+        break;
+      case "offline":
+        downloadRecordPosition(ctx.source.downloadId, snap.time, snap.duration);
+        if (ctx.source.entry) upsertProgress(ctx.source.entry, snap.time, snap.duration);
         break;
       case "live":
         break;

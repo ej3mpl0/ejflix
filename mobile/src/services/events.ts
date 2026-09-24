@@ -11,6 +11,8 @@ export type PlayerError = {
   code: PlayerErrorCode;
   /** Stream URL when it can be handed to another app. */
   url: string | null;
+  /** The failing Jellyfin playback was already a server transcode. */
+  transcoding?: boolean;
 };
 
 /** Events that replaced the Tauri `listen()` channels of the desktop app. */
@@ -26,6 +28,8 @@ export type EventMap = {
   "iptv://changed": void;
   "settings://changed": Settings;
   "update://progress": UpdateProgress;
+  /** The offline downloads list (or one transfer's progress) changed. */
+  "downloads://changed": void;
 };
 
 type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;

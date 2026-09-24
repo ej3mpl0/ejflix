@@ -33,6 +33,7 @@ import { ProductionInfo } from "../components/media/ProductionInfo";
 import { SeasonChips, type SeasonChip } from "../components/media/SeasonChips";
 import { SimilarRail } from "../components/media/SimilarRail";
 import { WatchedButton } from "../components/media/WatchedButton";
+import { DownloadButton } from "../components/media/DownloadButton";
 import { FloatingTitleBar } from "../components/shell";
 
 /** Position over which an item is considered "in progress" (30 s). */
@@ -301,6 +302,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
             ) : null}
             <FavoriteButton movie={movie} pill size="lg" />
             <WatchedButton movie={movie} pill size="lg" />
+            <DownloadButton movie={movie} />
             {onlineRef ? (
               <Pill variant="tonal" pill size="lg" icon={Globe} label={tr("onlineSources")} onPress={() => openOnline(movie)} />
             ) : null}

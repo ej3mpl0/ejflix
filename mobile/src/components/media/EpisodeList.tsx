@@ -1,10 +1,11 @@
 import React, { memo, useCallback, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
+import { haptic } from "../../lib/haptics";
 import { Ellipsis, Play } from "lucide-react-native";
 import type { Movie } from "../../lib/types";
-import { episodeCode, formatRuntime } from "../../lib/format";
+import { episodeCode, formatRuntime, remainingMinutes } from "../../lib/format";
+import { episodeProgress, isNewlyAired } from "../../lib/episodes";
 import { useI18n } from "../../lib/locale-context";
 import { useItemFlags } from "../../lib/userdata-context";
 import { makeStyles, useTheme } from "../../theme/ThemeProvider";
@@ -15,6 +16,8 @@ import { ProgressBar } from "../ui/ProgressBar";
 import { WatchedBadge } from "./WatchedBadge";
 import { ItemActionSheet } from "./ItemActionSheet";
 import { LONG_PRESS_MS } from "./PosterCard";
+import { DownloadButton } from "./DownloadButton";
+import { canDownload } from "../../services/downloads/downloads.pure";
 
 const STACK_BELOW = 400;
 
@@ -46,7 +49,11 @@ function EpisodeRow({
   const { t: tr } = useI18n();
   const layout = useLayout();
   const flags = useItemFlags(episode);
-  const progress = Math.min(100, flags.playedPercentage || 0);
+  const progress = episodeProgress(flags.playedPercentage, flags.played);
+  const isNew = isNewlyAired(episode.premiereDate, flags.played);
+  const downloadable = canDownload(episode);
+  // In progress: the time left replaces the runtime.
+  const trailing = progress > 0 && episode.runtimeTicks ? tr("remaining", { n: remainingMinutes(episode.runtimeTicks, flags.playbackPositionTicks) }) : meta;
   const code = episodeCode(episode, tr("episodeCode"));
   const title = [code, episode.name].filter(Boolean).join(" · ");
   const thumbW = stacked ? layout.width - 2 * layout.pagePad - 16 : layout.thumbW;
@@ -55,7 +62,7 @@ function EpisodeRow({
   const long = (episode.overview?.length ?? 0) > 120;
 
   const menu = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    haptic("medium");
     onMenu(episode);
   }, [episode, onMenu]);
 
@@ -77,14 +84,19 @@ function EpisodeRow({
         </View>
         <View pointerEvents="none" style={s.thumbOutline} />
         <WatchedBadge movie={episode} size={22} style={s.watched} />
-        {progress > 0 ? <ProgressBar value={progress / 100} height={3} animated={false} style={s.progress} /> : null}
+        {isNew ? (
+          <View pointerEvents="none" style={s.newBadge}>
+            <Text style={s.newText}>{tr("newBadge")}</Text>
+          </View>
+        ) : null}
+        {progress > 0 ? <ProgressBar value={progress} height={4} animated={false} track={t.black(0.55)} style={s.progress} /> : null}
       </View>
-      <View style={[s.body, stacked ? s.bodyStacked : null]}>
+      <View style={[s.body, stacked ? s.bodyStacked : null, downloadable ? s.bodyWithDownload : null]}>
         <View style={s.titleRow}>
           <Text numberOfLines={stacked ? 2 : 1} style={s.title}>
             {title}
           </Text>
-          {meta ? <Text style={s.meta}>{meta}</Text> : null}
+          {trailing ? <Text style={s.meta}>{trailing}</Text> : null}
         </View>
         {episode.overview ? (
           <Text numberOfLines={open ? undefined : 2} style={s.overview}>
@@ -97,6 +109,7 @@ function EpisodeRow({
           </Pressable>
         ) : null}
       </View>
+      {downloadable ? <DownloadButton movie={episode} variant="icon" style={s.download} /> : null}
       <IconButton icon={Ellipsis} label={tr("moreOptions")} onPress={menu} size={20} color={t.colors.muted} style={s.more} />
     </Pressable>
   );
@@ -159,4 +172,16 @@ const useStyles = makeStyles((t) => ({
   overview: { ...text(13, "regular", { lineHeight: 19 }), color: t.colors.muted, marginTop: 4 },
   moreText: { ...text(12, "semibold"), color: t.colors.text, marginTop: 4 },
   more: { position: "absolute", top: 4, right: 4 },
+  download: { position: "absolute", top: 4, right: 44 },
+  bodyWithDownload: { paddingRight: 88 },
+  newBadge: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    backgroundColor: t.colors.accent,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  newText: { ...text(10, "bold", { tracking: 0.06, uppercase: true, lineHeight: 13 }), color: t.colors.onAccent },
 }));
