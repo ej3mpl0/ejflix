@@ -69,6 +69,7 @@ export function LiveTvScreen() {
   const [sheet, setSheet] = useState<"source" | "groups" | null>(null);
 
   const request = useRef(0);
+  const groupsRequest = useRef(0);
   const alive = useRef(true);
   const toastRef = useRef(toast);
   toastRef.current = toast;
@@ -125,11 +126,13 @@ export function LiveTvScreen() {
   }, [enabledKey, sourceId]);
 
   const loadGroups = useCallback(async () => {
+    // Only the latest filter may fill the sidebar (a slower earlier answer is dropped).
+    const id = ++groupsRequest.current;
     try {
       const next = await api.iptvGroups(sourceId || null);
-      if (alive.current) setGroups(next);
+      if (alive.current && id === groupsRequest.current) setGroups(next);
     } catch {
-      if (alive.current) setGroups([]);
+      if (alive.current && id === groupsRequest.current) setGroups([]);
     }
   }, [sourceId]);
 

@@ -14,7 +14,7 @@ import type {
   Programme,
   XtreamAccount,
 } from "../../lib/types";
-import { emit } from "../events";
+import { emit, PlaybackError } from "../events";
 import { nowMs } from "../util";
 import { getSettingsFor, settingsUser } from "../settings";
 import { registerSessionCleanup } from "../session";
@@ -154,9 +154,9 @@ export async function resolveChannelPlayback(channelId: string): Promise<{
 }> {
   const uid = requireUser();
   const found = state.find(channelId);
-  if (!found) throw new Error("Canal no encontrado");
+  if (!found) throw new PlaybackError("playErrChannelNotFound", "Canal no encontrado");
   const source = sources.listSources(uid).find((s) => s.id === found.channel.sourceId);
-  if (!source) throw new Error("La lista de este canal ya no existe");
+  if (!source) throw new PlaybackError("playErrChannelListGone", "La lista de este canal ya no existe");
   const password = await sources.passwordOf(source);
   const { url, headers } = sources.streamFor(source, password, found.channel);
   sources.pushRecent(uid, channelId);

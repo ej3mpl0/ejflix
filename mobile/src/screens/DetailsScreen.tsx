@@ -71,6 +71,8 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const [expanded, setExpanded] = useState(false);
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
+  /** Bumped when the player closes: position, played state and next up changed. */
+  const [playedToken, setPlayedToken] = useState(0);
   const loadedSeason = useRef<string | null>(null);
   const scrollY = useSharedValue(0);
   const isSeries = route.kind === "Series";
@@ -79,6 +81,13 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const onScroll = useAnimatedScrollHandler((e) => {
     scrollY.value = e.contentOffset.y;
   });
+
+  useEffect(() => {
+    const unlisten = api.onPlayerClose(() => setPlayedToken((n) => n + 1));
+    return () => {
+      void unlisten.then((fn) => fn()).catch(() => undefined);
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -105,7 +114,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
     return () => {
       alive = false;
     };
-  }, [route.id, route.seed, isSeries]);
+  }, [route.id, route.seed, isSeries, playedToken]);
 
   useEffect(() => {
     if (!isSeries || !seasonId) return undefined;
@@ -126,7 +135,7 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
     return () => {
       alive = false;
     };
-  }, [isSeries, route.id, seasonId, userDataVersion]);
+  }, [isSeries, route.id, seasonId, userDataVersion, playedToken]);
 
   const movie = detail;
   const heading = movie?.name ?? route.seed?.name ?? "";
