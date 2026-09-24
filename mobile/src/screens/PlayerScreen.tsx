@@ -20,6 +20,7 @@ import { channelToMovie } from "../lib/iptv";
 import { nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
 import { openInExternalPlayer } from "../lib/external-player";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
 import { useSettings } from "../lib/settings-context";
 import { useToast } from "../lib/toast-context";
 import { decodeSubtitleBytes, parseSubtitles, type Cue } from "../lib/subtitles";
@@ -305,7 +306,11 @@ export function PlayerScreen({ route, navigation }: MainScreenProps<"Player">) {
         if (cancelled) return;
         // Stay on the player with the error, a retry and (online) another source.
         setPlayError({
-          message: err instanceof Error ? err.message : tRef.current("playerStartError"),
+          message: isParentalBlocked(err)
+            ? tRef.current("parentalBlockedTitle")
+            : err instanceof Error
+              ? err.message
+              : tRef.current("playerStartError"),
           detail: "",
           code: "unknown",
           url: null,

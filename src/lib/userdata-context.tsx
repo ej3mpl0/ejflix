@@ -74,9 +74,21 @@ export function UserDataProvider({
     const unlisten = api.onAccountSynced((report) => {
       if (report.pulled.includes("lists")) void load();
     });
+    // A Trakt import filled My list and the watched marks (online and on the server).
+    const unlistenTrakt = api.onTraktImported(() => {
+      void load();
+      setVersion((n) => n + 1);
+    });
+    // A new parental limit changes what every row may show.
+    const unlistenParental = api.onParentalChanged(() => {
+      void load();
+      setVersion((n) => n + 1);
+    });
     return () => {
       alive = false;
       void unlisten.then((fn) => fn());
+      void unlistenTrakt.then((fn) => fn());
+      void unlistenParental.then((fn) => fn());
     };
   }, []);
 

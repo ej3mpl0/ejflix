@@ -53,6 +53,8 @@ export function Profiles({
   /** Local profile waiting for its PIN. */
   const [locked, setLocked] = useState<LocalProfile | null>(null);
   const [pinError, setPinError] = useState(false);
+  /** PIN typed to edit a protected profile (changing or deleting it asks for it again in Rust). */
+  const [unlockPin, setUnlockPin] = useState<string | null>(null);
 
   const loadLocals = useCallback(async () => {
     try {
@@ -113,6 +115,27 @@ export function Profiles({
 
   const enterLocal = async (profile: LocalProfile, pin?: string) => {
     if (editing) {
+      // A protected profile is only edited with its PIN: otherwise anyone could remove
+      // it here and walk into the profile (or out of a parental restriction).
+      if (profile.hasPin && pin == null) {
+        setPinError(false);
+        setLocked(profile);
+        return;
+      }
+      if (profile.hasPin && pin != null) {
+        setSigning(true);
+        try {
+          await api.localProfileCheckPin(profile.id, pin);
+        } catch {
+          setPinError(true);
+          window.setTimeout(() => setPinError(false), 600);
+          return;
+        } finally {
+          setSigning(false);
+        }
+      }
+      setLocked(null);
+      setUnlockPin(pin ?? null);
       setEditor(profile);
       return;
     }
@@ -191,6 +214,7 @@ export function Profiles({
             </h1>
             <ProfileForm
               initial={initial}
+              unlockPin={initial ? unlockPin : null}
               onCancel={() => setEditor(null)}
               onSaved={(profile, pin) => {
                 setEditor(null);

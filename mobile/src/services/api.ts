@@ -39,6 +39,7 @@ import type {
   Session,
   Settings,
   SettingsPatch,
+  ParentalStatus,
 } from "../lib/types";
 import { emit, listen, type PlayerError } from "./events";
 import * as session from "./session";
@@ -50,6 +51,7 @@ import * as addons from "./addons";
 import * as iptv from "./iptv";
 import { engine } from "./player/engine";
 import * as updates from "./updates";
+import * as parental from "./parental";
 
 const EXTERNAL_ALLOWLIST = ["https://github.com/", "https://discord.com/developers/", "https://introdb.app/"];
 
@@ -66,11 +68,14 @@ export const api = {
   logoutServer: (): Promise<void> => session.logoutServer(),
   // Local (online) profiles
   localProfilesList: (): Promise<LocalProfile[]> => profiles.localProfilesList(),
-  localProfileCreate: (name: string, avatar: string, pin?: string | null): Promise<LocalProfile> =>
-    profiles.localProfileCreate(name, avatar, pin ?? null),
+  /** `parentalPin` is asked for while a profile has a parental restriction. */
+  localProfileCreate: (name: string, avatar: string, pin?: string | null, parentalPin?: string | null): Promise<LocalProfile> =>
+    profiles.localProfileCreate(name, avatar, pin ?? null, parentalPin ?? null),
   localProfileUpdate: (id: string, patch: ProfilePatch): Promise<LocalProfile> =>
     profiles.localProfileUpdate(id, patch),
-  localProfileDelete: (id: string): Promise<void> => profiles.localProfileDelete(id),
+  /** `pin`: the profile's own PIN (unless it is open); `parentalPin` when it is restricted. */
+  localProfileDelete: (id: string, pin?: string | null, parentalPin?: string | null): Promise<void> =>
+    profiles.localProfileDelete(id, pin ?? null, parentalPin ?? null),
   /** Opens a local profile; `pin` is required when the profile has one. */
   localProfileEnter: (id: string, pin?: string | null): Promise<Session> =>
     profiles.localProfileEnter(id, pin ?? null),
@@ -207,6 +212,15 @@ export const api = {
   settingsSet: (patch: SettingsPatch): Promise<Settings> => settings.settingsSet(patch),
   onSettingsChanged: (handler: (settings: Settings) => void): Promise<() => void> =>
     listen("settings://changed", handler),
+  // --- profiles & integrations ---
+  /** Checks a profile's PIN without opening it (rejects with "PIN incorrecto"). */
+  localProfileCheckPin: (id: string, pin: string): Promise<void> => profiles.localProfileCheckPin(id, pin),
+  parentalStatus: (): Promise<ParentalStatus> => parental.parentalStatus(),
+  /** `pin` is the parental PIN, or the new one when none exists yet. */
+  parentalSet: (pin: string, maxAge: number, hideUnrated: boolean, newPin?: string | null): Promise<ParentalStatus> =>
+    parental.parentalSet(pin, maxAge, hideUnrated, newPin ?? null),
+  onParentalChanged: (handler: (status: ParentalStatus) => void): Promise<() => void> =>
+    listen("parental://changed", handler),
 };
 
 export type Api = typeof api;

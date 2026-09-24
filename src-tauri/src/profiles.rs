@@ -48,6 +48,8 @@ pub struct ProfilePatch {
     /// New PIN (4 digits). Ignored when `clear_pin` is set.
     pub pin: Option<String>,
     pub clear_pin: bool,
+    /// The PIN the profile has now, to change or remove it while it is not open.
+    pub current_pin: Option<String>,
 }
 
 impl LocalProfile {

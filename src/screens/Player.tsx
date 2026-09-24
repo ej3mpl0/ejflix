@@ -5,6 +5,7 @@ import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
 import { SkipButton } from "../components/SkipButton";
 import { NextEpisodeCard } from "../components/NextEpisodeCard";
+import { isParentalBlocked } from "../lib/parental";
 import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
@@ -265,7 +266,13 @@ export function Player({
         } catch (err) {
           if (cancelled) return;
           setStartHint("");
-          setStartError(err instanceof Error ? err.message : tRef.current("playerStartError"));
+          setStartError(
+            isParentalBlocked(err)
+              ? tRef.current("parentalBlockedTitle")
+              : err instanceof Error
+                ? err.message
+                : tRef.current("playerStartError"),
+          );
         }
       };
       void begin();

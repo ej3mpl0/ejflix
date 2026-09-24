@@ -33,6 +33,8 @@ export type ProfilePatch = {
   avatar?: string;
   pin?: string;
   clearPin?: boolean;
+  /** The PIN the profile has now (changing it from the profile picker). */
+  currentPin?: string;
 };
 
 export type BrowseSort = "popular" | "newest" | "year" | "name";
@@ -319,6 +321,8 @@ export type AddonMeta = {
   runtime: string | null;
   year: number | null;
   imdb: string | null;
+  /** Age rating, when the addon publishes one. */
+  certification?: string | null;
 };
 
 export type AddonVideo = {
@@ -714,4 +718,44 @@ export const DEFAULT_SETTINGS: Settings = {
   torrents: { enabled: true, share: true, cacheGb: 5, uploadKbps: 512, downloadKbps: 0 },
   // Until the real settings arrive nothing asks for the setup step.
   onboarding: { setupDone: true },
+};
+
+// --- profiles & integrations ---
+
+/** Age limits a profile can have; 18 is "no limit". */
+export type ParentalLevel = 0 | 7 | 12 | 16 | 18;
+
+/** Parental restriction of the open profile. */
+export type ParentalStatus = {
+  maxAge: ParentalLevel;
+  hideUnrated: boolean;
+  /** The parental PIN exists (changing a restriction asks for it). */
+  pinSet: boolean;
+  active: boolean;
+};
+
+export type TraktStatus = {
+  clientId: string;
+  hasSecret: boolean;
+  connected: boolean;
+  username: string;
+  syncBack: boolean;
+  lastImportMs: number;
+};
+
+export type TraktDeviceCode = {
+  userCode: string;
+  verificationUrl: string;
+  expiresIn: number;
+  interval: number;
+};
+
+export type TraktPoll = "pending" | "slow_down" | "connected" | "expired" | "denied" | "invalid";
+
+export type TraktImportReport = {
+  watchlist: number;
+  watched: number;
+  episodes: number;
+  unmatched: number;
+  skipped: number;
 };

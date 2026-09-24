@@ -85,6 +85,8 @@ pub struct AddonMeta {
     pub year: Option<i32>,
     /// "tt…" when the id (or the `imdb_id` field) is an IMDb id.
     pub imdb: Option<String>,
+    /// Age rating, for the few addons that publish one (parental controls).
+    pub certification: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -411,7 +413,7 @@ impl AddonClient {
         if cacheable {
             if let Some((at, metas)) = self.catalogs.lock().unwrap().get(&path) {
                 if at.elapsed() < CATALOG_TTL {
-                    return Ok(metas.clone());
+                    return Ok(allowed_only(metas.clone()));
                 }
             }
         }
@@ -430,7 +432,7 @@ impl AddonClient {
             }
             cache.insert(path, (Instant::now(), metas.clone()));
         }
-        Ok(metas)
+        Ok(allowed_only(metas))
     }
 
     /// Full metadata: the first addon that serves `meta` for this type/id, else Cinemeta.
@@ -451,6 +453,9 @@ impl AddonClient {
             let path = format!("{}/meta/{}/{}.json", base_of(&addon.url), enc(kind), enc(id));
             if let Ok(value) = self.get_json(&path).await {
                 if let Some(meta) = value.get("meta").and_then(parse_meta_full) {
+                    if !crate::parental::allows(meta.meta.certification.as_deref()) {
+                        return Err(crate::parental::BLOCKED.into());
+                    }
                     return Ok(meta);
                 }
             }
@@ -834,7 +839,19 @@ fn parse_meta(v: &Value) -> Option<AddonMeta> {
         runtime: text(v, "runtime"),
         year,
         imdb,
+        certification: crate::parental::meta_rating(v),
     })
+}
+
+/// Catalog entries the open profile may see (the cache keeps the full page).
+fn allowed_only(metas: Vec<AddonMeta>) -> Vec<AddonMeta> {
+    if crate::parental::current().is_none() {
+        return metas;
+    }
+    metas
+        .into_iter()
+        .filter(|m| crate::parental::allows(m.certification.as_deref()))
+        .collect()
 }
 
 fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {

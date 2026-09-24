@@ -8,6 +8,8 @@ import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
+import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
 import { Pill } from "../components/Pill";
 import { MetaChips } from "../components/MetaChips";
@@ -49,6 +51,8 @@ export function ExternalDetailsPage({
   const [season, setSeason] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   const [reload, setReload] = useState(0);
   const [showTrailer, setShowTrailer] = useState(false);
   const [markingSeason, setMarkingSeason] = useState(false);
@@ -70,7 +74,8 @@ export function ExternalDetailsPage({
         if (alive) setMeta(full);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive) setError(err instanceof Error ? err.message : String(err));
       });
     api
       .addonProgressList()
@@ -115,6 +120,8 @@ export function ExternalDetailsPage({
       </Pill>
     </div>
   ) : null;
+
+  if (blocked) return <RestrictedNotice leaving={route.leaving} top={top} onBack={onBack} />;
 
   // Without a seed there is nothing to draw until the addon answers; keep the title bar so
   // the page can always be left.

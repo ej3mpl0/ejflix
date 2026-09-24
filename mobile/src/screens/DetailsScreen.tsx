@@ -3,12 +3,13 @@ import { Linking, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { Clapperboard, Globe, Play, RotateCcw } from "lucide-react-native";
+import { Clapperboard, Globe, Play, RotateCcw, ShieldAlert } from "lucide-react-native";
 import { api } from "../lib/api";
 import { externalRefForJellyfin } from "../lib/addons";
 import { episodeCode, formatClock, ticksToSeconds } from "../lib/format";
 import { useDominantColor } from "../lib/tint";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
 import { usePlay } from "../lib/play";
 import { useSettings } from "../lib/settings-context";
 import { useStreamPicker } from "../lib/stream-picker-context";
@@ -71,6 +72,8 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
   const [expanded, setExpanded] = useState(false);
   const [person, setPerson] = useState<Person | null>(null);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   const loadedSeason = useRef<string | null>(null);
   const scrollY = useSharedValue(0);
   const isSeries = route.kind === "Series";
@@ -88,7 +91,8 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
         if (alive) setDetail(full);
       })
       .catch((err) => {
-        if (alive && !route.seed) setError(errorText(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive && !route.seed) setError(errorText(err));
       });
     if (isSeries) {
       Promise.all([api.getSeasons(route.id), api.getSeriesNextUp(route.id).catch(() => null)])
@@ -157,6 +161,16 @@ export function DetailsScreen({ route: navRoute, navigation }: MainScreenProps<"
     () => seasons.map((season) => ({ id: season.id, name: season.name, count: season.childCount })),
     [seasons],
   );
+
+  if (blocked) {
+    return (
+      <View style={s.root}>
+        <View style={{ paddingTop: layout.insets.top + 96, paddingHorizontal: layout.pagePad }}>
+          <EmptyCard icon={ShieldAlert} title={tr("parentalBlockedTitle")} hint={tr("parentalBlockedHint")} actionLabel={tr("back")} onAction={back} />
+        </View>
+      </View>
+    );
+  }
 
   if (!movie && error) {
     return (

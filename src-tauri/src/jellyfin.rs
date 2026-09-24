@@ -176,6 +176,38 @@ pub struct Movie {
     pub chapters: Vec<Chapter>,
 }
 
+/// A library title reduced to what the Trakt import needs.
+#[derive(Debug, Clone)]
+pub struct ProviderItem {
+    pub id: String,
+    /// "Movie" | "Series"
+    pub kind: String,
+    pub provider_ids: BTreeMap<String, String>,
+    pub played: bool,
+    pub favorite: bool,
+}
+
+fn provider_item(item: &Value) -> Option<ProviderItem> {
+    let user = item.get("UserData");
+    let flag = |key: &str| user.and_then(|u| u.get(key)).and_then(|v| v.as_bool()).unwrap_or(false);
+    Some(ProviderItem {
+        id: item.get("Id")?.as_str()?.to_string(),
+        kind: item.get("Type")?.as_str()?.to_string(),
+        provider_ids: item
+            .get("ProviderIds")
+            .and_then(|v| v.as_object())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
+                    .filter(|(_, v)| !v.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default(),
+        played: flag("Played"),
+        favorite: flag("IsFavorite"),
+    })
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GenreRow {
@@ -202,6 +234,9 @@ pub struct JellyfinClient {
     http: reqwest::Client,
     http_local: reqwest::Client,
     session: Arc<RwLock<Option<Session>>>,
+    /// Series id -> its official rating, for parental controls: episodes and seasons
+    /// rarely carry a rating of their own and inherit the show's.
+    series_ratings: Arc<std::sync::Mutex<std::collections::HashMap<String, Option<String>>>>,
 }
 
 /// Filters of the Discover tab.
@@ -257,7 +292,22 @@ impl JellyfinClient {
         if let Some(year) = args.year.filter(|y| (1880..=2100).contains(y)) {
             path.push_str(&format!("&Years={year}"));
         }
-        self.items_query(&path).await
+        if crate::parental::current().is_none() {
+            return self.items_query(&path).await;
+        }
+        // A restricted profile can filter a whole page away; Discover would take the
+        // empty page for the end of the library, so look a few pages further first.
+        let limit = args.limit.clamp(1, 60);
+        let mut start = args.start;
+        for _ in 0..4 {
+            let page = path.replacen(&format!("&StartIndex={}&", args.start), &format!("&StartIndex={start}&"), 1);
+            let list = self.items_query(&page).await?;
+            if !list.is_empty() {
+                return Ok(list);
+            }
+            start += limit;
+        }
+        Ok(vec![])
     }
 
     /// Genre names of the whole library (movies and series).
@@ -298,6 +348,7 @@ impl JellyfinClient {
             http,
             http_local,
             session: Arc::new(RwLock::new(None)),
+            series_ratings: Arc::default(),
         }
     }
 
@@ -315,6 +366,9 @@ impl JellyfinClient {
 
     pub async fn set_session(&self, session: Option<Session>) {
         *self.session.write().await = session;
+        if let Ok(mut ratings) = self.series_ratings.lock() {
+            ratings.clear();
+        }
     }
 
     pub async fn require_session(&self) -> Result<Session, String> {
@@ -711,6 +765,64 @@ impl JellyfinClient {
         Ok(value.get(field).and_then(|v| v.as_bool()).unwrap_or(on))
     }
 
+    /// Every movie and series of the library with its external ids and flags, in one
+    /// light request (Trakt import matches titles by IMDb / TMDB id against it).
+    pub async fn provider_index(&self) -> Result<Vec<ProviderItem>, String> {
+        let session = self.require_session().await?;
+        let res = self
+            .get(&format!(
+                "/Users/{}/Items?IncludeItemTypes=Movie,Series&Recursive=true&Fields=ProviderIds&EnableImages=false",
+                session.user_id
+            ))
+            .await?;
+        if !res.status().is_success() {
+            return Err(format!("Jellyfin: {}", res.status()));
+        }
+        let value: Value = res.json().await.map_err(|e| e.to_string())?;
+        Ok(value
+            .get("Items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(provider_item)
+            .collect())
+    }
+
+    /// Episodes of a series as (id, season, episode, played).
+    pub async fn episode_index(&self, series_id: &str) -> Result<Vec<(String, i32, i32, bool)>, String> {
+        if !valid_item_id(series_id) {
+            return Err("Ítem no válido".into());
+        }
+        let session = self.require_session().await?;
+        let res = self
+            .get(&format!(
+                "/Shows/{series_id}/Episodes?UserId={}&EnableImages=false",
+                session.user_id
+            ))
+            .await?;
+        if !res.status().is_success() {
+            return Err(format!("Jellyfin: {}", res.status()));
+        }
+        let value: Value = res.json().await.map_err(|e| e.to_string())?;
+        Ok(value
+            .get("Items")
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|item| {
+                let id = item.get("Id")?.as_str()?.to_string();
+                let season = item.get("ParentIndexNumber")?.as_i64()? as i32;
+                let episode = item.get("IndexNumber")?.as_i64()? as i32;
+                let played = item
+                    .get("UserData")
+                    .and_then(|u| u.get("Played"))
+                    .and_then(|p| p.as_bool())
+                    .unwrap_or(false);
+                Some((id, season, episode, played))
+            })
+            .collect())
+    }
+
     /// Series-level IMDb id (episodes carry their own ids, IntroDB is keyed by the show).
     pub async fn series_imdb_id(&self, series_id: &str) -> Option<String> {
         let series = self.get_item(series_id).await.ok()?;
@@ -805,7 +917,13 @@ impl JellyfinClient {
             return Err("No se encontró la película".into());
         }
         let value: Value = res.json().await.map_err(|e| e.to_string())?;
-        self.map_item(&session, &value)
+        let movie = self.map_item(&session, &value)?;
+        if let Some(rule) = crate::parental::current() {
+            let mut one = vec![movie];
+            self.restrict(&session, rule, &mut one).await;
+            return one.pop().ok_or_else(|| crate::parental::BLOCKED.to_string());
+        }
+        Ok(movie)
     }
 
     pub async fn fetch_local_image(&self, path: &str, query: &str) -> Result<(Vec<u8>, String), String> {
@@ -1017,7 +1135,65 @@ impl JellyfinClient {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        items.iter().map(|v| self.map_item(&session, v)).collect()
+        let mut movies = items
+            .iter()
+            .map(|v| self.map_item(&session, v))
+            .collect::<Result<Vec<_>, _>>()?;
+        if let Some(rule) = crate::parental::current() {
+            self.restrict(&session, rule, &mut movies).await;
+        }
+        Ok(movies)
+    }
+
+    /// Drops what the open profile's parental restriction does not allow. An episode or
+    /// season without a rating of its own is judged by its series' rating.
+    async fn restrict(&self, session: &Session, rule: crate::parental::Rule, movies: &mut Vec<Movie>) {
+        let missing: Vec<String> = {
+            let known = self.series_ratings.lock().map(|m| m.clone()).unwrap_or_default();
+            let mut ids: Vec<String> = movies
+                .iter()
+                .filter(|m| m.official_rating.is_none())
+                .filter_map(|m| m.series_id.clone())
+                .filter(|id| valid_item_id(id) && !known.contains_key(id))
+                .collect();
+            ids.sort();
+            ids.dedup();
+            ids
+        };
+        for chunk in missing.chunks(40) {
+            let path = format!(
+                "/Users/{}/Items?Ids={}&Fields=OfficialRating&EnableImages=false&EnableUserData=false",
+                session.user_id,
+                chunk.join(",")
+            );
+            let Ok(res) = self.get(&path).await else { continue };
+            if !res.status().is_success() {
+                continue;
+            }
+            let Ok(value) = res.json::<Value>().await else { continue };
+            let Ok(mut ratings) = self.series_ratings.lock() else { continue };
+            for id in chunk {
+                ratings.entry(id.clone()).or_insert(None);
+            }
+            for item in value.get("Items").and_then(|v| v.as_array()).into_iter().flatten() {
+                if let Some(id) = item.get("Id").and_then(|v| v.as_str()) {
+                    let rating = item
+                        .get("OfficialRating")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.trim().is_empty())
+                        .map(|s| s.to_string());
+                    ratings.insert(id.to_string(), rating);
+                }
+            }
+        }
+        let ratings = self.series_ratings.lock().map(|m| m.clone()).unwrap_or_default();
+        movies.retain(|m| {
+            let rating = m
+                .official_rating
+                .clone()
+                .or_else(|| m.series_id.as_ref().and_then(|id| ratings.get(id).cloned().flatten()));
+            rule.allows(rating.as_deref())
+        });
     }
 
     fn map_item(&self, session: &Session, value: &Value) -> Result<Movie, String> {

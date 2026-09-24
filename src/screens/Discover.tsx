@@ -12,6 +12,7 @@ import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { cn } from "../lib/format";
+import { useParental } from "../lib/parental";
 
 type Source = "all" | "server" | "online";
 type Kind = "movie" | "series";
@@ -62,6 +63,10 @@ export function Discover({
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
+  // A restricted profile gets short pages (Rust filters them), which do not mean the end.
+  const parental = useParental();
+  const restricted = useRef(false);
+  restricted.current = parental?.active ?? false;
   const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [serverGenres, setServerGenres] = useState<string[]>([]);
@@ -185,7 +190,7 @@ export function Discover({
           api
             .browseItems({ type: kind, genre, year, sort, start: current * SERVER_PAGE, limit: SERVER_PAGE })
             .then((list) => {
-              if (list.length < SERVER_PAGE) serverDone.current = true;
+              if (list.length === 0 || (list.length < SERVER_PAGE && !restricted.current)) serverDone.current = true;
               return list;
             })
             .catch((err) => {

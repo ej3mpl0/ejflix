@@ -61,10 +61,20 @@ export function UserDataProvider({
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
 
   useEffect(() => {
-    api
-      .addonLibraryList()
-      .then(setLibrary)
-      .catch(() => undefined);
+    const load = () =>
+      api
+        .addonLibraryList()
+        .then(setLibrary)
+        .catch(() => undefined);
+    void load();
+    // A new parental limit changes what every row may show.
+    const unlisten = api.onParentalChanged(() => {
+      void load();
+      setVersion((n) => n + 1);
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   const patch = useCallback((id: string, value: Partial<ItemFlags> | null) => {

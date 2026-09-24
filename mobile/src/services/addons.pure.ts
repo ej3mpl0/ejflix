@@ -12,6 +12,7 @@ import type {
   ImportedAddon,
   ResumeEntry,
 } from "../lib/types";
+import { metaRating } from "./parental.pure";
 
 export const CINEMETA_URL = "https://v3-cinemeta.strem.io/manifest.json";
 export const MANIFEST_TTL_MS = 60 * 60 * 1000;
@@ -244,6 +245,7 @@ export function parseMeta(v: Json): AddonMeta | null {
     runtime: text(v, "runtime"),
     year,
     imdb,
+    certification: metaRating(obj),
   };
 }
 

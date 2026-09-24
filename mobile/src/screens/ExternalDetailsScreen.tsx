@@ -3,12 +3,14 @@ import { Linking, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
-import { CheckCheck, Clapperboard, Globe, Play, RotateCcw } from "lucide-react-native";
+import { CheckCheck, Clapperboard, Globe, Play, RotateCcw, ShieldAlert } from "lucide-react-native";
 import { api } from "../lib/api";
 import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
 import { episodeCode } from "../lib/format";
 import { useDominantColor } from "../lib/tint";
 import { useI18n } from "../lib/locale-context";
+import { isParentalBlocked } from "../lib/parental";
+import { EmptyCard } from "../components/ui/EmptyCard";
 import { usePlay } from "../lib/play";
 import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { MainScreenProps } from "../navigation/types";
@@ -55,6 +57,8 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   const [season, setSeason] = useState<number | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState("");
+  /** Above the open profile's age limit. */
+  const [blocked, setBlocked] = useState(false);
   const [reload, setReload] = useState(0);
   const [markingSeason, setMarkingSeason] = useState(false);
   const { setPlayed } = useUserData();
@@ -80,7 +84,8 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
         if (alive) setMeta(full);
       })
       .catch((err) => {
-        if (alive) setError(err instanceof Error ? err.message : String(err));
+        if (alive && isParentalBlocked(err)) setBlocked(true);
+        else if (alive) setError(err instanceof Error ? err.message : String(err));
       });
     api
       .addonProgressList()
@@ -158,6 +163,16 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   }, [isSeries, meta, movie, resumeEntry, videos, withPosition]);
 
   if (!ext) return null;
+
+  if (blocked) {
+    return (
+      <View style={s.root}>
+        <View style={{ paddingTop: layout.insets.top + 96, paddingHorizontal: layout.pagePad }}>
+          <EmptyCard icon={ShieldAlert} title={tr("parentalBlockedTitle")} hint={tr("parentalBlockedHint")} actionLabel={tr("back")} onAction={back} />
+        </View>
+      </View>
+    );
+  }
 
   const trailer = movie?.remoteTrailers?.find((url) => /youtu\.?be/.test(url)) ?? null;
   const startCode = startItem?.kind === "Episode" ? episodeCode(startItem, tr("episodeCode")) : "";

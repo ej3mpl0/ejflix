@@ -1,4 +1,4 @@
-import type { Movie, PlayerState, Settings, UpdateProgress } from "../lib/types";
+import type { Movie, ParentalStatus, PlayerState, Settings, UpdateProgress } from "../lib/types";
 
 /** What went wrong, so the UI can offer the right way out. */
 export type PlayerErrorCode = "decoder" | "network" | "unknown";
@@ -26,6 +26,7 @@ export type EventMap = {
   "iptv://changed": void;
   "settings://changed": Settings;
   "update://progress": UpdateProgress;
+  "parental://changed": ParentalStatus;
 };
 
 type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;
