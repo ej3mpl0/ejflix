@@ -11,6 +11,7 @@ import {
   type Settings,
   type SkipMode,
   type SubBackground,
+  type SubPosition,
   type ThemeId,
 } from "../lib/types";
 
@@ -145,6 +146,10 @@ export function sanitize(value: unknown): Settings {
       subColor,
       subBackground: oneOf<SubBackground>(playback.subBackground, ["shadow", "box"], "outline"),
       seekStep,
+      subPosition: oneOf<SubPosition>(playback.subPosition, ["raised", "top"], "bottom"),
+      autoPip: boolOr(playback.autoPip, d.playback.autoPip),
+      backgroundAudio: boolOr(playback.backgroundAudio, d.playback.backgroundAudio),
+      haptics: boolOr(playback.haptics, d.playback.haptics),
     },
     library: {
       pinned: dedupe(stringList(library.pinned).filter(validItemId)).slice(0, MAX_PINNED),

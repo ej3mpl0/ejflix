@@ -6,6 +6,7 @@ mod inflate;
 mod iptv;
 mod jellyfin;
 mod opensubs;
+mod lists;
 mod player;
 mod profiles;
 mod protect;
@@ -13,6 +14,8 @@ mod segments;
 mod settings;
 mod torrent;
 mod update;
+mod parental;
+mod trakt;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -431,7 +434,9 @@ fn local_profile_create(
     name: String,
     avatar: String,
     pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<LocalProfileView, String> {
+    parental::check_create(&app, parental_pin.as_deref())?;
     let profile = profiles::create(&app, &name, &avatar, pin.as_deref())?;
     Ok(profile.view(&app))
 }
@@ -443,6 +448,15 @@ async fn local_profile_update(
     id: String,
     patch: ProfilePatch,
 ) -> Result<LocalProfileView, String> {
+    // Changing or removing the PIN of a profile that is not open takes that PIN:
+    // otherwise anyone could clear it from the profile picker and walk in.
+    if patch.pin.is_some() || patch.clear_pin {
+        let open = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+        let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+        if !open && !profile.verify_pin(patch.current_pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
     let updated = profiles::update(&app, &id, patch)?;
     let mut active = state.local.write().await;
     if active.as_ref().is_some_and(|p| p.id == id) {
@@ -456,8 +470,16 @@ async fn local_profile_delete(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
     id: String,
+    pin: Option<String>,
+    parental_pin: Option<String>,
 ) -> Result<(), String> {
     let is_active = state.local.read().await.as_ref().is_some_and(|p| p.id == id);
+    if let Some(profile) = profiles::get(&app, &id)? {
+        if !is_active && !profile.verify_pin(pin.as_deref()) {
+            return Err("PIN incorrecto".into());
+        }
+    }
+    parental::check_delete(&app, &id, parental_pin.as_deref())?;
     if is_active {
         let _ = state.player.stop().await;
         *state.local.write().await = None;
@@ -466,6 +488,17 @@ async fn local_profile_delete(
     }
     account::forget_profile(&app, &id);
     profiles::delete(&app, &id)
+}
+
+/// Checks a profile's PIN without opening it (editing it from the profile picker).
+#[tauri::command]
+fn local_profile_check_pin(app: tauri::AppHandle, id: String, pin: String) -> Result<(), String> {
+    let profile = profiles::get(&app, &id)?.ok_or_else(|| "Perfil no encontrado".to_string())?;
+    if profile.verify_pin(Some(&pin)) {
+        Ok(())
+    } else {
+        Err("PIN incorrecto".into())
+    }
 }
 
 /// Opens a local profile (after checking its PIN) and restores its linked Jellyfin
@@ -820,8 +853,15 @@ async fn set_favorite(
 }
 
 #[tauri::command]
-async fn set_played(state: State<'_, AppState>, item_id: String, played: bool) -> Result<bool, String> {
-    state.jellyfin.set_played(&item_id, played).await
+async fn set_played(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    item_id: String,
+    played: bool,
+) -> Result<bool, String> {
+    let confirmed = state.jellyfin.set_played(&item_id, played).await?;
+    trakt::spawn_jellyfin_history(&app, &item_id, confirmed);
+    Ok(confirmed)
 }
 
 #[derive(Deserialize)]
@@ -912,6 +952,9 @@ async fn player_stop(
                 media_source_id,
                 play_session_id,
             } => {
+                if watched {
+                    trakt::spawn_jellyfin_history(&app, &item_id, true);
+                }
                 let _ = state
                     .jellyfin
                     .report_stop(
@@ -928,6 +971,7 @@ async fn player_stop(
                 }
             }
             PlaybackSource::Addon { entry } if watched => {
+                trakt::spawn_resume_history(&app, &entry);
                 if let Some(uid) = uid {
                     let _ = addons::remove_progress(&app, &uid, &entry.key);
                     let library = addons::LibraryEntry {
@@ -1883,6 +1927,10 @@ async fn addon_streams(
 
 #[tauri::command]
 async fn addon_progress_list(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<ResumeEntry>, String> {
+    // Local entries carry no rating: a profile that hides unrated titles hides them.
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_progress(&app, &uid),
         None => vec![],
@@ -1919,6 +1967,9 @@ async fn addon_library_list(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
+    if parental::current().is_some_and(|r| r.hide_unrated) {
+        return Ok(vec![]);
+    }
     Ok(match settings_user(&app, &state).await {
         Some(uid) => addons::load_library(&app, &uid),
         None => vec![],
@@ -1941,10 +1992,13 @@ async fn addon_library_set(
     state: State<'_, AppState>,
     args: LibraryFlagArgs,
 ) -> Result<Vec<addons::LibraryEntry>, String> {
-    match settings_user(&app, &state).await {
-        Some(uid) => addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched),
-        None => Err("No hay ningún perfil activo".into()),
+    let uid = settings_user(&app, &state)
+        .await
+        .ok_or_else(|| "No hay ningún perfil activo".to_string())?;
+    if let Some(watched) = args.watched {
+        trakt::spawn_entry_history(&app, &args.entry, watched);
     }
+    addons::set_library_flags(&app, &uid, args.entry, args.saved, args.watched)
 }
 
 #[derive(Deserialize)]
@@ -2190,6 +2244,9 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         .find(&id)
         .await
         .ok_or_else(|| "Canal no encontrado".to_string())?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
@@ -2250,7 +2307,11 @@ fn live_prefs(app: &tauri::AppHandle, uid: &str) -> PlaybackPrefs {
 #[tauri::command]
 async fn iptv_reminders(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<iptv::Reminder>, String> {
     let uid = iptv_user(&app, &state).await?;
-    Ok(iptv::reminders(&app, &uid, addons::now_ms() / 1000))
+    let hide_adult = parental::hides_adult();
+    Ok(iptv::reminders(&app, &uid, addons::now_ms() / 1000)
+        .into_iter()
+        .filter(|r| !(hide_adult && r.is_adult()))
+        .collect())
 }
 
 #[tauri::command]
@@ -2260,6 +2321,9 @@ async fn iptv_reminder_set(
     reminder: iptv::Reminder,
 ) -> Result<Vec<iptv::Reminder>, String> {
     let uid = iptv_user(&app, &state).await?;
+    if parental::hides_adult() && reminder.is_adult() {
+        return Err(parental::BLOCKED.into());
+    }
     let list = iptv::set_reminder(&app, &uid, reminder, addons::now_ms() / 1000)?;
     let _ = app.emit(iptv::REMINDERS_EVENT, ());
     Ok(list)
@@ -2291,7 +2355,9 @@ fn start_reminder_loop(app: tauri::AppHandle) {
                 continue;
             }
             let en = load_locale(&app).unwrap_or_default() == "en";
-            for reminder in &due {
+            // A restricted profile is never offered an adult channel.
+            let hide_adult = parental::hides_adult();
+            for reminder in due.iter().filter(|r| !(hide_adult && r.is_adult())) {
                 let _ = app.emit(iptv::REMINDER_EVENT, reminder);
                 use tauri_plugin_notification::NotificationExt;
                 let title = if en { "Starting now" } else { "Empieza ahora" };
@@ -2324,6 +2390,9 @@ async fn iptv_play_catchup(
         .find(&id)
         .await
         .ok_or_else(|| "Canal no encontrado".to_string())?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
     let source = iptv::list_sources(&app, &uid)
         .into_iter()
         .find(|s| s.id == channel.source_id)
@@ -2377,6 +2446,9 @@ async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: 
             .find(id)
             .await
             .ok_or_else(|| "Canal no encontrado".to_string())?;
+        if parental::hides_adult() && iptv::is_adult(&channel) {
+            return Err(parental::BLOCKED.into());
+        }
         let source = sources
             .iter()
             .find(|s| s.id == channel.source_id)
@@ -2485,6 +2557,106 @@ async fn download_reveal(state: State<'_, AppState>, id: String) -> Result<(), S
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+// ---- discovery: custom lists, calendar, shuffle, recommendations ----
+
+/// Profile whose lists are being edited; unlike reads, writes need an active one.
+async fn lists_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
+    if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
+        return Err("No hay ningún perfil activo".into());
+    }
+    settings_user(app, state).await.ok_or_else(|| "No hay ningún perfil activo".to_string())
+}
+
+#[tauri::command]
+async fn custom_lists_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<lists::CustomList>, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::load(&app, &uid),
+        None => vec![],
+    })
+}
+
+#[tauri::command]
+async fn custom_list_create(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::create(&app, &uid, &name)
+}
+
+#[tauri::command]
+async fn custom_list_rename(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::rename(&app, &uid, &id, &name)
+}
+
+#[tauri::command]
+async fn custom_list_delete(app: tauri::AppHandle, state: State<'_, AppState>, id: String) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::delete(&app, &uid, &id)
+}
+
+#[tauri::command]
+async fn custom_list_set_item(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    item: lists::ListItem,
+    on: bool,
+) -> Result<Vec<lists::CustomList>, String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_item(&app, &uid, &id, item, on)
+}
+
+#[tauri::command]
+async fn calendar_seen_get(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<u64, String> {
+    Ok(match settings_user(&app, &state).await {
+        Some(uid) => lists::calendar_seen(&app, &uid),
+        None => 0,
+    })
+}
+
+#[tauri::command]
+async fn calendar_seen_set(app: tauri::AppHandle, state: State<'_, AppState>, ms: u64) -> Result<(), String> {
+    let uid = lists_user(&app, &state).await?;
+    lists::set_calendar_seen(&app, &uid, ms)
+}
+
+#[tauri::command]
+async fn get_items_by_ids(state: State<'_, AppState>, ids: Vec<String>) -> Result<Vec<Movie>, String> {
+    state.jellyfin.items_by_ids(&ids).await
+}
+
+#[tauri::command]
+async fn get_random_episode(
+    state: State<'_, AppState>,
+    series_id: String,
+    exclude: Vec<String>,
+) -> Result<Option<Movie>, String> {
+    state.jellyfin.random_episode(&series_id, &exclude).await
+}
+
+#[tauri::command]
+async fn get_calendar(state: State<'_, AppState>, days_back: u32) -> Result<jellyfin::CalendarData, String> {
+    state.jellyfin.calendar(days_back).await
+}
+
+#[tauri::command]
+async fn get_recommendations(state: State<'_, AppState>) -> Result<Vec<jellyfin::RecommendationRow>, String> {
+    state.jellyfin.recommendations().await
+}
+
+#[tauri::command]
+async fn search_people(state: State<'_, AppState>, query: String) -> Result<Vec<jellyfin::Person>, String> {
+    state.jellyfin.search_people(&query).await
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
@@ -2609,6 +2781,18 @@ pub fn run() {
             torrent_cache_clear,
             torrent_pause_all,
             addons_all,
+            // profiles & integrations
+            local_profile_check_pin,
+            parental::parental_status,
+            parental::parental_set,
+            trakt::trakt_status,
+            trakt::trakt_set_app,
+            trakt::trakt_device_start,
+            trakt::trakt_device_poll,
+            trakt::trakt_disconnect,
+            trakt::trakt_set_sync_back,
+            trakt::trakt_import,
+            trakt::trakt_open,
             // player
             player_set_delay,
             player_set_night,
@@ -2619,6 +2803,19 @@ pub fn run() {
             opensubtitles_download,
             opensubtitles_has_password,
             opensubtitles_set_password,
+            // discovery
+            custom_lists_get,
+            custom_list_create,
+            custom_list_rename,
+            custom_list_delete,
+            custom_list_set_item,
+            calendar_seen_get,
+            calendar_seen_set,
+            get_items_by_ids,
+            get_random_episode,
+            get_calendar,
+            get_recommendations,
+            search_people,
             // livetv
             iptv_reminders,
             iptv_reminder_set,

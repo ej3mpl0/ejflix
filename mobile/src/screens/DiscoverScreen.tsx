@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
 import { useI18n } from "../lib/locale-context";
 import { useSettings } from "../lib/settings-context";
+import { useParental } from "../lib/parental";
 import { useSession } from "../lib/session-context";
 import { useToast } from "../lib/toast-context";
 import { usePlay } from "../lib/play";
@@ -47,6 +48,10 @@ export function DiscoverScreen() {
   const t = useTheme();
   const { t: tr } = useI18n();
   const { settings } = useSettings();
+  // A restricted profile gets short pages (the services filter them), which do not mean the end.
+  const parental = useParental();
+  const restricted = useRef(false);
+  restricted.current = parental?.active ?? false;
   const { session } = useSession();
   const { toast } = useToast();
   const play = usePlay();
@@ -163,7 +168,7 @@ export function DiscoverScreen() {
           ? api
               .browseItems({ type: kind, genre, year, sort, start: current * SERVER_PAGE, limit: SERVER_PAGE })
               .then((list) => {
-                if (list.length < SERVER_PAGE) serverDone.current = true;
+                if (list.length === 0 || (list.length < SERVER_PAGE && !restricted.current)) serverDone.current = true;
                 return list;
               })
               .catch((err) => {

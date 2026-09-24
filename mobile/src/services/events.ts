@@ -1,4 +1,4 @@
-import type { Movie, PlayerState, Settings, UpdateProgress } from "../lib/types";
+import type { Movie, ParentalStatus, PlayerState, Settings, UpdateProgress } from "../lib/types";
 import type { MessageKey } from "../lib/i18n";
 
 /** What went wrong, so the UI can offer the right way out. */
@@ -12,6 +12,8 @@ export type PlayerError = {
   code: PlayerErrorCode;
   /** Stream URL when it can be handed to another app. */
   url: string | null;
+  /** The failing Jellyfin playback was already a server transcode. */
+  transcoding?: boolean;
   /** Translated sentence for a known failure (the UI prefers it over `message`). */
   key?: MessageKey;
 };
@@ -42,6 +44,9 @@ export type EventMap = {
   "iptv://reminders": void;
   "settings://changed": Settings;
   "update://progress": UpdateProgress;
+  "parental://changed": ParentalStatus;
+  /** The offline downloads list (or one transfer's progress) changed. */
+  "downloads://changed": void;
 };
 
 type Handler<K extends keyof EventMap> = (payload: EventMap[K]) => void;

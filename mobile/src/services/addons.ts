@@ -30,6 +30,7 @@ import {
   upsertProgressList,
   type LoadedAddon,
 } from "./addons.pure";
+import { BLOCKED, allows as allowsParental, currentRule } from "./parental";
 
 const HTTP_TIMEOUT_MS = 25_000;
 const STREAM_TIMEOUT_MS = 20_000;
@@ -171,7 +172,7 @@ export async function addonCatalog(args: {
   const cacheable = !extra.some(([k]) => k === "search");
   if (cacheable) {
     const cached = catalogs.get(path);
-    if (cached && nowMs() - cached.at < CATALOG_TTL_MS) return cached.metas;
+    if (cached && nowMs() - cached.at < CATALOG_TTL_MS) return allowedOnly(cached.metas);
   }
   const value = await getJson(path);
   const rawMetas =
@@ -183,7 +184,12 @@ export async function addonCatalog(args: {
     if (catalogs.size > MAX_CATALOG_CACHE) catalogs.clear();
     catalogs.set(path, { at: nowMs(), metas });
   }
-  return metas;
+  return allowedOnly(metas);
+}
+
+/** Catalog entries the open profile may see (the cache keeps the full page). */
+function allowedOnly(metas: AddonMeta[]): AddonMeta[] {
+  return currentRule() ? metas.filter((m) => allowsParental(m.certification)) : metas;
 }
 
 /** Full metadata: the first addon that serves `meta` for this type/id, else Cinemeta. */
@@ -203,8 +209,10 @@ export async function addonMeta(type: string, id: string): Promise<AddonMetaFull
       const value = await getJson(metaPath(addon.info.url, type, id));
       const raw = typeof value === "object" && value !== null ? (value as { meta?: unknown }).meta : undefined;
       const meta = raw === undefined ? null : parseMetaFull(raw);
+      if (meta && !allowsParental(meta.certification)) throw new Error(BLOCKED);
       if (meta) return meta;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === BLOCKED) throw error;
       /* next addon */
     }
   }
@@ -259,6 +267,8 @@ function loadLibrary(uid: string): LibraryEntry[] {
 }
 
 export async function addonLibraryList(): Promise<LibraryEntry[]> {
+  // Local entries carry no rating: a profile that hides unrated titles hides them.
+  if (currentRule()?.hideUnrated) return [];
   const uid = settingsUser();
   return uid ? loadLibrary(uid) : [];
 }
@@ -333,6 +343,7 @@ export async function stremioAddons(email: string, password: string): Promise<Im
 }
 
 export async function addonProgressList(): Promise<ResumeEntry[]> {
+  if (currentRule()?.hideUnrated) return [];
   const uid = settingsUser();
   return uid ? loadProgress(uid) : [];
 }

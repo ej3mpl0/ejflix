@@ -33,6 +33,8 @@ export type ProfilePatch = {
   avatar?: string;
   pin?: string;
   clearPin?: boolean;
+  /** The PIN the profile has now (changing it from the profile picker). */
+  currentPin?: string;
 };
 
 export type BrowseSort = "popular" | "newest" | "year" | "name";
@@ -215,6 +217,8 @@ export type Movie = {
   mediaSources: MediaSourceInfo[];
   /** ISO-8601 date the item was added to the library. */
   dateCreated: string | null;
+  /** ISO-8601 air / release date (episodes: when it aired). */
+  premiereDate?: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
 };
@@ -310,6 +314,8 @@ export type AddonMeta = {
   runtime: string | null;
   year: number | null;
   imdb: string | null;
+  /** Age rating, when the addon publishes one. */
+  certification?: string | null;
 };
 
 export type AddonVideo = {
@@ -417,6 +423,14 @@ export type Settings = {
     subBackground: SubBackground;
     /** Seconds a double tap or a seek button jumps: 5, 10, 15 or 30. */
     seekStep: number;
+    /** Height of the app-drawn subtitles. */
+    subPosition: SubPosition;
+    /** Picture-in-picture when the app goes to the background while playing. */
+    autoPip: boolean;
+    /** Sound keeps playing with the app in the background (and in PiP). */
+    backgroundAudio: boolean;
+    /** Vibration on player gestures, the lock and switches. */
+    haptics: boolean;
   };
   library: { pinned: string[] };
   addons: { urls: string[]; cinemeta: boolean };
@@ -447,6 +461,7 @@ export type Settings = {
 };
 
 export type SubBackground = "outline" | "shadow" | "box";
+export type SubPosition = "bottom" | "raised" | "top";
 
 /** An addon found in another app's account, offered for import. */
 export type ImportedAddon = { url: string; name: string; official: boolean };
@@ -594,6 +609,10 @@ export const DEFAULT_SETTINGS: Settings = {
     subColor: "#FFFFFF",
     subBackground: "outline",
     seekStep: 10,
+    subPosition: "bottom",
+    autoPip: true,
+    backgroundAudio: true,
+    haptics: true,
   },
   library: { pinned: [] },
   addons: { urls: [], cinemeta: true },
@@ -624,4 +643,18 @@ export type Reminder = {
   start: number;
   stop: number;
   notified?: boolean;
+};
+
+// --- profiles & integrations ---
+
+/** Age limits a profile can have; 18 is "no limit". */
+export type ParentalLevel = 0 | 7 | 12 | 16 | 18;
+
+/** Parental restriction of the open profile. */
+export type ParentalStatus = {
+  maxAge: ParentalLevel;
+  hideUnrated: boolean;
+  /** The parental PIN exists (changing a restriction asks for it). */
+  pinSet: boolean;
+  active: boolean;
 };

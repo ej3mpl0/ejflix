@@ -470,6 +470,13 @@ pub struct Reminder {
     pub notified: bool,
 }
 
+impl Reminder {
+    /// Same rule as `is_adult` for channels (group or name of the channel).
+    pub fn is_adult(&self) -> bool {
+        crate::parental::is_adult_label(&self.group) || crate::parental::is_adult_label(&self.channel_name)
+    }
+}
+
 fn reminders_key(user_id: &str) -> String {
     format!("iptvReminders.{user_id}")
 }
@@ -1417,11 +1424,15 @@ impl IptvState {
         let entries = self.entries.read().await;
         let mut out: Vec<GroupInfo> = Vec::new();
         let mut index: HashMap<(String, String), usize> = HashMap::new();
+        let hide_adult = crate::parental::hides_adult();
         for source in sources.iter().filter(|s| s.enabled && source_id.map(|id| id == s.id).unwrap_or(true)) {
             let Some(catalog) = entries.get(&source.id).and_then(|e| e.catalog.clone()) else {
                 continue;
             };
             for channel in &catalog.channels {
+                if hide_adult && is_adult(channel) {
+                    continue;
+                }
                 let key = (source.id.clone(), channel.group.clone());
                 match index.get(&key) {
                     Some(&i) => {
@@ -1461,7 +1472,11 @@ impl IptvState {
             .filter(|s| !s.is_empty());
         let number = query.search.as_deref().and_then(|s| s.trim().parse::<u32>().ok());
         let enabled: HashMap<&str, &IptvSource> = sources.iter().filter(|s| s.enabled).map(|s| (s.id.as_str(), s)).collect();
+        let hide_adult = crate::parental::hides_adult();
         let matches = |channel: &Channel| -> bool {
+            if hide_adult && is_adult(channel) {
+                return false;
+            }
             match &search {
                 Some(needle) => normalize(&channel.name).contains(needle.as_str()) || number.is_some_and(|n| channel.number == Some(n)),
                 None => true,
@@ -1903,6 +1918,11 @@ fn clean_name(name: &str) -> String {
 }
 
 /// Lowercase alphanumerics only: "La 1 HD" → "la1hd".
+/// A channel of an adult group (or named as one), hidden from restricted profiles.
+pub fn is_adult(channel: &Channel) -> bool {
+    crate::parental::is_adult_label(&channel.group) || crate::parental::is_adult_label(&channel.name)
+}
+
 pub fn normalize(text: &str) -> String {
     text.chars()
         .filter(|c| c.is_alphanumeric())

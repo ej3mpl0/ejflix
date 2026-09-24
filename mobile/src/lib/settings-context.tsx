@@ -10,6 +10,7 @@ import React, {
 } from "react";
 import { api } from "./api";
 import { DEFAULT_SETTINGS, type Settings, type SettingsPatch } from "./types";
+import { setHapticsEnabled } from "./haptics";
 
 type SettingsContextValue = {
   settings: Settings;
@@ -96,6 +97,12 @@ export function SettingsProvider({
       void unlisten.then((fn) => fn());
     };
   }, [userId]);
+
+  // Haptics are fired from gesture callbacks outside React: mirror the switch there.
+  const hapticsOn = settings.playback.haptics;
+  useEffect(() => {
+    setHapticsEnabled(hapticsOn);
+  }, [hapticsOn]);
 
   const value = useMemo<SettingsContextValue>(
     () => ({ settings, ready, update, reload }),

@@ -8,10 +8,13 @@ import { RowSkeleton } from "./Skeletons";
 /** "More like this" rail for a details page. */
 export function SimilarRail({
   itemId,
+  name,
   onOpen,
   onPlay,
 }: {
   itemId: string;
+  /** Title of the page, for the "Similar to X" caption. */
+  name?: string;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
 }) {
@@ -36,5 +39,13 @@ export function SimilarRail({
 
   if (items == null) return <RowSkeleton />;
   if (!items.length) return null;
-  return <PosterRow title={t("moreLikeThis")} items={items} onOpen={onOpen} onPlay={onPlay} />;
+  return (
+    <PosterRow
+      title={t("moreLikeThis")}
+      caption={name ? t("similarTo", { name }) : undefined}
+      items={items}
+      onOpen={onOpen}
+      onPlay={onPlay}
+    />
+  );
 }

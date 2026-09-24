@@ -5,6 +5,7 @@ import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
 import { SkipButton } from "../components/SkipButton";
 import { NextEpisodeCard } from "../components/NextEpisodeCard";
+import { isParentalBlocked } from "../lib/parental";
 import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
@@ -22,6 +23,7 @@ import { useSettings } from "../lib/settings-context";
 import { useSegments } from "../hooks/useSegments";
 import { useSkipPrompt } from "../hooks/useSkipPrompt";
 import { useNextEpisodeCard } from "../hooks/useNextEpisodeCard";
+import { queueNext } from "../lib/play-queue";
 import { usePauseInfo } from "../hooks/usePauseInfo";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { StartCover } from "../components/StartCover";
@@ -335,7 +337,9 @@ export function Player({
           setStartHint("");
           // Tauri commands reject with the Rust message as a plain string.
           const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
-          setStartError(message || tRef.current("playerStartError"));
+          setStartError(
+            isParentalBlocked(err) ? tRef.current("parentalBlockedTitle") : message || tRef.current("playerStartError"),
+          );
         }
       };
       void begin();
@@ -424,6 +428,18 @@ export function Player({
   // Online episodes carry their successor already (resolved by the engine side).
   useEffect(() => {
     if (!overlay) return;
+    // Play all / Shuffle: the queue decides what follows, not the series order.
+    if (movie.queue) {
+      let alive = true;
+      queueNext(movie)
+        .then((next) => {
+          if (alive) setNextEpisode(next);
+        })
+        .catch(() => undefined);
+      return () => {
+        alive = false;
+      };
+    }
     if (movie.external) {
       setNextEpisode(movie.external.next ?? null);
       return;
@@ -439,7 +455,7 @@ export function Player({
     return () => {
       alive = false;
     };
-  }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external]);
+  }, [overlay, isEpisode, movie.seriesId, movie.id, movie.external, movie.queue]);
 
   // First frame: the file is loaded once mpv reports a duration or advances time.
   useEffect(() => {

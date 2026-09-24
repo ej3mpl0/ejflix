@@ -27,6 +27,7 @@ import { xtreamCheck } from "./catalog";
 import * as sources from "./sources";
 import * as state from "./state";
 import { parseXtreamUrl } from "./xtream";
+import { BLOCKED, hidesAdult, isAdultChannel } from "../parental";
 
 function requireUser(): string {
   const uid = settingsUser();
@@ -159,6 +160,7 @@ export async function resolveChannelPlayback(channelId: string): Promise<{
   const uid = requireUser();
   const found = state.find(channelId);
   if (!found) throw new PlaybackError("playErrChannelNotFound", "Canal no encontrado");
+  if (hidesAdult() && isAdultChannel(found.channel)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
   const source = sources.listSources(uid).find((s) => s.id === found.channel.sourceId);
   if (!source) throw new PlaybackError("playErrChannelListGone", "La lista de este canal ya no existe");
   const password = await sources.passwordOf(source);
@@ -184,6 +186,7 @@ export async function resolveCatchupPlayback(
   const uid = requireUser();
   const found = state.find(channelId);
   if (!found) throw new PlaybackError("playErrChannelNotFound", "Canal no encontrado");
+  if (hidesAdult() && isAdultChannel(found.channel)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
   const source = sources.listSources(uid).find((s) => s.id === found.channel.sourceId);
   if (!source) throw new PlaybackError("playErrChannelListGone", "La lista de este canal ya no existe");
   const password = await sources.passwordOf(source);
@@ -198,6 +201,11 @@ export async function resolveCatchupPlayback(
 }
 
 // ---- programme reminders (kept per profile in the store; announced in the app) ----
+
+/** Same rule as for channels: the group or the name of the channel. */
+function isAdultReminder(reminder: Reminder): boolean {
+  return isAdultChannel({ group: reminder.group, name: reminder.channelName });
+}
 
 function loadReminders(uid: string): Reminder[] {
   const raw = store.get<unknown[]>(KEYS.iptvReminders(uid));
@@ -217,12 +225,14 @@ export async function iptvReminders(): Promise<Reminder[]> {
   const uid = requireUser();
   const list = loadReminders(uid);
   const kept = pruneReminders(list, nowSeconds());
-  return kept.length !== list.length ? saveReminders(uid, kept) : kept;
+  const shown = kept.length !== list.length ? saveReminders(uid, kept) : kept;
+  return hidesAdult() ? shown.filter((r) => !isAdultReminder(r)) : shown;
 }
 
 export async function iptvReminderSet(reminder: Reminder): Promise<Reminder[]> {
   const uid = requireUser();
   if (sources.sourceOf(reminder.channelId) === null) throw new Error("Canal no válido");
+  if (hidesAdult() && isAdultReminder(reminder)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
   return saveReminders(uid, addReminder(loadReminders(uid), reminder, nowSeconds()));
 }
 
@@ -237,7 +247,8 @@ export async function iptvDueReminders(): Promise<Reminder[]> {
   if (!uid) return [];
   const { list, due } = dueReminders(loadReminders(uid), nowSeconds());
   if (due.length) saveReminders(uid, list);
-  return due;
+  // A restricted profile is never offered an adult channel.
+  return hidesAdult() ? due.filter((r) => !isAdultReminder(r)) : due;
 }
 
 /** Drops every playlist from memory (logout / profile switch). */

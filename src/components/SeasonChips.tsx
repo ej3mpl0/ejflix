@@ -3,7 +3,13 @@ import { ScrollRow } from "./ScrollRow";
 import { useI18n } from "../lib/locale-context";
 
 /** Anything with an id and a name: Jellyfin seasons, or an addon's season numbers. */
-export type SeasonTab = { id: string; name: string; childCount?: number | null };
+export type SeasonTab = {
+  id: string;
+  name: string;
+  childCount?: number | null;
+  /** Episodes left to watch; highlighted instead of the plain count once a season is under way. */
+  unplayedCount?: number | null;
+};
 
 export function SeasonChips({
   seasons,
@@ -27,7 +33,17 @@ export function SeasonChips({
           onClick={() => onChange(season.id)}
         >
           {season.name}
-          {season.childCount ? <span className="text-[11px] opacity-70 tabular">{season.childCount}</span> : null}
+          {season.unplayedCount && (!season.childCount || season.unplayedCount < season.childCount) ? (
+            <span
+              className="rounded-full bg-accent px-1.5 text-[10.5px] leading-[16px] font-bold text-on-accent tabular"
+              title={t("unwatchedCount", { n: season.unplayedCount })}
+              aria-label={t("unwatchedCount", { n: season.unplayedCount })}
+            >
+              {season.unplayedCount}
+            </span>
+          ) : season.childCount ? (
+            <span className="text-[11px] opacity-70 tabular">{season.childCount}</span>
+          ) : null}
         </Chip>
       ))}
     </ScrollRow>

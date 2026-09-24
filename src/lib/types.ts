@@ -33,6 +33,8 @@ export type ProfilePatch = {
   avatar?: string;
   pin?: string;
   clearPin?: boolean;
+  /** The PIN the profile has now (changing it from the profile picker). */
+  currentPin?: string;
 };
 
 export type BrowseSort = "popular" | "newest" | "year" | "name";
@@ -45,6 +47,10 @@ export type BrowseArgs = {
   sort?: BrowseSort;
   start?: number;
   limit?: number;
+  /** Minimum community rating (0-10). */
+  minRating?: number | null;
+  /** Only titles this person takes part in (Jellyfin person id). */
+  personId?: string | null;
 };
 
 export type PublicInfo = {
@@ -230,6 +236,10 @@ export type Movie = {
   dateCreated: string | null;
   trickplay: TrickplayInfo | null;
   chapters: Chapter[];
+  /** ISO-8601 air / release date (Jellyfin `PremiereDate`). */
+  premiereDate?: string | null;
+  /** Play all / shuffle: what comes after this item instead of the next episode. */
+  queue?: PlayQueue | null;
 };
 
 export type GenreRow = {
@@ -356,6 +366,8 @@ export type AddonMeta = {
   runtime: string | null;
   year: number | null;
   imdb: string | null;
+  /** Age rating, when the addon publishes one. */
+  certification?: string | null;
 };
 
 export type AddonVideo = {
@@ -461,7 +473,15 @@ export type Countdown = 0 | 5 | 10 | 15;
 
 /** Per-profile settings, mirrored from `src-tauri/src/settings.rs`. */
 export type Settings = {
-  appearance: { theme: ThemeId; amoled: boolean; posterSize: PosterSize };
+  appearance: {
+    theme: ThemeId;
+    amoled: boolean;
+    posterSize: PosterSize;
+    /** Muted trailers behind the Home hero and the details backdrop. */
+    autoplayTrailers: boolean;
+    /** The accent follows the artwork on screen (the theme is the fallback). */
+    autoAccent: boolean;
+  };
   playback: {
     skipIntro: SkipMode;
     skipRecap: SkipMode;
@@ -735,7 +755,7 @@ export type MfaEnrollment = {
 export type SyncReport = { pushed: string[]; pulled: string[]; skipped: string | null };
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: "crimson", amoled: false, posterSize: "medium" },
+  appearance: { theme: "crimson", amoled: false, posterSize: "medium", autoplayTrailers: true, autoAccent: false },
   playback: {
     skipIntro: "ask",
     skipRecap: "ask",
@@ -789,4 +809,95 @@ export type Reminder = {
   start: number;
   stop: number;
   notified?: boolean;
+};
+
+// --- discovery ---
+
+/** One title in a custom list (Jellyfin item or online title). */
+export type ListItem = {
+  /** "jf:<item id>" for a Jellyfin item, the Stremio video id for an online title. */
+  key: string;
+  source: "jellyfin" | "online";
+  /** Jellyfin: "Movie" | "Series" | "Episode"; online: "movie" | "series". */
+  type: string;
+  itemId: string | null;
+  metaId: string | null;
+  name: string;
+  seriesName: string | null;
+  poster: string | null;
+  year: number | null;
+  season: number | null;
+  episode: number | null;
+  imdb: string | null;
+  addedMs: number;
+};
+
+export type CustomList = {
+  id: string;
+  name: string;
+  /** Newest first. */
+  items: ListItem[];
+  createdMs: number;
+  updatedMs: number;
+};
+
+/** Jellyfin episodes around today and the series the user follows. */
+export type CalendarData = {
+  episodes: Movie[];
+  followed: string[];
+};
+
+/** A Jellyfin recommendation row and the title (or person) it grew from. */
+export type RecommendationRow = {
+  kind: string;
+  baseline: string;
+  items: Movie[];
+};
+
+/**
+ * What plays after the current item when it was started from "Play all" / "Shuffle".
+ * `list`: the rest of a list, in order. `shuffle`: another random episode of the series.
+ */
+export type PlayQueue =
+  | { mode: "list"; items: Movie[] }
+  | { mode: "shuffle"; seriesId: string | null; metaId: string | null; seen: string[] };
+
+// --- profiles & integrations ---
+
+/** Age limits a profile can have; 18 is "no limit". */
+export type ParentalLevel = 0 | 7 | 12 | 16 | 18;
+
+/** Parental restriction of the open profile. */
+export type ParentalStatus = {
+  maxAge: ParentalLevel;
+  hideUnrated: boolean;
+  /** The parental PIN exists (changing a restriction asks for it). */
+  pinSet: boolean;
+  active: boolean;
+};
+
+export type TraktStatus = {
+  clientId: string;
+  hasSecret: boolean;
+  connected: boolean;
+  username: string;
+  syncBack: boolean;
+  lastImportMs: number;
+};
+
+export type TraktDeviceCode = {
+  userCode: string;
+  verificationUrl: string;
+  expiresIn: number;
+  interval: number;
+};
+
+export type TraktPoll = "pending" | "slow_down" | "connected" | "expired" | "denied" | "invalid";
+
+export type TraktImportReport = {
+  watchlist: number;
+  watched: number;
+  episodes: number;
+  unmatched: number;
+  skipped: number;
 };

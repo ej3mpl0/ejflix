@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useState } from "react";
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
-import * as Haptics from "expo-haptics";
+import { haptic } from "../../lib/haptics";
 import { Globe, Heart } from "lucide-react-native";
 import type { Movie } from "../../lib/types";
 import { formatRuntime, isRecentlyAdded } from "../../lib/format";
@@ -49,7 +49,7 @@ function PosterCardInner({ movie, width, onOpen, onPlay, onMenu, style }: Poster
   const [menu, setMenu] = useState(false);
 
   const longPress = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => undefined);
+    haptic("medium");
     if (onMenu) onMenu(movie);
     else {
       setMenuMounted(true);

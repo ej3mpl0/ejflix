@@ -8,6 +8,7 @@ import { SettingsRow, SettingsSection } from "../settings/SettingsSection";
 import { Toggle } from "../settings/Toggle";
 import { AccountPanel } from "./AccountPanel";
 import { fieldClass as field } from "../../lib/ui";
+import { ListRowsSkeleton } from "../Skeletons";
 
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
@@ -72,9 +73,8 @@ export function AccountSettings({ onToast }: { onToast: (message: string, action
             </button>
           </div>
         ) : (
-          <div className="flex items-center gap-2 py-4 text-[13px] text-dim">
-            <LoaderCircle size={15} className="animate-spin" />
-            {t("accountWorking")}
+          <div role="status" aria-label={t("accountWorking")}>
+            <ListRowsSkeleton rows={1} />
           </div>
         )}
       </SettingsSection>

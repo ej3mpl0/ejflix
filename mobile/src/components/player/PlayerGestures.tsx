@@ -14,7 +14,9 @@ type Axis = "h" | "v" | "none" | null;
  *   centre / right 35 %);
  * - vertical pan on the left half → brightness, right half → volume (`fraction` = −dy/height);
  * - horizontal pan → scrub (`dx` in dp, only when `scrubEnabled`);
- * - pinch → `onPinch(scale)` on release.
+ * - pinch → `onPinch(scale)` on release;
+ * - long press → `onHold(true)` while the finger stays down, `onHold(false)` on release
+ *   (temporary fast playback).
  * Everything is disabled while locked or while a sheet / panel is open (`enabled`).
  */
 export function PlayerGestures({
@@ -27,6 +29,7 @@ export function PlayerGestures({
   onVerticalPan,
   onScrub,
   onPinch,
+  onHold,
   children,
 }: {
   enabled: boolean;
@@ -38,12 +41,14 @@ export function PlayerGestures({
   onVerticalPan: (side: VerticalSide, phase: PanPhase, fraction: number) => void;
   onScrub: (phase: PanPhase, dx: number) => void;
   onPinch: (scale: number) => void;
+  onHold?: (holding: boolean) => void;
   children?: React.ReactNode;
 }) {
   const axis = useRef<Axis>(null);
   const side = useRef<VerticalSide>("left");
-  const latest = useRef({ width, height, scrubEnabled, onSingleTap, onDoubleTap, onVerticalPan, onScrub, onPinch });
-  latest.current = { width, height, scrubEnabled, onSingleTap, onDoubleTap, onVerticalPan, onScrub, onPinch };
+  const holding = useRef(false);
+  const latest = useRef({ width, height, scrubEnabled, onSingleTap, onDoubleTap, onVerticalPan, onScrub, onPinch, onHold });
+  latest.current = { width, height, scrubEnabled, onSingleTap, onDoubleTap, onVerticalPan, onScrub, onPinch, onHold };
 
   const gesture = useMemo(() => {
     const single = Gesture.Tap()
@@ -110,7 +115,23 @@ export function PlayerGestures({
         if (success) latest.current.onPinch(e.scale);
       });
 
-    return Gesture.Race(pinch, pan, Gesture.Exclusive(double, single));
+    const hold = Gesture.LongPress()
+      .enabled(enabled)
+      .runOnJS(true)
+      .minDuration(450)
+      .onStart(() => {
+        if (!latest.current.onHold) return;
+        holding.current = true;
+        latest.current.onHold(true);
+      })
+      .onFinalize(() => {
+        // Also runs when the press never activated: only a started hold is released.
+        if (!holding.current) return;
+        holding.current = false;
+        latest.current.onHold?.(false);
+      });
+
+    return Gesture.Race(pinch, pan, hold, Gesture.Exclusive(double, single));
   }, [enabled]);
 
   return (

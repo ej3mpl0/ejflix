@@ -99,7 +99,7 @@ export function ChannelCard({
             <span className={cn(line, "text-[11px] leading-[16px] text-dim")}>{channel.group || t("noGroup")}</span>
           )}
           {next ? (
-            <span className={cn(line, "text-[11px] leading-[16px] text-dim/80")} title={next.title}>
+            <span className={cn(line, "text-[11px] leading-[16px] text-dim")} title={next.title}>
               {t("upNext")} <span className="tabular">{formatTime(next.start, locale)}</span> · {next.title}
             </span>
           ) : null}

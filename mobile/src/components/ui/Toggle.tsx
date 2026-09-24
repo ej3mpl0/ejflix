@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { Pressable } from "react-native";
 import Animated, { Easing, interpolateColor, useAnimatedStyle, useReducedMotion, useSharedValue, withTiming } from "react-native-reanimated";
 import { useTheme } from "../../theme/ThemeProvider";
+import { haptic } from "../../lib/haptics";
 
 const W = 48;
 const H = 28;
@@ -43,7 +44,10 @@ export function Toggle({
       accessibilityState={{ checked, disabled }}
       disabled={disabled}
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-      onPress={() => onChange(!checked)}
+      onPress={() => {
+        haptic("selection");
+        onChange(!checked);
+      }}
       style={{ minHeight: 44, justifyContent: "center", opacity: disabled ? t.opacity.disabled : 1 }}
     >
       <Animated.View style={[{ width: W, height: H, borderRadius: H / 2, justifyContent: "center" }, track]}>

@@ -6,18 +6,20 @@ import { useUserData } from "../lib/userdata-context";
 
 /**
  * "My list" toggle. `action`: labelled pill for detail pages and heroes;
- * `icon`: round heart for card hover overlays.
+ * `icon`: round heart for card hover overlays; `outline`: bordered round button (hover card).
  */
 export function FavoriteButton({
   movie,
   variant = "action",
   pill = false,
   className,
+  tabIndex,
 }: {
   movie: Movie;
-  variant?: "action" | "icon";
+  variant?: "action" | "icon" | "outline";
   pill?: boolean;
   className?: string;
+  tabIndex?: number;
 }) {
   const { t } = useI18n();
   const { flags, setFavorite, pending } = useUserData();
@@ -25,10 +27,11 @@ export function FavoriteButton({
   const busy = pending(movie.id);
   const label = favorite ? t("removeFromList") : t("addToList");
 
-  if (variant === "icon") {
+  if (variant !== "action") {
     return (
       <button
         type="button"
+        tabIndex={tabIndex}
         disabled={busy}
         aria-pressed={favorite}
         aria-label={label}
@@ -38,7 +41,10 @@ export function FavoriteButton({
           void setFavorite(movie, !favorite);
         }}
         className={cn(
-          "btn-press grid h-8 w-8 place-items-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 disabled:opacity-60",
+          "btn-press grid place-items-center rounded-full text-white disabled:opacity-60",
+          variant === "outline"
+            ? "h-9 w-9 border border-white/25 hover:border-white/60"
+            : "h-8 w-8 bg-black/60 backdrop-blur-sm hover:bg-black/80",
           className,
         )}
       >

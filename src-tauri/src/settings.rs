@@ -158,6 +158,11 @@ pub struct Appearance {
     pub theme: String,
     pub amoled: bool,
     pub poster_size: PosterSize,
+    /// Muted trailers play behind the Home hero and the details backdrop
+    /// (a missing field takes the struct default: on).
+    pub autoplay_trailers: bool,
+    /// The accent follows the artwork on screen instead of `theme`.
+    pub auto_accent: bool,
 }
 
 impl Default for Appearance {
@@ -166,6 +171,8 @@ impl Default for Appearance {
             theme: DEFAULT_THEME.to_string(),
             amoled: false,
             poster_size: PosterSize::Medium,
+            autoplay_trailers: true,
+            auto_accent: false,
         }
     }
 }

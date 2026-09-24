@@ -29,7 +29,8 @@ export function usePlay(): (movie: Movie) => void {
         return;
       }
       if (movie.external) {
-        if (movie.external.stream) openPlayer(movie);
+        // A downloaded online title plays from the device without asking for a source.
+        if (movie.external.stream || api.playableDownload(movie)) openPlayer(movie);
         else if (movie.kind === "Series") openDetails(movie);
         else picker.open(movie);
         return;

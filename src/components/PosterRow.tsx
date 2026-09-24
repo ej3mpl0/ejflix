@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { useSeeAll } from "../lib/see-all-context";
+import { useSeeAll, type SeeAllRequest } from "../lib/see-all-context";
 import type { Movie } from "../lib/types";
 import { PosterCard } from "./PosterCard";
 import { ContinueCard } from "./ContinueCard";
@@ -14,10 +14,16 @@ export function PosterRow({
   onOpen,
   onPlay,
   loadMore,
+  caption,
+  seeAll,
 }: {
   title: string;
+  /** Why the row is there ("Because you watched X"), under the title. */
+  caption?: string;
+  /** Opens this instead of the plain grid, and always offers "See all" (custom lists). */
+  seeAll?: SeeAllRequest;
   items: Movie[];
-  variant?: "poster" | "continue" | "nextUp";
+  variant?: "poster" | "continue" | "nextUp" | "new";
   /** Next page of the row's source, for its "See all" grid. */
   loadMore?: (loaded: number) => Promise<Movie[]>;
   onOpen: (movie: Movie) => void;
@@ -78,11 +84,14 @@ export function PosterRow({
       onMouseLeave={() => setHover(false)}
     >
       <div className="mb-1 flex items-baseline justify-between gap-4 px-page">
-        <h2 className="min-w-0 truncate text-[18px] font-semibold text-text">{title}</h2>
-        {openSeeAll && variant === "poster" && (items.length >= 8 || loadMore) ? (
+        <div className="min-w-0">
+          <h2 className="truncate text-[18px] font-semibold text-text">{title}</h2>
+          {caption ? <p className="truncate text-[12.5px] text-dim">{caption}</p> : null}
+        </div>
+        {openSeeAll && variant === "poster" && (seeAll || items.length >= 8 || loadMore) ? (
           <button
             type="button"
-            onClick={() => openSeeAll({ title, items, loadMore })}
+            onClick={() => openSeeAll(seeAll ?? { title, items, loadMore })}
             className="inline-flex shrink-0 items-center gap-0.5 text-[13px] font-semibold text-muted transition-colors hover:text-text"
           >
             {t("seeAll")}
@@ -100,13 +109,13 @@ export function PosterRow({
           )}
         >
           {items.map((movie, i) =>
-            variant === "continue" || variant === "nextUp" ? (
+            variant === "continue" || variant === "nextUp" || variant === "new" ? (
               <ContinueCard
                 key={movie.id}
                 movie={movie}
                 onOpen={onOpen}
                 onPlay={onPlay}
-                variant={variant === "nextUp" ? "nextUp" : "resume"}
+                variant={variant === "nextUp" || variant === "new" ? variant : "resume"}
               />
             ) : (
               <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} delay={i * 30} />

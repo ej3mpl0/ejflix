@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Globe, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
-import { episodeCode, formatRuntime } from "../lib/format";
+import { episodeCode, formatRuntime, isNewlyAired } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useItemFlags } from "../lib/userdata-context";
 import { FavoriteButton } from "./FavoriteButton";
@@ -42,6 +42,11 @@ function EpisodeRow({
           </span>
         </div>
         <WatchedBadge movie={episode} className="absolute top-1.5 right-1.5" />
+        {!flags.played && isNewlyAired(episode.premiereDate) ? (
+          <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+            {t("newBadge")}
+          </span>
+        ) : null}
         {progress > 0 ? (
           <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
             <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />

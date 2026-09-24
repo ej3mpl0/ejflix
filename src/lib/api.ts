@@ -46,6 +46,16 @@ import type {
   Session,
   Settings,
   SettingsPatch,
+  CalendarData,
+  CustomList,
+  ListItem,
+  Person,
+  RecommendationRow,
+  ParentalStatus,
+  TraktDeviceCode,
+  TraktImportReport,
+  TraktPoll,
+  TraktStatus,
 } from "./types";
 
 export const api = {
@@ -63,11 +73,14 @@ export const api = {
   logoutServer: () => invoke<void>("logout_server"),
   // Local (online) profiles
   localProfilesList: () => invoke<LocalProfile[]>("local_profiles_list"),
-  localProfileCreate: (name: string, avatar: string, pin?: string | null) =>
-    invoke<LocalProfile>("local_profile_create", { name, avatar, pin: pin ?? null }),
+  /** `parentalPin` is asked for while a profile has a parental restriction. */
+  localProfileCreate: (name: string, avatar: string, pin?: string | null, parentalPin?: string | null) =>
+    invoke<LocalProfile>("local_profile_create", { name, avatar, pin: pin ?? null, parentalPin: parentalPin ?? null }),
   localProfileUpdate: (id: string, patch: ProfilePatch) =>
     invoke<LocalProfile>("local_profile_update", { id, patch }),
-  localProfileDelete: (id: string) => invoke<void>("local_profile_delete", { id }),
+  /** `pin`: the profile's own PIN (unless it is open); `parentalPin` when it is restricted. */
+  localProfileDelete: (id: string, pin?: string | null, parentalPin?: string | null) =>
+    invoke<void>("local_profile_delete", { id, pin: pin ?? null, parentalPin: parentalPin ?? null }),
   /** Opens a local profile; `pin` is required when the profile has one. */
   localProfileEnter: (id: string, pin?: string | null) =>
     invoke<Session>("local_profile_enter", { id, pin: pin ?? null }),
@@ -277,6 +290,26 @@ export const api = {
   /** A sync finished; `pulled` names the kinds this PC took from the account. */
   onAccountSynced: (handler: (report: SyncReport) => void): Promise<UnlistenFn> =>
     listen<SyncReport>("account://synced", (event) => handler(event.payload)),
+  // --- profiles & integrations ---
+  /** Checks a profile's PIN without opening it (rejects with "PIN incorrecto"). */
+  localProfileCheckPin: (id: string, pin: string) => invoke<void>("local_profile_check_pin", { id, pin }),
+  parentalStatus: () => invoke<ParentalStatus>("parental_status"),
+  /** `pin` is the parental PIN, or the new one when none exists yet. */
+  parentalSet: (pin: string, maxAge: number, hideUnrated: boolean, newPin?: string | null) =>
+    invoke<ParentalStatus>("parental_set", { pin, maxAge, hideUnrated, newPin: newPin ?? null }),
+  onParentalChanged: (handler: (status: ParentalStatus) => void): Promise<UnlistenFn> =>
+    listen<ParentalStatus>("parental://changed", (event) => handler(event.payload)),
+  traktStatus: () => invoke<TraktStatus>("trakt_status"),
+  traktSetApp: (clientId: string, clientSecret: string) =>
+    invoke<TraktStatus>("trakt_set_app", { clientId, clientSecret }),
+  traktDeviceStart: () => invoke<TraktDeviceCode>("trakt_device_start"),
+  traktDevicePoll: () => invoke<TraktPoll>("trakt_device_poll"),
+  traktDisconnect: () => invoke<TraktStatus>("trakt_disconnect"),
+  traktSetSyncBack: (on: boolean) => invoke<TraktStatus>("trakt_set_sync_back", { on }),
+  traktImport: () => invoke<TraktImportReport>("trakt_import"),
+  traktOpen: (url: string) => invoke<void>("trakt_open", { url }),
+  onTraktImported: (handler: (report: TraktImportReport) => void): Promise<UnlistenFn> =>
+    listen<TraktImportReport>("trakt://imported", (event) => handler(event.payload)),
   // player
   /** Subtitle ("sub") or audio delay; remembered for the title playing. Returns the value applied. */
   playerSetDelay: (kind: "sub" | "audio", seconds: number) => invoke<number>("player_set_delay", { kind, seconds }),
@@ -294,4 +327,22 @@ export const api = {
   opensubtitlesDownload: (fileId: number) => invoke<void>("opensubtitles_download", { fileId }),
   opensubtitlesHasPassword: () => invoke<boolean>("opensubtitles_has_password"),
   opensubtitlesSetPassword: (password: string) => invoke<void>("opensubtitles_set_password", { password }),
+  // Discovery: custom lists, calendar, shuffle, recommendations
+  customListsGet: () => invoke<CustomList[]>("custom_lists_get"),
+  customListCreate: (name: string) => invoke<CustomList[]>("custom_list_create", { name }),
+  customListRename: (id: string, name: string) => invoke<CustomList[]>("custom_list_rename", { id, name }),
+  customListDelete: (id: string) => invoke<CustomList[]>("custom_list_delete", { id }),
+  /** Adds (`on`) or removes one title; returns every list. */
+  customListSetItem: (id: string, item: Omit<ListItem, "addedMs">, on: boolean) =>
+    invoke<CustomList[]>("custom_list_set_item", { id, item: { ...item, addedMs: 0 }, on }),
+  /** When the calendar was last opened (ms); 0 before the first time. */
+  calendarSeenGet: () => invoke<number>("calendar_seen_get"),
+  calendarSeenSet: (ms: number) => invoke<void>("calendar_seen_set", { ms }),
+  getItemsByIds: (ids: string[]) => invoke<Movie[]>("get_items_by_ids", { ids }),
+  /** A random episode of the series (unwatched first), none of `exclude`. */
+  getRandomEpisode: (seriesId: string, exclude: string[] = []) =>
+    invoke<Movie | null>("get_random_episode", { seriesId, exclude }),
+  getCalendar: (daysBack: number) => invoke<CalendarData>("get_calendar", { daysBack }),
+  getRecommendations: () => invoke<RecommendationRow[]>("get_recommendations"),
+  searchPeople: (query: string) => invoke<Person[]>("search_people", { query }),
 };
