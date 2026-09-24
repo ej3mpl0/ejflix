@@ -1219,7 +1219,11 @@ export function Player({
       {overlay ? (
         <ReminderAlerts
           enabled={!locked && !mini}
-          onWatch={(reminder) => void api.playNext(channelToMovie(reminderChannel(reminder), live?.sourceName ?? ""))}
+          onWatch={(reminder) =>
+            void api.playNext(
+              channelToMovie(reminderChannel(reminder), live?.sourceId === reminder.sourceId ? live.sourceName : ""),
+            )
+          }
         />
       ) : null}
       {partyPanel && !locked && !mini && !live ? (
