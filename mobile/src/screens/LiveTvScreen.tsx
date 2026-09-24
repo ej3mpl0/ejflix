@@ -18,6 +18,7 @@ import {
 import { useI18n } from "../lib/locale-context";
 import { useToast } from "../lib/toast-context";
 import { usePlay } from "../lib/play";
+import { errorText } from "../services/errors";
 import type { MainStackParamList } from "../navigation/types";
 import { makeStyles, useTheme } from "../theme/ThemeProvider";
 import { useLayout } from "../theme/responsive";
@@ -37,10 +38,6 @@ const EPG_REFRESH_MS = 60_000;
 /** Gap between the tablet sidebar and the grid. */
 const SIDEBAR_GAP = 24;
 const SEARCH_DEBOUNCE_MS = 200;
-
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
 
 /** Pill labels are laid out at their natural width: keep long group names short. */
 function short(value: string, max = 22): string {
@@ -83,6 +80,8 @@ export function LiveTvScreen() {
   const alive = useRef(true);
   const toastRef = useRef(toast);
   toastRef.current = toast;
+  const trRef = useRef(tr);
+  trRef.current = tr;
   const selectionRef = useRef(selection);
   selectionRef.current = selection;
 
@@ -174,7 +173,7 @@ export function LiveTvScreen() {
         setItems((previous) => (first ? page.items : [...previous, ...page.items]));
         setTotal(page.total);
       } catch (err) {
-        if (id === request.current) toastRef.current(errorText(err));
+        if (id === request.current) toastRef.current(errorText(err, trRef.current));
       } finally {
         if (id === request.current) {
           setLoading(false);
@@ -261,12 +260,12 @@ export function LiveTvScreen() {
       })
       .catch((err: unknown) => {
         setItems((list) => list.map((c) => (c.id === channel.id ? { ...c, favorite: !on } : c)));
-        toastRef.current(errorText(err));
+        toastRef.current(errorText(err, trRef.current));
       });
   }, []);
 
   const refresh = useCallback(() => {
-    api.iptvRefresh(sourceId || null).catch((err: unknown) => toastRef.current(errorText(err)));
+    api.iptvRefresh(sourceId || null).catch((err: unknown) => toastRef.current(errorText(err, trRef.current)));
   }, [sourceId]);
 
   // Pull to refresh: downloads the lists again; the spinner stays until the refresh the
@@ -323,7 +322,7 @@ export function LiveTvScreen() {
           if (alive.current) setReminders(list);
           toastRef.current(on ? tr("reminderSet", { title: programme.title }) : tr("reminderRemoved"));
         })
-        .catch((err: unknown) => toastRef.current(errorText(err)));
+        .catch((err: unknown) => toastRef.current(errorText(err, trRef.current)));
     },
     [tr],
   );

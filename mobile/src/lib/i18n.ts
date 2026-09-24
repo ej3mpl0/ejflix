@@ -659,6 +659,15 @@ const es = {
   partyErrDenied: "El servidor de ejFlix no admite sesiones en grupo ahora mismo.",
   partyErrOffline: "No se ha podido conectar. Revisa tu conexión a Internet.",
   partyErrGeneric: "No se ha podido conectar con la sesión.",
+  // --- review fixes: downloads / catch-up / IPTV errors ---
+  dlErrNoJellyfin: "No hay ninguna sesi\u00f3n de Jellyfin abierta.",
+  dlErrNotOnline: "Este t\u00edtulo no es de una fuente online.",
+  catchupErrNoArchive: "Este canal no permite ver programas anteriores.",
+  catchupErrUnavailable: "Este programa no est\u00e1 disponible en diferido.",
+  iptvErrChannelUnavailable: "Canal no disponible.",
+  iptvErrInvalidChannel: "Canal no v\u00e1lido.",
+  reminderErrStarted: "El programa ya ha empezado.",
+  reminderErrTooMany: "Hay demasiados recordatorios.",
 };
 
 const en: typeof es = {
@@ -1320,6 +1329,15 @@ const en: typeof es = {
   partyErrDenied: "The ejFlix server isn't allowing watch parties right now.",
   partyErrOffline: "Couldn't connect. Check your internet connection.",
   partyErrGeneric: "Couldn't connect to the party.",
+  // --- review fixes: downloads / catch-up / IPTV errors ---
+  dlErrNoJellyfin: "No Jellyfin session is open.",
+  dlErrNotOnline: "This title is not from an online source.",
+  catchupErrNoArchive: "This channel doesn't offer past programmes.",
+  catchupErrUnavailable: "This programme is not available to watch later.",
+  iptvErrChannelUnavailable: "Channel not available.",
+  iptvErrInvalidChannel: "Invalid channel.",
+  reminderErrStarted: "The programme has already started.",
+  reminderErrTooMany: "There are too many reminders.",
 };
 
 export const dictionaries = { es, en };
