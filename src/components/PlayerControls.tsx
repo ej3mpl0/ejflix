@@ -7,7 +7,9 @@ import {
   Lock,
   Maximize,
   Minimize,
+  Moon,
   Pause,
+  PictureInPicture2,
   Play,
   Ratio,
   RotateCcw,
@@ -99,6 +101,9 @@ export function PlayerControls({
   onPanel,
   onReveal,
   onHoldUi,
+  onNight,
+  onMini,
+  onSearchSubs,
 }: {
   movie: Movie;
   /** Movie with trickplay/chapter detail for the timeline (may be a fuller copy). */
@@ -134,6 +139,12 @@ export function PlayerControls({
   onPanel: () => void;
   onReveal: () => void;
   onHoldUi: (hold: boolean) => void;
+  /** Night mode (dynamic range compression) on/off. */
+  onNight: () => void;
+  /** Into the always-on-top mini player. */
+  onMini: () => void;
+  /** Opens the OpenSubtitles search. */
+  onSearchSubs: () => void;
 }) {
   const { t, locale } = useI18n();
   const seekStep = useSettings().settings.playback.seekStep;
@@ -231,6 +242,15 @@ export function PlayerControls({
               title={t("lockControls")}
             >
               <Lock size={19} />
+            </button>
+            <button
+              type="button"
+              className="icon-hit grid h-10 w-10 place-items-center text-white/85"
+              onClick={onMini}
+              aria-label={t("miniPlayer")}
+              title={`${t("miniPlayer")} (P)`}
+            >
+              <PictureInPicture2 size={19} />
             </button>
             {showPanelChip ? (
               <button
@@ -416,7 +436,16 @@ export function PlayerControls({
                 {menu === "sub" ? (
                   <TrackMenu
                     kind="sub"
-                    footer={<SubtitleTools delay={delays.sub} onDelay={(value) => onDelay("sub", value)} />}
+                    footer={
+                      <SubtitleTools
+                        delay={delays.sub}
+                        onDelay={(value) => onDelay("sub", value)}
+                        onSearchOnline={() => {
+                          onMenu(null);
+                          onSearchSubs();
+                        }}
+                      />
+                    }
                     tracks={state.tracks}
                     onSelect={(kind, id) => {
                       onTrack(kind, id);
@@ -450,6 +479,13 @@ export function PlayerControls({
                   />
                 ) : null}
               </div>
+              <ControlChip
+                icon={<Moon size={16} />}
+                label={t("nightMode")}
+                ariaLabel={`${t("nightMode")} (D)`}
+                active={state.night}
+                onClick={onNight}
+              />
               {showPanelChip ? (
                 <ControlChip
                   icon={live ? <Tv size={16} /> : <ListVideo size={16} />}

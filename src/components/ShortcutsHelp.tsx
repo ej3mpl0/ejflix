@@ -12,6 +12,9 @@ const VOD: Array<[string[], MessageKey]> = [
   [["F"], "keyFullscreen"],
   [["V"], "keySubtitles"],
   [["Z", "X"], "keySubDelay"],
+  [["G", "H"], "keyAudioDelay"],
+  [["D"], "keyNight"],
+  [["P"], "keyMini"],
   [["I"], "keyStats"],
   [["<", ">"], "keySpeed"],
   [["0–9"], "keyJump"],
@@ -29,6 +32,8 @@ const LIVE: Array<[string[], MessageKey]> = [
   [["M"], "keyMute"],
   [["F"], "keyFullscreen"],
   [["C"], "keyChannels"],
+  [["D"], "keyNight"],
+  [["P"], "keyMini"],
   [["?"], "keyHelp"],
   [["Esc"], "keyBack"],
 ];
@@ -50,7 +55,7 @@ export function ShortcutsHelp({ live, onClose }: { live: boolean; onClose: () =>
         role="dialog"
         aria-modal="true"
         aria-labelledby="shortcuts-title"
-        className="modal-enter w-[min(460px,92vw)] rounded-card bg-surface/95 p-6 shadow-[0_24px_64px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)]"
+        className="modal-enter max-h-[92vh] w-[min(460px,92vw)] overflow-y-auto rounded-card bg-surface/95 p-6 shadow-[0_24px_64px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-center justify-between">
