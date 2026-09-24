@@ -166,7 +166,13 @@ export type LiveRef = {
   logo: string | null;
   /** "live" | "movie" (VOD entry of the playlist). */
   kind: string;
+  /** A past programme played from the archive (catch-up) instead of the live stream. */
+  catchup?: { start: number; stop: number; title: string } | null;
+  /** Multi-view: the channels of the mosaic in cell order (this channel is the first). */
+  multiview?: MultiviewCell[] | null;
 };
+
+export type MultiviewCell = { channelId: string; name: string; logo: string | null };
 
 export type Movie = {
   id: string;
@@ -628,6 +634,8 @@ export type Channel = {
   favorite: boolean;
   /** A programme guide is attached to this channel. */
   epg: boolean;
+  /** Days of past programmes that can be played again (0 or absent = none). */
+  catchupDays?: number;
 };
 
 export type Programme = {
@@ -714,4 +722,19 @@ export const DEFAULT_SETTINGS: Settings = {
   torrents: { enabled: true, share: true, cacheGb: 5, uploadKbps: 512, downloadKbps: 0 },
   // Until the real settings arrive nothing asks for the setup step.
   onboarding: { setupDone: true },
+};
+
+/** "Remind me" on a future programme (per profile, kept by Rust). */
+export type Reminder = {
+  channelId: string;
+  sourceId: string;
+  channelName: string;
+  logo: string | null;
+  group: string;
+  number: number | null;
+  title: string;
+  /** Unix seconds. */
+  start: number;
+  stop: number;
+  notified?: boolean;
 };

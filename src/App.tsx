@@ -20,6 +20,8 @@ import { api } from "./lib/api";
 import { useI18n } from "./lib/locale-context";
 import type { AccountStatus, Movie, SavedServer, Session, Toast } from "./lib/types";
 import { SetupStep } from "./screens/SetupStep";
+import { ReminderAlerts } from "./components/ReminderAlerts";
+import { channelToMovie, reminderChannel } from "./lib/iptv";
 
 /** Screens shown while there is no session. */
 type Gate = "welcome" | "login" | "profiles" | "create";
@@ -238,6 +240,11 @@ function AppInner() {
                   }}
                 />
               ) : null}
+              {/* Programme reminders; the player overlay shows its own while watching. */}
+              <ReminderAlerts
+                enabled={!playing && accountGate === "none"}
+                onWatch={(reminder) => setPlaying(channelToMovie(reminderChannel(reminder), ""))}
+              />
             </DownloadsProvider>
           </UserDataProvider>
         </SettingsProvider>

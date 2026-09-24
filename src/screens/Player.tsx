@@ -9,9 +9,11 @@ import { LockScreen } from "../components/LockScreen";
 import { PauseInfo } from "../components/PauseInfo";
 import { EpisodesPanel } from "../components/EpisodesPanel";
 import { ChannelsPanel } from "../components/ChannelsPanel";
+import { MultiviewBar } from "../components/MultiviewBar";
+import { ReminderAlerts } from "../components/ReminderAlerts";
 import { api } from "../lib/api";
 import type { Channel, EpgNow, Movie, PlayerState, TorrentStatus } from "../lib/types";
-import { channelToMovie } from "../lib/iptv";
+import { channelToMovie, reminderChannel } from "../lib/iptv";
 import { episodeCode, ticksToSeconds } from "../lib/format";
 import { nextAspect } from "../lib/aspect";
 import { isSeriesEpisode, nextVideoOf, pickStream, resumeEntryOf, videoToMovie } from "../lib/addons";
@@ -190,6 +192,25 @@ export function Player({
         }
         if (cancelled) return;
         try {
+          if (movie.live?.multiview?.length) {
+            // Multi-view: the overlay only lists the channels that could be opened.
+            const cells = movie.live.multiview;
+            const started = await api.iptvMultiview(cells.map((c) => c.channelId));
+            if (cancelled) return;
+            const shown = started.ids.flatMap((id) => cells.filter((c) => c.channelId === id));
+            void api.openPlayer({ ...movie, live: { ...movie.live, multiview: shown } });
+            setState(started.state);
+            return;
+          }
+          if (movie.live?.catchup) {
+            // A past programme from the channel's archive.
+            const { start: from, stop, title: programme } = movie.live.catchup;
+            const next = await api.iptvPlayCatchup(movie.live.channelId, from, stop, programme);
+            if (cancelled) return;
+            void api.openPlayer(movie);
+            setState(next);
+            return;
+          }
           if (movie.live) {
             // IPTV channel: Rust resolves the stream URL (Xtream credentials stay there).
             const next = await api.iptvPlay(movie.live.channelId);
@@ -496,7 +517,8 @@ export function Player({
 
   /** Previous / next channel of the group (wraps around). */
   const zap = (dir: 1 | -1) => {
-    if (!live || !zapList.length) return;
+    // The mosaic has no "current channel" to step from.
+    if (!live || !zapList.length || live.multiview?.length) return;
     const index = zapList.findIndex((c) => c.id === live.channelId);
     const target = zapList[((index < 0 ? 0 : index + dir) + zapList.length) % zapList.length];
     if (target) playChannel(target);
@@ -855,7 +877,20 @@ export function Player({
           menu={menu}
           remaining={remaining}
           panelOpen={panel}
-          live={live ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null } : null}
+          live={
+            live?.catchup
+              ? {
+                  number: live.number,
+                  now: { start: live.catchup.start, stop: live.catchup.stop, title: live.catchup.title, desc: null, category: null },
+                  next: null,
+                  catchup: true,
+                }
+              : live?.multiview?.length
+                ? { number: null, now: null, next: null }
+                : live
+                  ? { number: live.number, now: liveEpg?.now ?? null, next: liveEpg?.next ?? null }
+                  : null
+          }
           onMenu={setMenu}
           onToggleRemaining={toggleRemaining}
           onBack={onExit}
@@ -879,6 +914,15 @@ export function Player({
           onHoldUi={holdUi}
         />
       )}
+      {overlay && live?.multiview?.length && !locked ? (
+        <MultiviewBar cells={live.multiview} visible={visible} onHoldUi={holdUi} />
+      ) : null}
+      {overlay ? (
+        <ReminderAlerts
+          enabled={!locked}
+          onWatch={(reminder) => void api.playNext(channelToMovie(reminderChannel(reminder), live?.sourceName ?? ""))}
+        />
+      ) : null}
       {panel && !locked && live ? (
         <ChannelsPanel live={live} channels={zapList} onPlay={playChannel} onClose={() => setPanel(false)} onHoldUi={holdUi} />
       ) : panel && !locked ? (

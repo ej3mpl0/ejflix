@@ -1,9 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Clock, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
-import type { Channel, ChannelGroup, IptvSource, Movie } from "../lib/types";
+import { Bell, Clock, Grid2x2, Play, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
+import type { Channel, ChannelGroup, IptvSource, Movie, Programme, Reminder } from "../lib/types";
 import { api } from "../lib/api";
 import { cn } from "../lib/format";
-import { channelToMovie } from "../lib/iptv";
+import {
+  MULTIVIEW_MAX,
+  catchupToMovie,
+  channelInitials,
+  channelToMovie,
+  formatWhen,
+  multiviewToMovie,
+  reminderChannel,
+  reminderKey,
+  reminderOf,
+} from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
 import { ChannelCard } from "../components/ChannelCard";
 import { Shimmer } from "../components/Shimmer";
@@ -13,6 +23,7 @@ import { Select } from "../components/Select";
 import { useEpgNow } from "../hooks/useEpgNow";
 import { EpgGuide } from "../components/EpgGuide";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
+import { Pill } from "../components/Pill";
 
 const PAGE = 120;
 
@@ -20,6 +31,7 @@ type Selection =
   | { type: "all" }
   | { type: "favorites" }
   | { type: "recent" }
+  | { type: "reminders" }
   | { type: "group"; name: string; sourceId: string };
 
 /**
@@ -32,6 +44,7 @@ export function LiveTv({
   onPlay,
   onError,
   onSettings,
+  onToast,
 }: {
   sources: IptvSource[];
   /** Bumped after playback: reloads the page (the Recent list changed). */
@@ -40,8 +53,10 @@ export function LiveTv({
   onError: (message: string) => void;
   /** Opens Settings › IPTV. */
   onSettings: () => void;
+  /** Short confirmation (reminder set / removed). */
+  onToast?: (message: string) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const enabled = useMemo(() => sources.filter((s) => s.enabled), [sources]);
   const [sourceId, setSourceId] = useState<string>("");
   const [groups, setGroups] = useState<ChannelGroup[]>([]);
@@ -84,6 +99,13 @@ export function LiveTv({
   const loadChannels = useCallback(
     async (first: boolean) => {
       const id = ++request.current;
+      if (selection.type === "reminders") {
+        // The reminders view lists programmes, not channels.
+        setItems([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
       if (first) setLoading(true);
       else setLoadingMore(true);
       try {
@@ -132,6 +154,68 @@ export function LiveTv({
 
   const play = (channel: Channel) => {
     onPlay(channelToMovie(channel, names.get(channel.sourceId) ?? ""));
+  };
+
+  // ---- reminders (per profile, announced by Rust a minute before the start) ----
+
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => {
+      api
+        .iptvReminders()
+        .then((list) => {
+          if (alive) setReminders(list);
+        })
+        .catch(() => undefined);
+    };
+    load();
+    const unlisten = api.onIptvReminders(load);
+    return () => {
+      alive = false;
+      void unlisten.then((fn) => fn());
+    };
+  }, []);
+  const reminderKeys = useMemo(() => new Set(reminders.map((r) => reminderKey(r.channelId, r.start))), [reminders]);
+
+  const toggleReminder = async (channel: Channel, programme: Programme, on: boolean) => {
+    try {
+      const list = on
+        ? await api.iptvReminderSet(reminderOf(channel, programme))
+        : await api.iptvReminderRemove(channel.id, programme.start);
+      setReminders(list);
+      onToast?.(on ? t("reminderSet", { title: programme.title }) : t("reminderRemoved"));
+    } catch (err) {
+      onErrorRef.current(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const cancelReminder = (reminder: Reminder) => {
+    setReminders((list) => list.filter((r) => r !== reminder));
+    api.iptvReminderRemove(reminder.channelId, reminder.start).then(setReminders, (err: unknown) => {
+      onErrorRef.current(err instanceof Error ? err.message : String(err));
+    });
+  };
+
+  const playCatchup = (channel: Channel, programme: Programme) => {
+    onPlay(catchupToMovie(channel, names.get(channel.sourceId) ?? "", programme));
+  };
+
+  // ---- multi-view: 2–4 channels picked here, composed by mpv ----
+
+  const [mosaic, setMosaic] = useState<Channel[]>([]);
+  const toggleMosaic = (channel: Channel) => {
+    if (mosaic.some((c) => c.id === channel.id)) {
+      setMosaic(mosaic.filter((c) => c.id !== channel.id));
+    } else if (mosaic.length >= MULTIVIEW_MAX) {
+      onToast?.(t("multiviewFull"));
+    } else {
+      setMosaic([...mosaic, channel]);
+    }
+  };
+  const watchMosaic = () => {
+    if (mosaic.length < 2) return;
+    onPlay(multiviewToMovie(mosaic, names.get(mosaic[0].sourceId) ?? ""));
   };
 
   const favorite = async (channel: Channel, on: boolean) => {
@@ -289,6 +373,13 @@ export function LiveTv({
             {sideButton(t("allChannels"), selection.type === "all", () => setSelection({ type: "all" }), String(channelTotal), <Tv size={15} />)}
             {sideButton(t("favorites"), selection.type === "favorites", () => setSelection({ type: "favorites" }), undefined, <Star size={15} />)}
             {sideButton(t("recent"), selection.type === "recent", () => setSelection({ type: "recent" }), undefined, <Clock size={15} />)}
+            {sideButton(
+              t("reminders"),
+              selection.type === "reminders",
+              () => setSelection({ type: "reminders" }),
+              reminders.length ? String(reminders.length) : undefined,
+              <Bell size={15} />,
+            )}
           </div>
           {groups.length ? (
             <>
@@ -319,7 +410,52 @@ export function LiveTv({
         </nav>
 
         <div className="min-w-0">
-          {loading && !items.length ? (
+          {selection.type === "reminders" ? (
+            reminders.length ? (
+              <ul className="space-y-2">
+                {reminders.map((reminder) => (
+                  <li
+                    key={reminderKey(reminder.channelId, reminder.start)}
+                    className="flex items-center gap-3 rounded-card bg-surface px-4 py-3"
+                  >
+                    <span className="grid h-10 w-14 shrink-0 place-items-center overflow-hidden rounded-md bg-white/6 p-1">
+                      {reminder.logo ? (
+                        <img src={reminder.logo} alt="" loading="lazy" className="max-h-full max-w-full object-contain" />
+                      ) : (
+                        <span className="text-[11px] font-bold text-white/70">{channelInitials(reminder.channelName)}</span>
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[14px] font-medium">{reminder.title}</p>
+                      <p className="truncate text-[12px] text-dim">
+                        <span className="tabular">{formatWhen(reminder.start, locale)}</span> · {reminder.channelName}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => play(reminderChannel(reminder))}
+                      aria-label={`${t("watchLive")} ${reminder.channelName}`}
+                      title={t("watchLive")}
+                      className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/6 text-text hover:bg-white/12"
+                    >
+                      <Play size={15} fill="currentColor" className="translate-x-px" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cancelReminder(reminder)}
+                      aria-label={`${t("reminderCancel")}: ${reminder.title}`}
+                      title={t("reminderCancel")}
+                      className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/6 text-muted hover:bg-white/12 hover:text-text"
+                    >
+                      <X size={15} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <EmptyState icon={<Bell size={22} />} title={t("remindersEmpty")} hint={t("remindersEmptyHint")} />
+            )
+          ) : loading && !items.length ? (
             <div className={grid}>
               {Array.from({ length: 12 }).map((_, i) => (
                 <div key={i}>
@@ -330,7 +466,13 @@ export function LiveTv({
             </div>
           ) : items.length && layout === "guide" ? (
             <>
-              <EpgGuide channels={items} onPlay={play} />
+              <EpgGuide
+                channels={items}
+                onPlay={play}
+                reminders={reminderKeys}
+                onToggleReminder={(channel, programme, on) => void toggleReminder(channel, programme, on)}
+                onCatchup={playCatchup}
+              />
               {items.length < total ? (
                 <LoadMoreButton
                   loading={loadingMore}
@@ -349,6 +491,7 @@ export function LiveTv({
                     epg={epg[channel.id]}
                     onPlay={play}
                     onFavorite={(c, on) => void favorite(c, on)}
+                    multiview={{ active: mosaic.some((c) => c.id === channel.id), onToggle: toggleMosaic }}
                     delay={Math.min(i, 24) * 15}
                   />
                 ))}
@@ -377,6 +520,52 @@ export function LiveTv({
           )}
         </div>
       </div>
+
+      {mosaic.length ? (
+        <div
+          role="region"
+          aria-label={t("multiview")}
+          className="toast-enter fixed bottom-6 left-1/2 z-40 flex w-[min(720px,calc(100vw-48px))] -translate-x-1/2 flex-wrap items-center gap-3 rounded-2xl bg-panel/95 p-3 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
+        >
+          <div className="flex min-w-0 items-center gap-2 pl-1">
+            <Grid2x2 size={16} className="shrink-0 text-accent" aria-hidden />
+            <span className="text-[13px] font-semibold">{t("multiview")}</span>
+            <span className="text-[12px] text-dim tabular">
+              {mosaic.length}/{MULTIVIEW_MAX}
+            </span>
+          </div>
+          <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+            {mosaic.map((channel) => (
+              <span key={channel.id} className="inline-flex h-8 max-w-[180px] items-center gap-1 rounded-pill bg-white/8 pr-1 pl-3 text-[12px]">
+                <span className="truncate">{channel.name}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleMosaic(channel)}
+                  aria-label={`${t("multiviewRemove")}: ${channel.name}`}
+                  className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-dim hover:bg-white/10 hover:text-text"
+                >
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+            {mosaic.length < 2 ? <span className="self-center text-[12px] text-dim">{t("multiviewHint")}</span> : null}
+          </div>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Pill size="sm" variant="ghost" onClick={() => setMosaic([])}>
+              {t("multiviewClear")}
+            </Pill>
+            <Pill
+              size="sm"
+              variant="primary"
+              disabled={mosaic.length < 2}
+              icon={<Play size={14} fill="currentColor" />}
+              onClick={watchMosaic}
+            >
+              {t("multiviewWatch")}
+            </Pill>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

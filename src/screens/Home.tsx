@@ -510,7 +510,7 @@ export function Home({
             onToast={onToast}
           />
         ) : view === "tv" ? (
-          <LiveTv sources={tvSources} refreshToken={refreshToken} onPlay={play} onError={onToast} onSettings={() => openSettings("iptv")} />
+          <LiveTv sources={tvSources} refreshToken={refreshToken} onPlay={play} onError={onToast} onToast={onToast} onSettings={() => openSettings("iptv")} />
         ) : view === "search" ? (
           <SearchPage
             userId={session.userId}

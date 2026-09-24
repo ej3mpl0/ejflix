@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play, Star } from "lucide-react";
+import { Grid2x2Check, Grid2x2Plus, History, Play, Star } from "lucide-react";
 import type { Channel, EpgNow } from "../lib/types";
 import { cn } from "../lib/format";
 import { channelInitials, formatRange, formatTime, programmeProgress } from "../lib/iptv";
@@ -18,12 +18,15 @@ export function ChannelCard({
   epg,
   onPlay,
   onFavorite,
+  multiview,
   delay = 0,
 }: {
   channel: Channel;
   epg?: EpgNow;
   onPlay: (channel: Channel) => void;
   onFavorite: (channel: Channel, on: boolean) => void;
+  /** "Add to multi-view" toggle (live channels only). */
+  multiview?: { active: boolean; onToggle: (channel: Channel) => void };
   delay?: number;
 }) {
   const { t, locale } = useI18n();
@@ -63,6 +66,14 @@ export function ChannelCard({
           {channel.kind === "movie" ? (
             <span className="absolute bottom-2 left-2 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white/70 uppercase">
               VOD
+            </span>
+          ) : (channel.catchupDays ?? 0) > 0 ? (
+            <span
+              className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white/70 uppercase"
+              title={t("catchupDays", { n: channel.catchupDays ?? 0 })}
+            >
+              <History size={10} aria-hidden />
+              {t("catchup")}
             </span>
           ) : null}
           <span className="btn-play absolute top-1/2 left-1/2 grid h-11 w-11 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-black opacity-0 shadow-[0_6px_20px_rgb(0_0_0_/_0.45)] transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
@@ -108,6 +119,21 @@ export function ChannelCard({
       >
         <Star size={15} fill={channel.favorite ? "currentColor" : "none"} />
       </button>
+      {multiview && channel.kind === "live" ? (
+        <button
+          type="button"
+          onClick={() => multiview.onToggle(channel)}
+          aria-label={multiview.active ? t("multiviewRemove") : t("multiviewAdd")}
+          aria-pressed={multiview.active}
+          title={multiview.active ? t("multiviewRemove") : t("multiviewAdd")}
+          className={cn(
+            "absolute top-2 right-11 z-10 grid h-8 w-8 place-items-center rounded-full bg-black/55 text-white/85 backdrop-blur-sm transition-opacity duration-150 hover:bg-black/75 hover:text-white",
+            multiview.active ? "text-accent opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+          )}
+        >
+          {multiview.active ? <Grid2x2Check size={15} /> : <Grid2x2Plus size={15} />}
+        </button>
+      ) : null}
     </div>
   );
 }
