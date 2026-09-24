@@ -185,11 +185,17 @@ fn apply_tokens(stored: &mut Stored, value: &Value) -> Result<(), String> {
 /// A valid access token, refreshed first when it is about to expire. A refresh the
 /// server refuses signs the profile out of Trakt.
 async fn access_token(app: &tauri::AppHandle, user_id: &str, force: bool) -> Result<(Stored, String), String> {
+    // One refresh at a time: Trakt rotates the refresh token, so a second refresh with
+    // the same one (several titles marked watched at once) is refused and signs out.
+    static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let seen = load(app, user_id).access_token;
+    let _guard = REFRESH.lock().await;
     let mut stored = load(app, user_id);
     if !stored.connected() {
         return Err("trakt_not_connected".into());
     }
-    if !force && stored.expires_at > now_secs() + REFRESH_MARGIN_SECS {
+    // A forced refresh is moot when another caller refreshed while this one waited.
+    if (!force || stored.access_token != seen) && stored.expires_at > now_secs() + REFRESH_MARGIN_SECS {
         let token = open_sealed(&stored.access_token);
         if !token.is_empty() {
             return Ok((stored, token));
@@ -217,6 +223,8 @@ async fn access_token(app: &tauri::AppHandle, user_id: &str, force: bool) -> Res
         return Err(crate::errors::detail("traktStatus", res.status().as_u16()));
     }
     let value: Value = res.json().await.map_err(|_| "trakt_bad_response".to_string())?;
+    // Only the tokens go back: settings may have changed while the request was out.
+    let mut stored = load(app, user_id);
     apply_tokens(&mut stored, &value)?;
     save(app, user_id, &stored)?;
     let token = open_sealed(&stored.access_token);

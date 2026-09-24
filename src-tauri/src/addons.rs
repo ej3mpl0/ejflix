@@ -477,9 +477,12 @@ impl AddonClient {
         if let Some(cached) = self.imdb_ids.lock().unwrap().get(&key) {
             return cached.clone().map(|imdb| format!("{imdb}{suffix}"));
         }
-        let imdb = self
-            .meta(addons, kind, base)
-            .await
+        let meta = self.meta(addons, kind, base).await;
+        // Hidden from this profile says nothing about the title: not worth caching.
+        if matches!(&meta, Err(err) if err == crate::parental::BLOCKED) {
+            return None;
+        }
+        let imdb = meta
             .ok()
             .and_then(|full| full.meta.imdb)
             .filter(|imdb| imdb.starts_with("tt"));

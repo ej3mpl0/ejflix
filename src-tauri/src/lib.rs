@@ -2629,13 +2629,12 @@ async fn download_reveal(state: State<'_, AppState>, id: String) -> Result<(), S
     state.downloads.reveal(&id)
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
 // ---- discovery: custom lists, calendar, shuffle, recommendations ----
 
 /// Profile whose lists are being edited; unlike reads, writes need an active one.
 async fn lists_user(app: &tauri::AppHandle, state: &AppState) -> Result<String, String> {
     if state.local.read().await.is_none() && state.jellyfin.session().await.is_none() {
-        return Err("No hay ningún perfil activo".into());
+        return Err(crate::errors::code("noProfile"));
     }
     settings_user(app, state).await.ok_or_else(|| crate::errors::code("noProfile"))
 }
@@ -2730,6 +2729,7 @@ async fn search_people(state: State<'_, AppState>, query: String) -> Result<Vec<
     state.jellyfin.search_people(&query).await
 }
 
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
