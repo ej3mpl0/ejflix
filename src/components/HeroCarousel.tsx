@@ -18,7 +18,7 @@ const FADE_MS = 700;
 /**
  * Full-bleed hero carousel (Nuvio style): cross-fading backdrops with scroll parallax,
  * logo or title, meta line, actions and stretchy page dots. Auto-advances every 8 s
- * unless hovered, hidden or the user prefers reduced motion. After a few seconds on a
+ * unless paused, focused by keyboard, hidden or the user prefers reduced motion. After a few seconds on a
  * slide its trailer (when it has one) plays muted behind it, holding the rotation until
  * it ends.
  */
@@ -35,7 +35,6 @@ export function HeroCarousel({
   const [index, setIndex] = useState(0);
   const [previous, setPrevious] = useState<Movie | null>(null);
   const [dir, setDir] = useState<1 | -1>(1);
-  const [hover, setHover] = useState(false);
   /** Keyboard focus inside the hero pauses it too (WCAG 2.2.2), and so does the pause button. */
   const [focused, setFocused] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -78,7 +77,7 @@ export function HeroCarousel({
   }, [previous]);
 
   useEffect(() => {
-    if (count < 2 || hover || focused || paused || trailerBusy || reduced.current) return;
+    if (count < 2 || focused || paused || trailerBusy || reduced.current) return;
     const handle = window.setInterval(() => {
       // Also still while Home sits invisible behind the player or the first-run setup.
       if (document.hidden || (root.current && getComputedStyle(root.current).visibility === "hidden")) return;
@@ -86,7 +85,7 @@ export function HeroCarousel({
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count, hover, focused, paused, trailerBusy, safeIndex]);
+  }, [count, focused, paused, trailerBusy, safeIndex]);
 
   if (!current) return null;
 
@@ -108,8 +107,6 @@ export function HeroCarousel({
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
       }}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
       onKeyDown={(e) => {
         // Only on the carousel itself or its dots: on the action buttons the arrows move focus.
         const own = e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-hero-dots]");
