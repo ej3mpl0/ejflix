@@ -1,7 +1,7 @@
 import React, { memo, useEffect, useState } from "react";
 import { Text, View } from "react-native";
 import { Image } from "expo-image";
-import { Star } from "lucide-react-native";
+import { History, Star } from "lucide-react-native";
 import type { Channel, EpgNow } from "../../lib/types";
 import { channelInitials, formatRange, formatTime, programmeProgress } from "../../lib/iptv";
 import { useI18n } from "../../lib/locale-context";
@@ -77,6 +77,11 @@ function ChannelCardInner({ channel, epg, width, onPlay, onFavorite }: ChannelCa
           {channel.kind === "movie" ? (
             <View style={s.vod}>
               <Text style={s.vodText}>VOD</Text>
+            </View>
+          ) : (channel.catchupDays ?? 0) > 0 ? (
+            <View style={[s.vod, s.catchup]}>
+              <History size={10} color={t.white(0.75)} strokeWidth={2.4} />
+              <Text style={s.vodText}>{tr("catchup")}</Text>
             </View>
           ) : null}
           {now ? (
@@ -169,6 +174,7 @@ const useStyles = makeStyles((t) => ({
     borderRadius: 4,
     backgroundColor: t.white(0.12),
   },
+  catchup: { flexDirection: "row", alignItems: "center", gap: 3 },
   vodText: { ...text(9, "bold", { tracking: 0.06, uppercase: true }), color: t.white(0.75) },
   progress: { position: "absolute", left: 0, right: 0, bottom: 0, borderRadius: 0 },
   texts: { height: TEXT_H, paddingHorizontal: 10, paddingVertical: 9, gap: 2 },

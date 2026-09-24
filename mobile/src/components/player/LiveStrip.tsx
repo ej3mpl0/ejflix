@@ -8,7 +8,16 @@ import { text } from "../../theme/typography";
 import { ProgressBar } from "../ui/ProgressBar";
 
 /** Replaces the timeline while a channel plays: programme on air, what comes next, progress. */
-export function LiveStrip({ now, next }: { now: Programme | null; next: Programme | null }) {
+export function LiveStrip({
+  now,
+  next,
+  progress,
+}: {
+  now: Programme | null;
+  next: Programme | null;
+  /** 0–1 override (catch-up plays from the archive, not along the clock). */
+  progress?: number;
+}) {
   const s = useStyles();
   const { t, locale } = useI18n();
   if (!now) return null;
@@ -25,7 +34,7 @@ export function LiveStrip({ now, next }: { now: Programme | null; next: Programm
           </Text>
         ) : null}
       </View>
-      <ProgressBar value={programmeProgress(now) / 100} height={3} animated={false} style={s.bar} />
+      <ProgressBar value={progress != null ? Math.min(1, progress) : programmeProgress(now) / 100} height={3} animated={false} style={s.bar} />
     </View>
   );
 }

@@ -125,3 +125,37 @@ export function GridSkeleton({ rows = 2 }: { rows?: number }) {
     </View>
   );
 }
+
+/** Live TV tiles placeholder: 16:9 plates with a name line, in the grid's own geometry. */
+export function ChannelGridSkeleton({ cols, itemW, gap, rows = 3 }: { cols: number; itemW: number; gap: number; rows?: number }) {
+  const t = useTheme();
+  return (
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap }}>
+      {Array.from({ length: cols * rows }).map((_, i) => (
+        <View key={i} style={{ width: itemW }}>
+          <Shimmer width={itemW} height={Math.round((itemW * 9) / 16)} radius={t.radii.poster} delay={(i % cols) * 60} />
+          <Shimmer width={Math.round(itemW * 0.7)} height={12} radius={6} delay={(i % cols) * 60} style={{ marginTop: 8 }} />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** Navigation rows (the Live TV groups) while they load. */
+export function NavListSkeleton({ count = 8 }: { count?: number }) {
+  const t = useTheme();
+  return (
+    <View style={{ paddingHorizontal: 12, paddingTop: 4 }}>
+      {Array.from({ length: count }).map((_, i) => (
+        <Shimmer
+          key={i}
+          width={`${55 + ((i * 17) % 35)}%`}
+          height={14}
+          radius={t.radii.btn}
+          delay={i * 50}
+          style={{ marginVertical: 15 }}
+        />
+      ))}
+    </View>
+  );
+}

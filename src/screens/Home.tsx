@@ -572,6 +572,7 @@ export function Home({
             refreshToken={refreshToken}
             onPlay={play}
             onError={onToast}
+            onToast={onToast}
             onSettings={() => openSettings("iptv")}
             onAddSource={addIptvList}
           />

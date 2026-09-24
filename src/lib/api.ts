@@ -24,6 +24,7 @@ import type {
   IptvSourceInput,
   IptvStatus,
   Programme,
+  Reminder,
   XtreamAccount,
   HomeData,
   UpdateCheck,
@@ -218,6 +219,22 @@ export const api = {
   iptvFavorite: (id: string, on: boolean) => invoke<string[]>("iptv_favorite", { id, on }),
   iptvPlay: (id: string) => invoke<PlayerState>("iptv_play", { id }),
   onIptvChanged: (handler: () => void): Promise<UnlistenFn> => listen("iptv://changed", () => handler()),
+  iptvReminders: () => invoke<Reminder[]>("iptv_reminders"),
+  iptvReminderSet: (reminder: Reminder) => invoke<Reminder[]>("iptv_reminder_set", { reminder }),
+  iptvReminderRemove: (channelId: string, start: number) =>
+    invoke<Reminder[]>("iptv_reminder_remove", { channelId, start }),
+  /** The reminder list changed (added, removed, announced or expired). */
+  onIptvReminders: (handler: () => void): Promise<UnlistenFn> => listen("iptv://reminders", () => handler()),
+  /** A programme with a reminder is about to start. */
+  onIptvReminder: (handler: (reminder: Reminder) => void): Promise<UnlistenFn> =>
+    listen<Reminder>("iptv://reminder", (event) => handler(event.payload)),
+  /** Plays a past programme from the archive of a channel with catch-up. */
+  iptvPlayCatchup: (id: string, start: number, stop: number, title: string) =>
+    invoke<PlayerState>("iptv_play_catchup", { id, start, stop, title }),
+  /** Mosaic of 2–4 channels; `ids` are the ones that could be opened, in cell order. */
+  iptvMultiview: (ids: string[]) => invoke<{ state: PlayerState; ids: string[] }>("iptv_multiview", { ids }),
+  /** Audio of the multi-view cell `index`. */
+  playerMultiviewAudio: (index: number) => invoke<void>("player_multiview_audio", { index }),
   // Downloads of online sources (Rust owns the files and the list)
   downloadStream: (args: DownloadRequest) => invoke<DownloadItem>("download_stream", { args }),
   downloadsList: () => invoke<DownloadItem[]>("downloads_list"),

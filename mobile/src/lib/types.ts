@@ -159,6 +159,8 @@ export type LiveRef = {
   logo: string | null;
   /** "live" | "movie" (VOD entry of the playlist). */
   kind: string;
+  /** A past programme played from the archive (catch-up) instead of the live stream. */
+  catchup?: { start: number; stop: number; title: string } | null;
 };
 
 export type Movie = {
@@ -560,6 +562,8 @@ export type Channel = {
   favorite: boolean;
   /** A programme guide is attached to this channel. */
   epg: boolean;
+  /** Days of past programmes that can be played again (absent = none). */
+  catchupDays?: number;
 };
 
 export type Programme = {
@@ -624,6 +628,21 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   iptv: { autoRefresh: true, epg: true, wheelZap: false },
   onboarding: { setupDone: false },
+};
+
+/** "Remind me" on a future programme (per profile, in the store). */
+export type Reminder = {
+  channelId: string;
+  sourceId: string;
+  channelName: string;
+  logo: string | null;
+  group: string;
+  number: number | null;
+  title: string;
+  /** Unix seconds. */
+  start: number;
+  stop: number;
+  notified?: boolean;
 };
 
 // --- profiles & integrations ---

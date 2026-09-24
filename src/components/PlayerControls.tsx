@@ -34,7 +34,13 @@ import { useSettings } from "../lib/settings-context";
 export type PlayerMenu = "speed" | "audio" | "sub" | null;
 
 /** What the controls show while an IPTV channel plays. */
-export type LiveInfo = { number: number | null; now: Programme | null; next: Programme | null };
+export type LiveInfo = {
+  number: number | null;
+  now: Programme | null;
+  next: Programme | null;
+  /** A past programme from the archive: its own progress, not the clock's. */
+  catchup?: boolean;
+};
 
 function ControlChip({
   icon,
@@ -231,7 +237,7 @@ export function PlayerControls({
               {live ? (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded-[4px] bg-accent px-1.5 py-px text-[9px] font-bold tracking-wide text-on-accent uppercase">
                   <span className="h-1.5 w-1.5 rounded-full bg-on-accent" />
-                  {t("liveBadge")}
+                  {live.catchup ? t("catchup") : t("liveBadge")}
                 </span>
               ) : null}
               {live && live.number != null ? <span className="tabular">{live.number}</span> : null}
@@ -294,7 +300,13 @@ export function PlayerControls({
                   ) : null}
                 </div>
                 <div className="mt-1.5 h-[3px] w-full rounded-full bg-white/15">
-                  <div className="h-full rounded-full bg-accent" style={{ width: `${programmeProgress(live.now)}%` }} />
+                  <div className="h-full rounded-full bg-accent" style={{
+                      width: `${
+                        live.catchup
+                          ? Math.min(100, (state.time / Math.max(1, live.now.stop - live.now.start)) * 100)
+                          : programmeProgress(live.now)
+                      }%`,
+                    }} />
                 </div>
               </div>
             ) : null
@@ -328,7 +340,7 @@ export function PlayerControls({
               {live ? (
                 <span className="ml-2 inline-flex items-center gap-1.5 rounded-full bg-accent/15 px-2.5 py-1 text-[11px] font-bold tracking-wide text-accent uppercase">
                   <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-                  {t("liveBadge")}
+                  {live.catchup ? t("catchup") : t("liveBadge")}
                 </span>
               ) : (
                 <button

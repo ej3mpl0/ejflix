@@ -413,6 +413,8 @@ pub struct Player {
     overlay_guard: Arc<AtomicBool>,
     overlay_gen: Arc<AtomicU64>,
     request_id: AtomicU64,
+    /// URLs of the multi-view mosaic (empty for a single file), in screen order.
+    multiview: Mutex<Vec<String>>,
     /// Start of the credits of the current file, as the overlay detected it.
     credits_start: Mutex<Option<f64>>,
     mini: Mutex<Option<MiniRestore>>,
@@ -431,6 +433,7 @@ impl Player {
             overlay_guard: Arc::new(AtomicBool::new(false)),
             overlay_gen: Arc::new(AtomicU64::new(0)),
             request_id: AtomicU64::new(1),
+            multiview: Mutex::new(Vec::new()),
             credits_start: Mutex::new(None),
             mini: Mutex::new(None),
         }
@@ -537,6 +540,69 @@ impl Player {
         context: PlaybackContext,
         prefs: PlaybackPrefs,
     ) -> Result<(), String> {
+        self.start_with(app, url, &[], headers, title, start_seconds, context, prefs).await
+    }
+
+    /// Multi-view: several live streams composed into one mosaic by mpv itself. The
+    /// other streams are loaded as external files of the first one (`--external-files`)
+    /// and `--lavfi-complex` scales each video to a cell and stacks them. The graph is
+    /// never changed while playing (reinitialising it stalls non-seekable streams), so
+    /// the audio is switched with the plain `aid` property instead.
+    pub async fn start_multiview(
+        &self,
+        app: &AppHandle,
+        urls: &[String],
+        headers: &[(String, String)],
+        title: &str,
+        context: PlaybackContext,
+        prefs: PlaybackPrefs,
+    ) -> Result<(), String> {
+        let Some((first, rest)) = urls.split_first() else {
+            return Err("No hay canales".into());
+        };
+        self.start_with(app, first, rest, headers, title, 0.0, context, prefs).await
+    }
+
+    /// Audio of the mosaic cell `index`: its first audio track in mpv's track list
+    /// (the main file's tracks, then each external file's).
+    pub async fn multiview_audio(&self, index: usize) -> Result<(), String> {
+        let urls = self.multiview.lock().unwrap().clone();
+        let Some(url) = urls.get(index).cloned() else {
+            return Err("Canal no válido".into());
+        };
+        let reply = tokio::time::timeout(Duration::from_secs(2), self.command(json!(["get_property", "track-list"]), true))
+            .await
+            .map_err(|_| "sin respuesta de mpv".to_string())??;
+        let tracks = reply.get("data").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let id = tracks
+            .iter()
+            .filter(|t| t.get("type").and_then(|v| v.as_str()) == Some("audio"))
+            .find(|t| {
+                let external = t.get("external").and_then(|v| v.as_bool()).unwrap_or(false);
+                if index == 0 {
+                    !external
+                } else {
+                    external && t.get("external-filename").and_then(|v| v.as_str()) == Some(url.as_str())
+                }
+            })
+            .and_then(|t| t.get("id").and_then(|v| v.as_i64()))
+            .ok_or_else(|| "Este canal no tiene audio".to_string())?;
+        self.command(json!(["set_property", "aid", id]), false).await?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn start_with(
+        &self,
+        app: &AppHandle,
+        url: &str,
+        extra: &[String],
+        headers: &[(String, String)],
+        title: &str,
+        start_seconds: f64,
+        context: PlaybackContext,
+        prefs: PlaybackPrefs,
+    ) -> Result<(), String> {
         self.ensure_process(app).await?;
         let speed = if prefs.remember_speed && prefs.last_speed.is_finite() {
             prefs.last_speed.clamp(0.25, 4.0)
@@ -594,7 +660,10 @@ impl Player {
                 false,
             )
             .await;
-        let _ = self.command(json!(["set_property", "aid", "auto"]), false).await;
+        // Multi-view starts with the first cell's audio (the main file's first track);
+        // `alang` could otherwise pick another cell's.
+        let aid = if extra.is_empty() { json!("auto") } else { json!(1) };
+        let _ = self.command(json!(["set_property", "aid", aid]), false).await;
         if prefs.subtitle_language == "off" {
             let _ = self.command(json!(["set_property", "slang", ""]), false).await;
             let _ = self.command(json!(["set_property", "sid", "no"]), false).await;
@@ -642,6 +711,21 @@ impl Player {
             .command(json!(["set_property", "video-aspect-override", -1]), false)
             .await;
         let _ = self.command(json!(["set_property", "panscan", 0.0]), false).await;
+        // Mosaic (or back to a single file): these options persist across loadfile.
+        // Software filters need frames in system memory, hence the copy-back decoder.
+        let graph = if extra.is_empty() { String::new() } else { multiview_graph(extra.len() + 1) };
+        let _ = self.command(json!(["set_property", "external-files", extra]), false).await;
+        let _ = self.command(json!(["set_property", "lavfi-complex", graph]), false).await;
+        let hwdec = if extra.is_empty() { "d3d11va" } else { "d3d11va-copy" };
+        let _ = self.command(json!(["set_property", "hwdec", hwdec]), false).await;
+        {
+            let mut cells = self.multiview.lock().unwrap();
+            cells.clear();
+            if !extra.is_empty() {
+                cells.push(url.to_string());
+                cells.extend(extra.iter().cloned());
+            }
+        }
         self.command(json!(["loadfile", url, "replace"]), false)
             .await?;
         self.raise_video();
@@ -1077,6 +1161,23 @@ impl Drop for Player {
             let _ = child.kill();
         }
     }
+}
+
+/// Mosaic of 2–4 videos: each cell is 960×540 (letterboxed), two side by side, three as
+/// two plus one centred below, four as a 2×2 grid.
+pub fn multiview_graph(count: usize) -> String {
+    const CELL: &str = "scale=960:540:force_original_aspect_ratio=decrease:flags=bilinear,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1";
+    let count = count.clamp(2, 4);
+    let mut graph: Vec<String> = (1..=count).map(|i| format!("[vid{i}]{CELL}[v{i}]")).collect();
+    graph.push(
+        match count {
+            2 => "[v1][v2]hstack[vo]",
+            3 => "[v1][v2]hstack[top];[v3]pad=1920:540:480:0[bottom];[top][bottom]vstack[vo]",
+            _ => "[v1][v2]hstack[top];[v3][v4]hstack[bottom];[top][bottom]vstack[vo]",
+        }
+        .to_string(),
+    );
+    graph.join(";")
 }
 
 async fn ipc_loop(

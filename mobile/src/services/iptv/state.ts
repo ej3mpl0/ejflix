@@ -10,6 +10,7 @@ import { nowMs } from "../util";
 import { Catalog, attachEpg, buildChannels, deleteCache, readCache, writeCache } from "./catalog";
 import * as epgdb from "./epgdb";
 import { normalize, parseU32, type IptvChannel } from "./m3u";
+import { catchupWindow } from "./catchup";
 import { passwordOf, sourceOf, type StoredSource } from "./sources";
 import { hidesAdult, isAdultChannel } from "../parental";
 
@@ -168,6 +169,7 @@ function toView(channel: IptvChannel, catalog: Catalog, fav: Set<string>): Chann
     tvgId: channel.tvgId,
     favorite: fav.has(channel.id),
     epg: catalog.channelEpg.has(channel.id),
+    ...(catchupWindow(channel) > 0 ? { catchupDays: catchupWindow(channel) } : {}),
   };
 }
 

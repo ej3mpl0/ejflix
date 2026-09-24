@@ -2284,6 +2284,227 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
     Ok(state.player.snapshot().await)
 }
 
+// ---- IPTV: reminders, catch-up and multi-view ----
+
+/// Profile with an open session (reminders never go off on the profile picker).
+async fn active_user(state: &AppState) -> Option<String> {
+    if let Some(profile) = state.local.read().await.as_ref() {
+        return Some(profile.id.clone());
+    }
+    state.jellyfin.session().await.map(|s| s.user_id)
+}
+
+/// Playback preferences for live streams (always normal speed).
+fn live_prefs(app: &tauri::AppHandle, uid: &str) -> PlaybackPrefs {
+    let playback = settings::load(app, uid).unwrap_or_default().playback;
+    PlaybackPrefs {
+        remember_speed: false,
+        last_speed: 1.0,
+        ..PlaybackPrefs::from_settings(&playback)
+    }
+}
+
+#[tauri::command]
+async fn iptv_reminders(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let hide_adult = parental::hides_adult();
+    Ok(iptv::reminders(&app, &uid, addons::now_ms() / 1000)
+        .into_iter()
+        .filter(|r| !(hide_adult && r.is_adult()))
+        .collect())
+}
+
+#[tauri::command]
+async fn iptv_reminder_set(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    reminder: iptv::Reminder,
+) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    if parental::hides_adult() && reminder.is_adult() {
+        return Err(parental::BLOCKED.into());
+    }
+    let list = iptv::set_reminder(&app, &uid, reminder, addons::now_ms() / 1000)?;
+    let _ = app.emit(iptv::REMINDERS_EVENT, ());
+    Ok(list)
+}
+
+#[tauri::command]
+async fn iptv_reminder_remove(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    channel_id: String,
+    start: u64,
+) -> Result<Vec<iptv::Reminder>, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let list = iptv::remove_reminder(&app, &uid, &channel_id, start, addons::now_ms() / 1000)?;
+    let _ = app.emit(iptv::REMINDERS_EVENT, ());
+    Ok(list)
+}
+
+/// Checks the reminders of the active profile every few seconds: the ones due are
+/// announced to both windows (in-app card with "Watch now") and as a Windows notification.
+fn start_reminder_loop(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(15)).await;
+            let state = app.state::<AppState>();
+            let Some(uid) = active_user(&state).await else { continue };
+            let due = iptv::take_due_reminders(&app, &uid, addons::now_ms() / 1000);
+            if due.is_empty() {
+                continue;
+            }
+            let en = load_locale(&app).unwrap_or_default() == "en";
+            // A restricted profile is never offered an adult channel.
+            let hide_adult = parental::hides_adult();
+            for reminder in due.iter().filter(|r| !(hide_adult && r.is_adult())) {
+                let _ = app.emit(iptv::REMINDER_EVENT, reminder);
+                use tauri_plugin_notification::NotificationExt;
+                let title = if en { "Starting now" } else { "Empieza ahora" };
+                let _ = app
+                    .notification()
+                    .builder()
+                    .title(title)
+                    .body(format!("{} · {}", reminder.title, reminder.channel_name))
+                    .show();
+            }
+            let _ = app.emit(iptv::REMINDERS_EVENT, ());
+        }
+    });
+}
+
+/// Plays a past programme of a channel with catch-up (Xtream timeshift or the M3U
+/// `catchup-source`). The URL, with the credentials, is built here.
+#[tauri::command]
+async fn iptv_play_catchup(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    start: u64,
+    stop: u64,
+    title: String,
+) -> Result<PlayerState, String> {
+    let uid = iptv_user(&app, &state).await?;
+    let (channel, catalog) = state
+        .iptv
+        .find(&id)
+        .await
+        .ok_or_else(|| "Canal no encontrado".to_string())?;
+    if parental::hides_adult() && iptv::is_adult(&channel) {
+        return Err(parental::BLOCKED.into());
+    }
+    let source = iptv::list_sources(&app, &uid)
+        .into_iter()
+        .find(|s| s.id == channel.source_id)
+        .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+    let now = addons::now_ms() / 1000;
+    let url = iptv::catchup_url(&source, &channel, start, stop, now, catalog.server_offset)?;
+    let (_, headers) = iptv::stream_for(&source, &channel)?;
+    let label = format!("{} · {}", channel.name, title);
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Live { channel_id: id.clone() },
+        presence: discord::PresenceInfo {
+            title: channel.name.clone(),
+            episode: Some(title.clone()),
+            year: None,
+            kind: "live".into(),
+            poster_url: channel.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            source: source.name.clone(),
+            live_window: None,
+        },
+    };
+    state
+        .player
+        .start(&app, &url, &headers, &label, 0.0, ctx, live_prefs(&app, &uid))
+        .await?;
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(state.player.snapshot().await)
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MultiviewStart {
+    state: PlayerState,
+    /// Channels actually on screen, in cell order (dead streams are left out).
+    ids: Vec<String>,
+}
+
+/// Watches 2–4 channels at once in a mosaic. Every stream is tried first: mpv fails the
+/// whole mosaic when one input cannot be opened.
+#[tauri::command]
+async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: Vec<String>) -> Result<MultiviewStart, String> {
+    let uid = iptv_user(&app, &state).await?;
+    if !(2..=4).contains(&ids.len()) {
+        return Err("Elige entre 2 y 4 canales".into());
+    }
+    let sources = iptv::list_sources(&app, &uid);
+    let mut resolved = Vec::new();
+    for id in &ids {
+        let (channel, catalog) = state
+            .iptv
+            .find(id)
+            .await
+            .ok_or_else(|| "Canal no encontrado".to_string())?;
+        if parental::hides_adult() && iptv::is_adult(&channel) {
+            return Err(parental::BLOCKED.into());
+        }
+        let source = sources
+            .iter()
+            .find(|s| s.id == channel.source_id)
+            .ok_or_else(|| "La lista de este canal ya no existe".to_string())?;
+        let (url, headers) = iptv::stream_for(source, &channel)?;
+        resolved.push((id.clone(), channel, url, headers, catalog.account.clone()));
+    }
+    // An Xtream account only serves so many streams at once.
+    for (_, channel, _, _, account) in &resolved {
+        if let Some(max) = account.as_ref().and_then(|a| a.max_connections).filter(|&m| m > 0) {
+            let wanted = resolved.iter().filter(|(_, c, ..)| c.source_id == channel.source_id).count();
+            if wanted > max as usize {
+                return Err(format!("Tu cuenta permite {max} conexiones a la vez"));
+            }
+        }
+    }
+    let targets: Vec<(String, Vec<(String, String)>)> =
+        resolved.iter().map(|(_, _, url, headers, _)| (url.clone(), headers.clone())).collect();
+    let alive = state.iptv.probe(&targets).await;
+    let resolved: Vec<_> = resolved.into_iter().zip(alive).filter(|(_, ok)| *ok).map(|(r, _)| r).collect();
+    if resolved.len() < 2 {
+        return Err("No se pudieron abrir suficientes canales".into());
+    }
+    let urls: Vec<String> = resolved.iter().map(|(_, _, url, ..)| url.clone()).collect();
+    let names: Vec<String> = resolved.iter().map(|(_, c, ..)| c.name.clone()).collect();
+    let (first_id, first, _, headers, _) = &resolved[0];
+    let title = names.join(" · ");
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Live { channel_id: first_id.clone() },
+        presence: discord::PresenceInfo {
+            title: title.clone(),
+            episode: None,
+            year: None,
+            kind: "live".into(),
+            poster_url: first.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+            source: String::new(),
+            live_window: None,
+        },
+    };
+    state
+        .player
+        .start_multiview(&app, &urls, headers, &title, ctx, live_prefs(&app, &uid))
+        .await?;
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(MultiviewStart {
+        state: state.player.snapshot().await,
+        ids: resolved.into_iter().map(|(id, ..)| id).collect(),
+    })
+}
+
+#[tauri::command]
+async fn player_multiview_audio(state: State<'_, AppState>, index: usize) -> Result<(), String> {
+    state.player.multiview_audio(index).await
+}
+
 // ---- downloads ----
 
 /// Saves an online source (an addon stream) to the Downloads folder. The URL and the
@@ -2439,6 +2660,7 @@ async fn search_people(state: State<'_, AppState>, query: String) -> Result<Vec<
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::new().build())
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::new())
         .register_asynchronous_uri_scheme_protocol(jellyfin::IMAGE_SCHEME, |ctx, request, responder| {
             let app = ctx.app_handle().clone();
@@ -2594,6 +2816,13 @@ pub fn run() {
             get_calendar,
             get_recommendations,
             search_people,
+            // livetv
+            iptv_reminders,
+            iptv_reminder_set,
+            iptv_reminder_remove,
+            iptv_play_catchup,
+            iptv_multiview,
+            player_multiview_audio,
         ])
         .setup(|app| {
             let state = app.state::<AppState>();
@@ -2621,6 +2850,7 @@ pub fn run() {
             state.downloads.load(&handle);
             state.discord.spawn();
             account::start_sync_loop(handle.clone());
+            start_reminder_loop(handle.clone());
             start_progress_loop(handle, state.player.clone(), state.jellyfin.clone());
             Ok(())
         })

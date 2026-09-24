@@ -19,6 +19,7 @@ import { navigationRef } from "./navigation/navigationRef";
 import { useNavigationTheme } from "./navigation/navTheme";
 import { UpdateAvailableModal } from "./components/update/UpdateAvailableModal";
 import { WhatsNewModal } from "./components/update/WhatsNewModal";
+import { ReminderAlerts } from "./components/live/ReminderAlerts";
 
 // Keep the native splash until the session restore resolved.
 void SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -97,13 +98,15 @@ function Shell() {
 
 /** Update dialogs above everything: the "what's new" card first, never while watching. */
 function Overlays({ playing }: { playing: boolean }) {
-  const { boot, notesVersion, dismissNotes } = useSession();
+  const { boot, notesVersion, dismissNotes, session } = useSession();
   const { modalOpen } = useUpdate();
   if (boot) return null;
   return (
     <>
       {notesVersion ? <WhatsNewModal version={notesVersion} onClose={dismissNotes} /> : null}
       {modalOpen && !notesVersion && !playing ? <UpdateAvailableModal /> : null}
+      {/* Programme reminders of the profile, over every screen (the player too). */}
+      {session ? <ReminderAlerts key={session.userId} /> : null}
     </>
   );
 }

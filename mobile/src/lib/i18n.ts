@@ -599,6 +599,23 @@ const es = {
   downloadsEmptyHint: "Pulsa Descargar en una película o en un episodio para verlo sin conexión.",
   downloadsStorageTitle: "Almacenamiento",
   downloadsStorage: "{used} en descargas · {free} libres",
+  // --- livetv ---
+  remindMe: "Recordármelo",
+  reminderCancel: "Quitar recordatorio",
+  reminderSet: "Te avisaremos cuando empiece «{title}»",
+  reminderRemoved: "Recordatorio quitado",
+  reminders: "Recordatorios",
+  remindersEmpty: "No tienes recordatorios",
+  remindersEmptyHint: "En la guía, toca un programa que aún no ha empezado y elige «Recordármelo». El aviso aparece con la app abierta.",
+  reminderSoon: "Empieza en un minuto",
+  reminderNow: "Ya ha empezado",
+  watchNow: "Ver ahora",
+  watchLive: "Ver en directo",
+  catchup: "Diferido",
+  catchupWatch: "Ver desde el principio",
+  catchupAvailable: "Disponible en diferido",
+  programmeUpcoming: "Próximamente",
+  programmeEnded: "Ya emitido",
 };
 
 const en: typeof es = {
@@ -1200,6 +1217,23 @@ const en: typeof es = {
   downloadsEmptyHint: "Tap Download on a movie or an episode to watch it offline.",
   downloadsStorageTitle: "Storage",
   downloadsStorage: "{used} in downloads · {free} free",
+  // --- livetv ---
+  remindMe: "Remind me",
+  reminderCancel: "Cancel reminder",
+  reminderSet: "We'll let you know when “{title}” starts",
+  reminderRemoved: "Reminder removed",
+  reminders: "Reminders",
+  remindersEmpty: "No reminders",
+  remindersEmptyHint: "In the guide, tap a programme that hasn't started yet and choose Remind me. The alert shows while the app is open.",
+  reminderSoon: "Starts in a minute",
+  reminderNow: "Already started",
+  watchNow: "Watch now",
+  watchLive: "Watch live",
+  catchup: "Catch-up",
+  catchupWatch: "Watch from the start",
+  catchupAvailable: "Available on catch-up",
+  programmeUpcoming: "Coming up",
+  programmeEnded: "Already aired",
 };
 
 export const dictionaries = { es, en };

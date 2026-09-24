@@ -33,7 +33,7 @@ import {
 import { matchesLang } from "../jellyfin/languages";
 import { settingsGet } from "../settings";
 import { upsertProgress } from "../addons";
-import { resolveChannelPlayback } from "../iptv";
+import { resolveCatchupPlayback, resolveChannelPlayback } from "../iptv";
 import { downloadFileUri, downloadGet, downloadRecordPosition, downloadsSyncPending } from "../downloads/downloads";
 import { registerSessionCleanup } from "../session";
 import { aspectBox, isAspectMode } from "./aspect";
@@ -966,6 +966,41 @@ async function iptvPlay(channelId: string): Promise<PlayerState> {
   });
 }
 
+/** A past programme from the archive of a channel with catch-up. */
+async function iptvPlayCatchup(channelId: string, start: number, stop: number, title: string): Promise<PlayerState> {
+  return serialized(async () => {
+    let url: string | null = null;
+    try {
+      if (ctx) await stopInner(false);
+      const { channel, url: streamUrl, headers } = await resolveCatchupPlayback(channelId, start, stop);
+      url = streamUrl;
+      const base = await loadPrefs();
+      const prefs: PlaybackPrefs = { ...base, rememberSpeed: false, lastSpeed: 1 };
+      const label = `${channel.name} · ${title}`;
+      await load({
+        url: streamUrl,
+        headers: headers ?? {},
+        contentType: contentTypeFor(streamUrl),
+        metadata: {
+          title,
+          artist: channel.name,
+          artwork: channel.logo && /^https?:\/\//i.test(channel.logo) ? channel.logo : undefined,
+        },
+        title: label,
+        startSeconds: 0,
+        prefs,
+        speed: 1,
+        ctx: { source: { kind: "live", channelId }, title: label, url: streamUrl },
+        fallbackTried: true,
+      });
+      return snapshot();
+    } catch (error) {
+      emitError(error, url);
+      throw error;
+    }
+  });
+}
+
 /** `switching`: another item starts right away, so the player screen stays (no `player://close`). */
 function playerStop(switching = false): Promise<void> {
   return serialized(() => stopInner(!switching));
@@ -1154,6 +1189,7 @@ export const engine = {
   playerStartFile,
   setBackgroundPlayback,
   iptvPlay,
+  iptvPlayCatchup,
   playerStop,
   playerTogglePause,
   playerSeek,

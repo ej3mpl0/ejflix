@@ -12,9 +12,13 @@ import type {
   IptvSourceInput,
   IptvStatus,
   Programme,
+  Reminder,
   XtreamAccount,
 } from "../../lib/types";
+import { Platform } from "react-native";
 import { emit, PlaybackError } from "../events";
+import { KEYS, store } from "../store";
+import { addReminder, catchupUrl, dropReminder, dueReminders, pruneReminders } from "./catchup";
 import { nowMs } from "../util";
 import { getSettingsFor, settingsUser } from "../settings";
 import { registerSessionCleanup } from "../session";
@@ -168,6 +172,83 @@ export async function resolveChannelPlayback(channelId: string): Promise<{
     url,
     headers,
   };
+}
+
+/**
+ * Stream URL of a past programme of a channel with catch-up (Xtream timeshift or the M3U
+ * `catchup-source`), with the channel's headers.
+ */
+export async function resolveCatchupPlayback(
+  channelId: string,
+  start: number,
+  stop: number,
+): Promise<{ channel: Channel; url: string; headers: Record<string, string> }> {
+  const uid = requireUser();
+  const found = state.find(channelId);
+  if (!found) throw new PlaybackError("playErrChannelNotFound", "Canal no encontrado");
+  if (hidesAdult() && isAdultChannel(found.channel)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
+  const source = sources.listSources(uid).find((s) => s.id === found.channel.sourceId);
+  if (!source) throw new PlaybackError("playErrChannelListGone", "La lista de este canal ya no existe");
+  const password = await sources.passwordOf(source);
+  const { headers } = sources.streamFor(source, password, found.channel);
+  // Only HLS plays on iOS (AVPlayer): the archive is asked for as .m3u8 there too.
+  const xtream =
+    source.kind === "xtream"
+      ? { base: source.url, username: source.username, password, output: Platform.OS === "ios" ? "m3u8" : "ts" }
+      : null;
+  const url = catchupUrl(xtream, found.channel, start, stop, nowSeconds(), found.catalog.serverOffset);
+  return { channel: state.viewOf(found.channel, found.catalog, sources.favorites(uid)), url, headers };
+}
+
+// ---- programme reminders (kept per profile in the store; announced in the app) ----
+
+/** Same rule as for channels: the group or the name of the channel. */
+function isAdultReminder(reminder: Reminder): boolean {
+  return isAdultChannel({ group: reminder.group, name: reminder.channelName });
+}
+
+function loadReminders(uid: string): Reminder[] {
+  const raw = store.get<unknown[]>(KEYS.iptvReminders(uid));
+  return Array.isArray(raw)
+    ? raw.filter((r): r is Reminder => typeof r === "object" && r !== null && typeof (r as Reminder).channelId === "string")
+    : [];
+}
+
+function saveReminders(uid: string, list: Reminder[]): Reminder[] {
+  store.set(KEYS.iptvReminders(uid), list);
+  emit("iptv://reminders");
+  return list;
+}
+
+/** Pending reminders, soonest first (programmes that started a while ago are dropped). */
+export async function iptvReminders(): Promise<Reminder[]> {
+  const uid = requireUser();
+  const list = loadReminders(uid);
+  const kept = pruneReminders(list, nowSeconds());
+  const shown = kept.length !== list.length ? saveReminders(uid, kept) : kept;
+  return hidesAdult() ? shown.filter((r) => !isAdultReminder(r)) : shown;
+}
+
+export async function iptvReminderSet(reminder: Reminder): Promise<Reminder[]> {
+  const uid = requireUser();
+  if (sources.sourceOf(reminder.channelId) === null) throw new Error("Canal no válido");
+  if (hidesAdult() && isAdultReminder(reminder)) throw new PlaybackError("parentalBlockedTitle", BLOCKED);
+  return saveReminders(uid, addReminder(loadReminders(uid), reminder, nowSeconds()));
+}
+
+export async function iptvReminderRemove(channelId: string, start: number): Promise<Reminder[]> {
+  const uid = requireUser();
+  return saveReminders(uid, dropReminder(loadReminders(uid), channelId, start, nowSeconds()));
+}
+
+/** Reminders that go off now (a minute before the start), each returned once. */
+export async function iptvDueReminders(): Promise<Reminder[]> {
+  const uid = settingsUser();
+  if (!uid) return [];
+  const { list, due } = dueReminders(loadReminders(uid), nowSeconds());
+  if (due.length) saveReminders(uid, list);
+  // A restricted profile is never offered an adult channel.
+  return hidesAdult() ? due.filter((r) => !isAdultReminder(r)) : due;
 }
 
 /** Drops every playlist from memory (logout / profile switch). */

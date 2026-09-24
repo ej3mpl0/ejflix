@@ -40,6 +40,8 @@ export type EventMap = {
   /** Engine failure; the UI turns this into a card with a way out. */
   "player://error": PlayerError;
   "iptv://changed": void;
+  /** The reminder list of the profile changed. */
+  "iptv://reminders": void;
   "settings://changed": Settings;
   "update://progress": UpdateProgress;
   "parental://changed": ParentalStatus;

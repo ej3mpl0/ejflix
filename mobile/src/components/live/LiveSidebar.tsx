@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { FlatList, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { Clock, Star, Tv } from "lucide-react-native";
+import { Bell, Clock, Star, Tv } from "lucide-react-native";
 import type { LucideIcon } from "lucide-react-native";
 import type { ChannelGroup } from "../../lib/types";
 import { useI18n } from "../../lib/locale-context";
@@ -8,6 +8,7 @@ import { makeStyles, useTheme } from "../../theme/ThemeProvider";
 import { text } from "../../theme/typography";
 import { PressableScale } from "../ui/PressableScale";
 import { TextField } from "../ui/TextField";
+import { NavListSkeleton } from "../ui/Skeletons";
 
 /** Width of the tablet sidebar (desktop `md:grid-cols-[250px_1fr]`). */
 export const SIDEBAR_WIDTH = 250;
@@ -19,6 +20,7 @@ export type Selection =
   | { type: "all" }
   | { type: "favorites" }
   | { type: "recent" }
+  | { type: "reminders" }
   | { type: "group"; name: string; sourceId: string };
 
 export type LiveNavListProps = {
@@ -32,10 +34,24 @@ export type LiveNavListProps = {
   /** Several lists are shown at once: append the list name to each group. */
   multiSource: boolean;
   contentStyle?: StyleProp<ViewStyle>;
+  /** Pending programme reminders (shown next to "Reminders"). */
+  reminderCount?: number;
+  /** The groups are loading: placeholder rows instead of the list. */
+  loading?: boolean;
 };
 
 /** All / Favorites / Recent plus the groups of the playlists, as a scrolling list. */
-export function LiveNavList({ selection, onSelect, groups, channelTotal, names, multiSource, contentStyle }: LiveNavListProps) {
+export function LiveNavList({
+  selection,
+  onSelect,
+  groups,
+  channelTotal,
+  names,
+  multiSource,
+  contentStyle,
+  reminderCount = 0,
+  loading = false,
+}: LiveNavListProps) {
   const s = useStyles();
   const t = useTheme();
   const { t: tr } = useI18n();
@@ -68,6 +84,15 @@ export function LiveNavList({ selection, onSelect, groups, channelTotal, names, 
       {row(tr("allChannels"), selection.type === "all", () => onSelect({ type: "all" }), String(channelTotal), Tv, "all")}
       {row(tr("favorites"), selection.type === "favorites", () => onSelect({ type: "favorites" }), undefined, Star, "favorites")}
       {row(tr("recent"), selection.type === "recent", () => onSelect({ type: "recent" }), undefined, Clock, "recent")}
+      {row(
+        tr("reminders"),
+        selection.type === "reminders",
+        () => onSelect({ type: "reminders" }),
+        reminderCount ? String(reminderCount) : undefined,
+        Bell,
+        "reminders",
+      )}
+      {loading && !groups.length ? <NavListSkeleton /> : null}
       {groups.length ? (
         <>
           <Text style={s.section}>{tr("iptvGroupsLabel")}</Text>
