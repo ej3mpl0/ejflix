@@ -228,6 +228,10 @@ export const api = {
   /** A programme with a reminder is about to start. */
   onIptvReminder: (handler: (reminder: Reminder) => void): Promise<UnlistenFn> =>
     listen<Reminder>("iptv://reminder", (event) => handler(event.payload)),
+  /** A reminder card was answered (watched or closed) in one window: every window drops it. */
+  dismissIptvReminder: (key: string) => emit("iptv://reminder-dismissed", key),
+  onIptvReminderDismissed: (handler: (key: string) => void): Promise<UnlistenFn> =>
+    listen<string>("iptv://reminder-dismissed", (event) => handler(event.payload)),
   /** Plays a past programme from the archive of a channel with catch-up. */
   iptvPlayCatchup: (id: string, start: number, stop: number, title: string) =>
     invoke<PlayerState>("iptv_play_catchup", { id, start, stop, title }),

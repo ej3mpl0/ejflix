@@ -6,6 +6,7 @@ import { ChevronDown, CircleCheck, Server, Wifi } from "lucide-react-native";
 import { makeStyles, useTheme } from "../theme/ThemeProvider";
 import { text } from "../theme/typography";
 import { useI18n } from "../lib/locale-context";
+import { errorText } from "../services/errors";
 import { useSession } from "../lib/session-context";
 import { api } from "../lib/api";
 import { GrainBackdrop } from "../components/ui/GrainBackdrop";
@@ -41,7 +42,7 @@ export function LoginScreen({ navigation }: AuthScreenProps<"Login">) {
       const info = await api.testServer(trimmed);
       setTested(`${info.serverName} · Jellyfin ${info.version}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, t));
     } finally {
       setTesting(false);
     }
@@ -66,7 +67,7 @@ export function LoginScreen({ navigation }: AuthScreenProps<"Login">) {
       setGate("profiles");
       navigation.replace("Profiles");
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(errorText(err, t));
     } finally {
       setLoading(false);
     }

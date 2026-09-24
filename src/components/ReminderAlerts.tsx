@@ -30,8 +30,13 @@ export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch
       }, SHOW_MS);
       timers.add(handle);
     });
+    // Answered in the other window (main or player overlay): gone here too.
+    const unlistenDismissed = api.onIptvReminderDismissed((key) =>
+      setAlerts((list) => list.filter((r) => reminderKey(r.channelId, r.start) !== key)),
+    );
     return () => {
       void unlisten.then((fn) => fn());
+      void unlistenDismissed.then((fn) => fn());
       timers.forEach((handle) => window.clearTimeout(handle));
     };
   }, []);
@@ -45,8 +50,10 @@ export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch
 
   if (!enabled || !alerts.length) return null;
 
-  const dismiss = (reminder: Reminder) =>
+  const dismiss = (reminder: Reminder) => {
     setAlerts((list) => list.filter((r) => r !== reminder));
+    void api.dismissIptvReminder(reminderKey(reminder.channelId, reminder.start));
+  };
 
   return (
     <div

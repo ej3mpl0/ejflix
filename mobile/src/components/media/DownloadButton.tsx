@@ -48,7 +48,10 @@ export function useDownloadActions(entry: DownloadEntry | null): SheetAction[] {
   if (!entry) return [];
   const actions: SheetAction[] = [];
   if (entry.status === "done") {
-    actions.push({ key: "play", label: t("playOffline"), icon: Play, onPress: () => openPlayer(entry.movie) });
+    // Above the profile's parental limit (set after downloading): only deleting is offered.
+    if (api.downloadPlayable(entry)) {
+      actions.push({ key: "play", label: t("playOffline"), icon: Play, onPress: () => openPlayer(entry.movie) });
+    }
   } else if (entry.status === "downloading" || entry.status === "queued") {
     actions.push({ key: "pause", label: t("downloadPause"), icon: Pause, onPress: () => api.downloadPause(entry.id) });
   } else {
