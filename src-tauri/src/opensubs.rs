@@ -334,7 +334,7 @@ pub fn save_password(app: &tauri::AppHandle, user_id: &str, password: &str) -> R
         store.set(password_key(user_id), Value::String(crate::protect::to_hex(&sealed)));
     }
     forget_token();
-    store.save().map_err(|e| e.to_string())
+    crate::save_store(&store)
 }
 
 #[cfg(test)]

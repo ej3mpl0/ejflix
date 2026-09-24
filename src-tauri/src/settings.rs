@@ -454,7 +454,7 @@ pub fn merge_and_save(
         serde_json::to_value(&settings).map_err(|e| e.to_string())?,
     );
     store.set(LAST_USER_KEY, Value::String(user_id.to_string()));
-    store.save().map_err(|e| e.to_string())?;
+    crate::save_store(&store)?;
     Ok(settings)
 }
 
