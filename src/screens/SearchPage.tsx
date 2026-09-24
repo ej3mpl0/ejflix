@@ -365,8 +365,9 @@ export function SearchPage({
                 <div className="mt-6">
                   <p className="mb-2 text-[12px] font-semibold tracking-[0.08em] text-dim uppercase">{t("searchSuggestions")}</p>
                   <div className="flex flex-wrap justify-center gap-2">
-                    {suggestions.map((item) => (
-                      <Chip key={item.label} icon={item.icon} onClick={item.run}>
+                    {suggestions.map((item, i) => (
+                      // A past search can be named like a genre: the label alone is not unique.
+                      <Chip key={`${i}:${item.label}`} icon={item.icon} onClick={item.run}>
                         {item.label}
                       </Chip>
                     ))}

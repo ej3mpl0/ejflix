@@ -32,8 +32,11 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
   const [busy, setBusy] = useState<"app" | "connect" | "import" | null>(null);
   const [error, setError] = useState("");
   const polling = useRef<number | null>(null);
+  /** Bumped by every stop: a poll answered after it (cancel, unmount) must not go on. */
+  const pollRun = useRef(0);
 
   const stopPolling = useCallback(() => {
+    pollRun.current += 1;
     if (polling.current != null) window.clearTimeout(polling.current);
     polling.current = null;
   }, []);
@@ -46,8 +49,10 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
         setClientId(next.clientId);
       })
       .catch((err) => setError(errorText(t, err)));
-    return stopPolling;
-  }, [stopPolling, t]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => stopPolling, [stopPolling]);
 
   if (!status) {
     return (
@@ -77,9 +82,11 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
   };
 
   const poll = (interval: number) => {
+    const run = pollRun.current;
     polling.current = window.setTimeout(async () => {
       try {
         const outcome = await api.traktDevicePoll();
+        if (run !== pollRun.current) return;
         if (outcome === "pending") return poll(interval);
         if (outcome === "slow_down") return poll(interval + 5);
         setDevice(null);
@@ -90,6 +97,7 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
           setError(outcome === "denied" ? t("traktDenied") : t("traktCodeExpired"));
         }
       } catch (err) {
+        if (run !== pollRun.current) return;
         setDevice(null);
         setError(errorText(t, err));
       }
@@ -286,7 +294,11 @@ export function TraktSection({ onToast }: { onToast: (message: string) => void }
             <ConfirmButton
               confirmLabel={t("traktDisconnect")}
               onConfirm={async () => {
-                setStatus(await api.traktDisconnect());
+                try {
+                  setStatus(await api.traktDisconnect());
+                } catch (err) {
+                  setError(errorText(t, err));
+                }
               }}
               trigger={(ask) => (
                 <button type="button" onClick={ask} className={tonal}>

@@ -16,6 +16,9 @@ import type { CustomList, ListItem, Movie } from "./types";
 import { ListPickerDialog } from "../components/ListPickerDialog";
 import { useParental } from "./parental";
 
+/** Ids `get_items_by_ids` resolves per call (it ignores the rest). */
+const ITEMS_PER_CALL = 200;
+
 /** Identity of a title inside a custom list; null for what cannot be listed (channels). */
 export function listKeyOf(movie: Movie): string | null {
   if (movie.live) return null;
@@ -146,8 +149,12 @@ export function CustomListsProvider({
     if (!jellyfinIds.length) return;
     let alive = true;
     // Without a server (or another one linked) the stored cards stay as they are.
-    api
-      .getItemsByIds(jellyfinIds)
+    // Rust answers at most ITEMS_PER_CALL ids per call: ask in batches, or the rest would
+    // count as gone (and a restricted profile would lose them).
+    const batches: string[][] = [];
+    for (let i = 0; i < jellyfinIds.length; i += ITEMS_PER_CALL) batches.push(jellyfinIds.slice(i, i + ITEMS_PER_CALL));
+    Promise.all(batches.map((ids) => api.getItemsByIds(ids)))
+      .then((pages) => pages.flat())
       .then((items) => {
         if (!alive) return;
         setResolved(Object.fromEntries(items.map((movie) => [movie.id, movie])));
