@@ -39,7 +39,7 @@ export function HeroCarousel({
    * The title on screen, and where it sat: Home rebuilds the list when it refetches, and the
    * carousel stays on that title (or on its old position when the new list lost it).
    */
-  const [at, setAt] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
+  const [at, setAt] = useState<{ id: string | null; index: number }>(() => ({ id: items[0]?.id ?? null, index: 0 }));
   const [previous, setPrevious] = useState<Movie | null>(null);
   const [dir, setDir] = useState<1 | -1>(1);
   /** Keyboard or gamepad focus inside the hero pauses it (WCAG 2.2.2), and so does the pause button. */
@@ -54,7 +54,7 @@ export function HeroCarousel({
   const dragStart = useRef<number | null>(null);
   const dragged = useRef(false);
   /** When the last slide came in by itself (timer or trailer over), for CLICK_GUARD_MS. */
-  const autoAt = useRef(0);
+  const autoAt = useRef(Number.NEGATIVE_INFINITY);
   const root = useRef<HTMLElement>(null);
   const reduced = useReducedMotion();
   const count = items.length;
