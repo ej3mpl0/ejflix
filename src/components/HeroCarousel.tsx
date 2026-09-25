@@ -10,17 +10,20 @@ import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "./Trailer
 import { useTrailerGate, useTrailerUrl } from "../lib/trailer-autoplay";
 import { useSettings } from "../lib/settings-context";
 import { useArtworkAccent } from "../lib/auto-accent";
+import { useReducedMotion } from "../lib/motion";
 
 const AUTO_ADVANCE_MS = 8000;
 const DRAG_THRESHOLD = 60;
 const FADE_MS = 700;
+/** The actions of a slide that just came in by itself are still fading in: a click this soon was aimed at the one before. */
+const CLICK_GUARD_MS = 600;
 
 /**
  * Full-bleed hero carousel (Nuvio style): cross-fading backdrops with scroll parallax,
  * logo or title, meta line, actions and stretchy page dots. Auto-advances every 8 s
- * unless paused, focused by keyboard, hidden or the user prefers reduced motion. After a few seconds on a
- * slide its trailer (when it has one) plays muted behind it, holding the rotation until
- * it ends.
+ * unless paused, focused by keyboard or gamepad, the mouse is on its buttons or dots,
+ * hidden or the user prefers reduced motion. After a few seconds on a slide its trailer
+ * (when it has one) plays muted behind it, holding the rotation until it ends.
  */
 export function HeroCarousel({
   items,
@@ -32,42 +35,56 @@ export function HeroCarousel({
   onDetails: (movie: Movie) => void;
 }) {
   const { t } = useI18n();
-  const [index, setIndex] = useState(0);
+  /**
+   * The title on screen, and where it sat: Home rebuilds the list when it refetches, and the
+   * carousel stays on that title (or on its old position when the new list lost it).
+   */
+  const [at, setAt] = useState<{ id: string | null; index: number }>({ id: null, index: 0 });
   const [previous, setPrevious] = useState<Movie | null>(null);
   const [dir, setDir] = useState<1 | -1>(1);
-  /** Keyboard focus inside the hero pauses it too (WCAG 2.2.2), and so does the pause button. */
+  /** Keyboard or gamepad focus inside the hero pauses it (WCAG 2.2.2), and so does the pause button. */
   const [focused, setFocused] = useState(false);
   const [paused, setPaused] = useState(false);
+  /**
+   * The mouse is on the actions or the dots, so what it is about to click stays put. The rest
+   * of the hero does not count: it fills most of the screen and the mouse rests there.
+   */
+  const [aiming, setAiming] = useState(false);
+  const held = focused || paused || aiming;
   const dragStart = useRef<number | null>(null);
   const dragged = useRef(false);
+  /** When the last slide came in by itself (timer or trailer over), for CLICK_GUARD_MS. */
+  const autoAt = useRef(0);
   const root = useRef<HTMLElement>(null);
-  const reduced = useRef(
-    typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
+  const reduced = useReducedMotion();
   const count = items.length;
-  const safeIndex = count ? index % count : 0;
+  const byId = at.id ? items.findIndex((item) => item.id === at.id) : -1;
+  const safeIndex = byId >= 0 ? byId : count ? at.index % count : 0;
   const current = items[safeIndex];
   const { settings } = useSettings();
   const gate = useTrailerGate();
-  const trailer = useTrailerUrl(current, gate.hero && settings.appearance.autoplayTrailers && !reduced.current);
+  const trailer = useTrailerUrl(current, gate.hero && settings.appearance.autoplayTrailers && !reduced);
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
   const [muted, setMuted] = useState(true);
   const trailerBusy = trailerPhase === "loading" || trailerPhase === "playing";
   useArtworkAccent("hero", gate.hero ? current?.backdropUrl ?? null : null);
 
-  const go = (delta: 1 | -1) => {
-    if (count < 2) return;
-    setPrevious(items[safeIndex]);
-    setDir(delta);
-    setIndex((safeIndex + delta + count) % count);
-  };
-
-  const goTo = (target: number) => {
+  const goTo = (target: number, delta: 1 | -1 = target > safeIndex ? 1 : -1) => {
     if (target === safeIndex || count < 2) return;
     setPrevious(items[safeIndex]);
-    setDir(target > safeIndex ? 1 : -1);
-    setIndex(target);
+    setDir(delta);
+    setAt({ id: items[target].id, index: target });
   };
+
+  const go = (delta: 1 | -1) => goTo((safeIndex + delta + count) % count, delta);
+
+  const autoAdvance = () => {
+    autoAt.current = performance.now();
+    go(1);
+  };
+  // The timer calls the latest one: the list it reads may have been rebuilt since it started.
+  const autoAdvanceRef = useRef(autoAdvance);
+  autoAdvanceRef.current = autoAdvance;
 
   // Drop the outgoing backdrop once the cross-fade is over.
   useEffect(() => {
@@ -76,18 +93,23 @@ export function HeroCarousel({
     return () => window.clearTimeout(handle);
   }, [previous]);
 
+  // safeIndex restarts the 8 s after every change of slide, whoever made it.
   useEffect(() => {
-    if (count < 2 || focused || paused || trailerBusy || reduced.current) return;
+    if (count < 2 || held || trailerBusy || reduced) return;
     const handle = window.setInterval(() => {
-      // Also still while Home sits invisible behind the player or the first-run setup.
-      if (document.hidden || (root.current && getComputedStyle(root.current).visibility === "hidden")) return;
-      go(1);
+      // Also still while Home sits invisible behind the player or the first-run setup, and mid-drag.
+      if (document.hidden || dragStart.current != null) return;
+      if (root.current && getComputedStyle(root.current).visibility === "hidden") return;
+      autoAdvanceRef.current();
     }, AUTO_ADVANCE_MS);
     return () => window.clearInterval(handle);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [count, focused, paused, trailerBusy, safeIndex]);
+  }, [count, held, trailerBusy, reduced, safeIndex]);
 
   if (!current) return null;
+
+  const endDrag = () => {
+    dragStart.current = null;
+  };
 
   const resume = current.playbackPositionTicks > 10_000_000 * 30;
   const typeLabel = current.kind === "Series" ? t("seriesOne") : current.kind === "Episode" ? t("episode") : t("movie");
@@ -97,17 +119,22 @@ export function HeroCarousel({
   return (
     <section
       ref={root}
-      className="group/hero relative h-[min(78vh,720px)] min-h-[min(480px,70vh)] w-full overflow-hidden rounded-b-[var(--radius-hero)] bg-surface outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
+      className="relative h-[min(78vh,720px)] min-h-[min(480px,70vh)] w-full overflow-hidden rounded-b-[var(--radius-hero)] bg-surface outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-inset"
       tabIndex={0}
       aria-roledescription="carousel"
       aria-label={t("featured")}
       onFocus={(e) => {
-        if (e.currentTarget.matches(":focus-visible, :has(:focus-visible)")) setFocused(true);
+        // Focus from a click leaves the rotation alone. The gamepad focuses from script,
+        // which :focus-visible does not count after a click, so its input mode does.
+        const byKeys = e.currentTarget.matches(":focus-visible, :has(:focus-visible)");
+        if (byKeys || document.documentElement.dataset.input === "pad") setFocused(true);
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFocused(false);
       }}
       onKeyDown={(e) => {
+        // Keys pressed in here: the hero is being used from the keyboard now, however the focus got in.
+        setFocused(true);
         // Only on the carousel itself or its dots: on the action buttons the arrows move focus.
         const own = e.target === e.currentTarget || (e.target as HTMLElement).closest("[data-hero-dots]");
         if (!own || (e.key !== "ArrowRight" && e.key !== "ArrowLeft")) return;
@@ -120,7 +147,13 @@ export function HeroCarousel({
         dragged.current = false;
       }}
       onPointerMove={(e) => {
+        if (e.pointerType !== "touch") setAiming(Boolean((e.target as Element).closest("[data-hero-actions], [data-hero-dots]")));
         if (dragStart.current == null) return;
+        // The button came up where the hero never saw it (outside the window): no drag any more.
+        if (!e.buttons) {
+          endDrag();
+          return;
+        }
         const dx = e.clientX - dragStart.current;
         if (Math.abs(dx) >= DRAG_THRESHOLD) {
           dragStart.current = null;
@@ -128,11 +161,20 @@ export function HeroCarousel({
           go(dx < 0 ? 1 : -1);
         }
       }}
-      onPointerUp={() => {
-        dragStart.current = null;
+      // The backdrop and the logo are images: a native drag of one would take the pointer
+      // away (pointercancel) before the swipe got anywhere.
+      onDragStart={(e) => e.preventDefault()}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
+      onPointerLeave={() => {
+        endDrag();
+        setAiming(false);
       }}
       onClickCapture={(e) => {
-        if (dragged.current) {
+        // A drag is not a click, and neither is one on the actions of a slide that just came
+        // in under the pointer (they are still fading in: it was aimed at the one before).
+        const early = performance.now() - autoAt.current < CLICK_GUARD_MS && (e.target as Element).closest("[data-hero-actions]");
+        if (dragged.current || early) {
           e.stopPropagation();
           dragged.current = false;
         }
@@ -156,19 +198,20 @@ export function HeroCarousel({
             key={current.id}
             src={current.backdropUrl}
             alt=""
-            className={cn("hero-in absolute inset-0 h-full w-full object-cover", reduced.current && "!animate-none")}
+            className={cn("hero-in absolute inset-0 h-full w-full object-cover", reduced && "!animate-none")}
             style={{ ["--hero-dx" as string]: dir > 0 ? "3%" : "-3%" }}
           />
         ) : null}
         <TrailerBackdrop
-          key={current.id}
+          key={`trailer-${current.id}`}
           url={trailer}
           active={gate.hero}
           muted={muted}
           onPhase={(phase) => {
             setTrailerPhase(phase);
             // Played to the end: on to the next slide instead of sitting on its last frame.
-            if (phase === "ended") go(1);
+            // Unless something holds the rotation: then the backdrop comes back and waits.
+            if (phase === "ended" && !held) autoAdvance();
           }}
         />
       </div>
@@ -214,7 +257,7 @@ export function HeroCarousel({
             {current.overview}
           </p>
         ) : null}
-        <div className="enter enter-d3 flex flex-wrap items-center gap-3">
+        <div className="enter enter-d3 flex flex-wrap items-center gap-3" data-hero-actions>
           <Pill variant="primary" pill size="lg" className="btn-play" icon={<Play size={18} fill="currentColor" />} onClick={() => onPlay(current)}>
             {resume ? t("resume") : t("play")}
           </Pill>
@@ -230,13 +273,14 @@ export function HeroCarousel({
           {trailerPhase === "playing" ? (
             <TrailerMuteButton muted={muted} onToggle={() => setMuted((v) => !v)} className="mr-2 h-8 w-8" />
           ) : null}
-          {reduced.current || count < 2 ? null : (
+          {reduced || count < 2 ? null : (
+            // Always in sight: it is the one way to stop the rotation with a mouse or a finger.
             <button
               type="button"
               onClick={() => setPaused((v) => !v)}
               aria-label={paused ? t("playSlides") : t("pauseSlides")}
               aria-pressed={paused}
-              className="mr-1 grid h-7 w-7 place-items-center rounded-full bg-black/40 text-white/80 opacity-0 transition-opacity duration-150 group-hover/hero:opacity-100 hover:bg-black/60 hover:text-white focus-visible:opacity-100 data-[paused=true]:opacity-100"
+              className="mr-1 grid h-7 w-7 place-items-center rounded-full bg-black/40 text-white/80 opacity-70 transition-opacity duration-150 hover:bg-black/60 hover:text-white hover:opacity-100 focus-visible:opacity-100 data-[paused=true]:opacity-100"
               data-paused={paused}
             >
               {paused ? <Play size={12} fill="currentColor" /> : <Pause size={12} fill="currentColor" />}
