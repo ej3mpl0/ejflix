@@ -11,6 +11,7 @@ import type {
   TorrentStatus,
   AddonMeta,
   AddonMetaFull,
+  LocalizedInfo,
   AddonStream,
   BrowseArgs,
   ChannelGroup,
@@ -134,6 +135,9 @@ export const api = {
     skip?: number;
   }) => invoke<AddonMeta[]>("addon_catalog", { args }),
   addonMeta: (type: string, id: string) => invoke<AddonMetaFull>("addon_meta", { kind: type, id }),
+  /** Overview and trailers of a title in `lang` (a TMDB tag), tried with each of its ids. */
+  localizedInfo: (type: "movie" | "series", ids: string[], lang: string) =>
+    invoke<LocalizedInfo | null>("localized_info", { kind: type, ids, lang }),
   /** Poster-card metadata of several titles at once (a collection names them only). */
   addonMetas: (type: string, ids: string[]) => invoke<AddonMeta[]>("addon_metas", { args: { kind: type, ids } }),
   addonStreams: (type: string, id: string) =>

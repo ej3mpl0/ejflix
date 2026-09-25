@@ -407,6 +407,13 @@ export type AddonMetaFull = AddonMeta & {
   trailers: string[];
 };
 
+/** A title's overview and trailers in the profile's content language (from TMDB). */
+export type LocalizedInfo = {
+  overview: string | null;
+  /** YouTube watch URLs in that language, best first. */
+  trailers: string[];
+};
+
 /** An online title the user saved to their list or ticked off as watched. */
 export type LibraryEntry = {
   key: string;
@@ -483,6 +490,11 @@ export type Settings = {
     autoplayTrailers: boolean;
     /** The accent follows the artwork on screen (the theme is the fallback). */
     autoAccent: boolean;
+    /**
+     * Language of overviews and trailers: "auto" (the app's language), "source" (what the
+     * addon or the server sends) or a TMDB tag such as "en-GB".
+     */
+    contentLanguage: string;
   };
   playback: {
     skipIntro: SkipMode;
@@ -757,7 +769,7 @@ export type MfaEnrollment = {
 export type SyncReport = { pushed: string[]; pulled: string[]; skipped: string | null };
 
 export const DEFAULT_SETTINGS: Settings = {
-  appearance: { theme: "crimson", amoled: false, posterSize: "medium", autoplayTrailers: true, autoAccent: false },
+  appearance: { theme: "crimson", amoled: false, posterSize: "medium", autoplayTrailers: true, autoAccent: false, contentLanguage: "auto" },
   playback: {
     skipIntro: "ask",
     skipRecap: "ask",

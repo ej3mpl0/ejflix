@@ -163,6 +163,10 @@ pub struct Appearance {
     pub autoplay_trailers: bool,
     /// The accent follows the artwork on screen instead of `theme`.
     pub auto_accent: bool,
+    /// Language of overviews and trailers: `auto` (the app's language), `source` (what
+    /// the addon or the server sends) or a TMDB tag such as `en-GB`. Chosen, never guessed
+    /// from where the user is.
+    pub content_language: String,
 }
 
 impl Default for Appearance {
@@ -173,6 +177,7 @@ impl Default for Appearance {
             poster_size: PosterSize::Medium,
             autoplay_trailers: true,
             auto_accent: false,
+            content_language: "auto".to_string(),
         }
     }
 }
@@ -295,6 +300,10 @@ impl Settings {
     pub fn sanitized(mut self) -> Self {
         if !THEME_IDS.contains(&self.appearance.theme.as_str()) {
             self.appearance.theme = DEFAULT_THEME.to_string();
+        }
+        let content = self.appearance.content_language.as_str();
+        if !matches!(content, "auto" | "source") && !crate::addons::valid_language_tag(content) {
+            self.appearance.content_language = "auto".to_string();
         }
         if !COUNTDOWNS.contains(&self.playback.next_episode_countdown) {
             self.playback.next_episode_countdown = 5;

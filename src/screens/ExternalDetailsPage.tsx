@@ -12,7 +12,7 @@ import { errorText } from "../lib/errors";
 import { isParentalBlocked } from "../lib/parental";
 import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
-import { Pill } from "../components/Pill";
+import { IconPill, Pill } from "../components/Pill";
 import { MetaChips } from "../components/MetaChips";
 import { CastRow } from "../components/CastRow";
 import { FavoriteButton } from "../components/FavoriteButton";
@@ -26,6 +26,7 @@ import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { useUserData } from "../lib/userdata-context";
 import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
 import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useLocalizedInfo } from "../lib/localized";
 import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
@@ -77,6 +78,7 @@ export function ExternalDetailsPage({
   const [trailerMuted, setTrailerMuted] = useState(true);
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
   useArtworkAccent(`details:${route.key}`, route.leaving ? null : movie?.backdropUrl);
+  const localized = useLocalizedInfo(movie);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -210,7 +212,9 @@ export function ExternalDetailsPage({
       ? t("resume")
       : t("playOnline");
   const genresLine = movie.genres.slice(0, 3).join(" • ");
-  const trailer = playableTrailer(movie.remoteTrailers);
+  // In the content language when TMDB has one; none until that is known (no double start).
+  const trailer = localized === undefined ? null : playableTrailer(localized?.trailers ?? []) ?? playableTrailer(movie.remoteTrailers);
+  const overview = localized?.overview ?? movie.overview;
   const resumes = Boolean(startItem && startItem.playbackPositionTicks > 0);
   const episodes = meta && season != null ? videos.filter((v) => (v.season ?? 0) === season) : [];
   /** Play all starts at the first regular episode; the usual chaining carries on from there. */
@@ -277,78 +281,66 @@ export function ExternalDetailsPage({
                     "linear-gradient(180deg, transparent 0%, color-mix(in oklab, var(--details-tint) 40%, transparent) 45%, color-mix(in oklab, var(--details-tint) 85%, transparent) 80%, var(--details-tint) 100%)",
                 }}
               />
-              <div className="relative w-full max-w-[768px] px-page pt-28 pb-8 md:max-w-[min(768px,75%)]">
-                {movie.logoUrl ? (
-                  <img src={movie.logoUrl} alt={movie.name} className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]" />
-                ) : (
-                  <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
-                    {movie.name}
-                  </h1>
-                )}
-                <p className="enter enter-d1 mb-5 flex items-center gap-2 text-[14px] text-muted">
-                  <Globe size={14} />
-                  {t("online")}
-                  {genresLine ? <span>• {genresLine}</span> : null}
-                </p>
-                <div className="enter enter-d2 flex flex-wrap items-center gap-3">
-                  <Pill
-                    variant="primary"
-                    pill
-                    size="lg"
-                    className="btn-play"
-                    icon={<Play size={18} fill="currentColor" />}
-                    disabled={!startItem}
-                    onClick={() => startItem && onPlay(startItem)}
-                  >
-                    {playLabel}
-                  </Pill>
-                  <WatchTogetherButton onPlay={() => startItem && onPlay(startItem)} disabled={!startItem} />
-                  <FavoriteButton movie={movie} pill className="h-12" />
-                  <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
-                    {t("listsButton")}
-                  </Pill>
-                  {resumes && startItem ? (
+              {/* The gutter sits outside the width cap: inside it, a wide window's gutter ate the column. */}
+              <div className="relative w-full px-page pt-28 pb-8">
+                <div className="max-w-[768px]">
+                  {movie.logoUrl ? (
+                    <img src={movie.logoUrl} alt={movie.name} className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]" />
+                  ) : (
+                    <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
+                      {movie.name}
+                    </h1>
+                  )}
+                  <p className="enter enter-d1 mb-5 flex items-center gap-2 text-[14px] text-muted">
+                    <Globe size={14} />
+                    {t("online")}
+                    {genresLine ? <span>• {genresLine}</span> : null}
+                  </p>
+                  {/* Play keeps its label; the rest are icons (named by their tooltip), always one row. */}
+                  <div className="enter enter-d2 flex items-center gap-3">
                     <Pill
-                      variant="tonal"
+                      variant="primary"
                       pill
                       size="lg"
-                      icon={<RotateCcw size={16} />}
-                      onClick={() => onPlay({ ...startItem, playbackPositionTicks: 0 })}
+                      className="btn-play"
+                      icon={<Play size={18} fill="currentColor" />}
+                      disabled={!startItem}
+                      onClick={() => startItem && onPlay(startItem)}
                     >
-                      {t("startOver")}
+                      {playLabel}
                     </Pill>
-                  ) : null}
-                  <WatchedButton movie={movie} pill className="h-12" />
-                  {isSeries && meta && firstVideo ? (
-                    <>
-                      <Pill
-                        variant="tonal"
-                        pill
-                        size="lg"
-                        icon={<ListVideo size={17} />}
-                        title={t("playAllHint")}
-                        onClick={() => onPlay(withPosition(videoToMovie(meta, firstVideo)))}
-                      >
-                        {t("playAll")}
-                      </Pill>
-                      <Pill
-                        variant="tonal"
-                        pill
-                        size="lg"
-                        icon={<Shuffle size={16} />}
-                        disabled={shuffling}
-                        title={t("shuffleHint")}
-                        onClick={shuffle}
-                      >
-                        {t("shuffle")}
-                      </Pill>
-                    </>
-                  ) : null}
-                  {trailer ? (
-                    <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
-                      {t("trailer")}
-                    </Pill>
-                  ) : null}
+                    {resumes && startItem ? (
+                      <IconPill
+                        label={t("startOver")}
+                        icon={<RotateCcw size={18} />}
+                        onClick={() => onPlay({ ...startItem, playbackPositionTicks: 0 })}
+                      />
+                    ) : null}
+                    <WatchTogetherButton onPlay={() => startItem && onPlay(startItem)} disabled={!startItem} />
+                    <FavoriteButton movie={movie} variant="round" />
+                    <IconPill label={t("listsButton")} icon={<ListPlus size={19} />} onClick={() => openPicker(movie)} />
+                    <WatchedButton movie={movie} variant="round" />
+                    {isSeries && meta && firstVideo ? (
+                      <>
+                        <IconPill
+                          label={t("playAll")}
+                          title={`${t("playAll")}: ${t("playAllHint")}`}
+                          icon={<ListVideo size={19} />}
+                          onClick={() => onPlay(withPosition(videoToMovie(meta, firstVideo)))}
+                        />
+                        <IconPill
+                          label={t("shuffle")}
+                          title={`${t("shuffle")}: ${t("shuffleHint")}`}
+                          icon={<Shuffle size={18} />}
+                          disabled={shuffling}
+                          onClick={shuffle}
+                        />
+                      </>
+                    ) : null}
+                    {trailer ? (
+                      <IconPill label={t("trailer")} icon={<Clapperboard size={18} />} onClick={() => setShowTrailer(true)} />
+                    ) : null}
+                  </div>
                 </div>
               </div>
               {trailerPhase === "playing" ? (
@@ -372,10 +364,10 @@ export function ExternalDetailsPage({
               {/* Synopsis on the left, the production details in a column beside it. */}
               <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
                 <div className="max-w-[72ch]">
-                  {movie.overview ? (
+                  {overview ? (
                     <>
-                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>{movie.overview}</p>
-                      {movie.overview.length > 240 ? (
+                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>{overview}</p>
+                      {overview.length > 240 ? (
                         <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-semibold text-text hover:underline">
                           {expanded ? t("less") : t("more")}
                         </button>

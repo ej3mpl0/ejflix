@@ -1,8 +1,10 @@
 import type { Movie } from "../lib/types";
 import { formatRuntime } from "../lib/format";
+import { useLocalizedInfo } from "../lib/localized";
 
 /** Compact metadata block shown under the title while playback is paused. */
 export function PauseInfo({ movie, heading }: { movie: Movie; heading: string }) {
+  const overview = useLocalizedInfo(movie)?.overview ?? movie.overview;
   const meta = [
     movie.year ? String(movie.year) : null,
     formatRuntime(movie.runtimeTicks) || null,
@@ -25,9 +27,7 @@ export function PauseInfo({ movie, heading }: { movie: Movie; heading: string })
         <p className="truncate text-[15px] font-semibold text-white">{heading}</p>
         {meta.length ? <p className="mt-0.5 text-[12px] text-white/70 tabular">{meta.join(" · ")}</p> : null}
         {genres ? <p className="text-[12px] text-white/60">{genres}</p> : null}
-        {movie.overview ? (
-          <p className="mt-1.5 line-clamp-3 text-[13px] leading-[1.5] text-muted">{movie.overview}</p>
-        ) : null}
+        {overview ? <p className="mt-1.5 line-clamp-3 text-[13px] leading-[1.5] text-muted">{overview}</p> : null}
       </div>
     </div>
   );

@@ -3,10 +3,12 @@ import type { Movie } from "../lib/types";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useUserData } from "../lib/userdata-context";
+import { ICON_PILL } from "./Pill";
 
 /**
- * "My list" toggle. `action`: labelled pill for detail pages and heroes;
- * `icon`: round heart for card hover overlays; `outline`: bordered round button (hover card).
+ * "My list" toggle. `action`: labelled pill for heroes; `round`: icon-only pill for the
+ * details page row; `icon`: round heart for card hover overlays; `outline`: bordered round
+ * button (hover card).
  */
 export function FavoriteButton({
   movie,
@@ -16,7 +18,7 @@ export function FavoriteButton({
   tabIndex,
 }: {
   movie: Movie;
-  variant?: "action" | "icon" | "outline";
+  variant?: "action" | "round" | "icon" | "outline";
   pill?: boolean;
   className?: string;
   tabIndex?: number;
@@ -26,6 +28,28 @@ export function FavoriteButton({
   const favorite = flags(movie).favorite;
   const busy = pending(movie.id);
   const label = favorite ? t("removeFromList") : t("addToList");
+
+  if (variant === "round") {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        aria-pressed={favorite}
+        aria-label={label}
+        title={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          void setFavorite(movie, !favorite);
+        }}
+        className={cn(ICON_PILL, favorite ? "text-accent" : "text-text", className)}
+      >
+        <span className="relative grid h-5 w-5 place-items-center">
+          <Check size={19} className={`icon-swap absolute ${favorite ? "icon-swap-on" : "icon-swap-off"}`} />
+          <Plus size={19} className={`icon-swap absolute ${favorite ? "icon-swap-off" : "icon-swap-on"}`} />
+        </span>
+      </button>
+    );
+  }
 
   if (variant !== "action") {
     return (

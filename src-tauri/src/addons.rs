@@ -14,6 +14,11 @@ use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
 pub const CINEMETA_URL: &str = "https://v3-cinemeta.strem.io/manifest.json";
+/// Public instance of the TMDB addon. With a language in its config it answers a title's
+/// overview and trailers in that language, for TMDB and IMDb ids alike. The user's own
+/// addons fix their language inside their config (often on their server), out of reach.
+const LOCALIZED_META_URL: &str = "https://tmdb.elfhosted.com";
+const LOCALIZED_TIMEOUT: Duration = Duration::from_secs(8);
 const MANIFEST_TTL: Duration = Duration::from_secs(60 * 60);
 const STREAM_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_RESUME_ENTRIES: usize = 100;
@@ -137,6 +142,15 @@ pub struct AddonMetaFull {
     pub trailers: Vec<String>,
 }
 
+/// A title's overview and trailers in one language (`AddonClient::localized`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalizedInfo {
+    pub overview: Option<String>,
+    /// Trailer pages (YouTube) in that language, best first.
+    pub trailers: Vec<String>,
+}
+
 /// A title the user saved or ticked off. Online titles have no server to remember
 /// them, so the app keeps its own list next to the playback positions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +271,9 @@ pub struct AddonClient {
     catalogs: Mutex<HashMap<String, (Instant, Vec<AddonMeta>)>>,
     /// `"movie/tmdb:610253"` -> the IMDb id of that title, `None` when it has none.
     imdb_ids: Mutex<HashMap<String, Option<String>>>,
+    /// `"es-ES|movie/tt1375666"` -> that title in that language, `None` when TMDB does not
+    /// have it (a failed request is not kept: it is asked again next time).
+    localized: Mutex<HashMap<String, Option<LocalizedInfo>>>,
 }
 
 const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
@@ -273,6 +290,7 @@ impl AddonClient {
             manifests: Mutex::new(HashMap::new()),
             catalogs: Mutex::new(HashMap::new()),
             imdb_ids: Mutex::new(HashMap::new()),
+            localized: Mutex::new(HashMap::new()),
         }
     }
 
@@ -461,6 +479,60 @@ impl AddonClient {
             }
         }
         Err("No hay información para este título".into())
+    }
+
+    /// A title's overview and trailers in `lang` (`es-ES`, `en-US`...), asked with each of
+    /// its ids in turn (`tmdb:…` or `tt…`). `Ok(None)` when none of them is known there
+    /// (the caller keeps what the addon or the server gave); `Err` when the service did not
+    /// answer at all, so the caller may ask again later.
+    pub async fn localized(&self, kind: &str, ids: &[String], lang: &str) -> Result<Option<LocalizedInfo>, String> {
+        if !matches!(kind, "movie" | "series") || !valid_language_tag(lang) {
+            return Ok(None);
+        }
+        let config = enc(&serde_json::json!({ "language": lang }).to_string());
+        let ids = ids.iter().map(|id| id.trim()).filter(|id| id.starts_with("tt") || id.starts_with("tmdb:"));
+        let mut answered = false;
+        for id in ids.take(3) {
+            let key = format!("{lang}|{kind}/{id}");
+            if let Some(known) = self.localized.lock().unwrap().get(&key).cloned() {
+                answered = true;
+                if known.is_some() {
+                    return Ok(known);
+                }
+                continue;
+            }
+            let url = format!("{LOCALIZED_META_URL}/{config}/meta/{}/{}.json", enc(kind), enc(id));
+            let Ok(res) = self.http.get(&url).timeout(LOCALIZED_TIMEOUT).send().await else {
+                continue;
+            };
+            let found = if res.status().is_success() {
+                match res.json::<Value>().await {
+                    Ok(value) => value.get("meta").and_then(parse_localized),
+                    Err(_) => continue,
+                }
+            } else if res.status() == reqwest::StatusCode::NOT_FOUND {
+                None
+            } else {
+                // Busy or down (5xx, rate limit): not an answer about the title.
+                continue;
+            };
+            answered = true;
+            {
+                let mut cache = self.localized.lock().unwrap();
+                if cache.len() > 500 {
+                    cache.clear();
+                }
+                cache.insert(key, found.clone());
+            }
+            if found.is_some() {
+                return Ok(found);
+            }
+        }
+        if answered {
+            Ok(None)
+        } else {
+            Err("El servicio de sinopsis no responde".into())
+        }
     }
 
     /// The same title addressed by its IMDb id, when the given id is a catalog one.
@@ -893,6 +965,19 @@ fn parse_meta_full(v: &Value) -> Option<AddonMetaFull> {
     })
 }
 
+/// The overview and trailers of a TMDB addon meta; `None` when it carries neither.
+fn parse_localized(v: &Value) -> Option<LocalizedInfo> {
+    let overview = text(v, "description").filter(|s| !s.is_empty());
+    let trailers = parse_trailers(v);
+    (overview.is_some() || !trailers.is_empty()).then_some(LocalizedInfo { overview, trailers })
+}
+
+/// `es-ES`, `en-US`...: a language and a region, the form TMDB takes.
+pub(crate) fn valid_language_tag(tag: &str) -> bool {
+    let b = tag.as_bytes();
+    b.len() == 5 && b[..2].iter().all(u8::is_ascii_lowercase) && b[2] == b'-' && b[3..].iter().all(u8::is_ascii_uppercase)
+}
+
 /// Stremio metas give trailers as YouTube ids (`trailers[].source`,
 /// `trailerStreams[].ytId`); they are turned into watch URLs.
 fn parse_trailers(v: &Value) -> Vec<String> {
@@ -1196,5 +1281,27 @@ mod tests {
         assert!(s.url.is_none() && s.external_url.is_none());
         // Nothing usable at all is dropped.
         assert!(parse_stream(&addon, &serde_json::json!({ "name": "X", "ytId": "abc" })).is_none());
+    }
+
+    #[test]
+    fn language_tags_are_language_and_region() {
+        assert!(valid_language_tag("es-ES"));
+        assert!(valid_language_tag("pt-BR"));
+        for bad in ["es", "ES-es", "es_ES", "es-ES/", "español", "", "en-USA"] {
+            assert!(!valid_language_tag(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn localized_meta_keeps_overview_and_trailers() {
+        let meta = serde_json::json!({
+            "description": " Dom Cobb es un ladrón hábil. ",
+            "trailers": [{ "source": "RV9L7ui9Cn8", "type": "Trailer" }, { "source": "abcdefghijk", "type": "Clip" }],
+        });
+        let info = parse_localized(&meta).expect("localized");
+        assert_eq!(info.overview.as_deref(), Some("Dom Cobb es un ladrón hábil."));
+        assert_eq!(info.trailers, vec!["https://www.youtube.com/watch?v=RV9L7ui9Cn8".to_string()]);
+        // Neither an overview nor a trailer: nothing to show in that language.
+        assert!(parse_localized(&serde_json::json!({ "description": "", "trailers": [] })).is_none());
     }
 }

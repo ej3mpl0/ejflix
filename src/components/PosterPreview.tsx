@@ -4,6 +4,7 @@ import { Info, Play } from "lucide-react";
 import type { Movie } from "../lib/types";
 import { formatRuntime } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
+import { useLocalizedInfo } from "../lib/localized";
 import { FavoriteButton } from "./FavoriteButton";
 import { WatchedButton } from "./WatchedButton";
 
@@ -38,6 +39,7 @@ export function PosterPreview({
   onDismiss?: () => void;
 }) {
   const { t } = useI18n();
+  const overview = useLocalizedInfo(movie)?.overview ?? movie.overview;
   const runtime = formatRuntime(movie.runtimeTicks);
   const chips = [
     movie.year ? String(movie.year) : null,
@@ -125,7 +127,7 @@ export function PosterPreview({
           </button>
         </div>
         {genres ? <p className="truncate text-[12px] text-dim">{genres}</p> : null}
-        {movie.overview ? <p className="line-clamp-3 text-[12.5px] leading-[1.5] text-muted">{movie.overview}</p> : null}
+        {overview ? <p className="line-clamp-3 text-[12.5px] leading-[1.5] text-muted">{overview}</p> : null}
       </div>
     </div>,
     document.body,

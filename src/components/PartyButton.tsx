@@ -3,7 +3,7 @@ import { PartyPopper } from "lucide-react";
 import { partyApi, startParty, type PartyStatus } from "../lib/party";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
-import { Pill } from "./Pill";
+import { IconPill } from "./Pill";
 
 /** Header button: opens the party dialog; while in one, shows how many are in. */
 export function PartyButton({ status, onClick }: { status: PartyStatus | null; onClick: () => void }) {
@@ -51,8 +51,6 @@ export function WatchTogetherButton({ onPlay, disabled }: { onPlay: () => void; 
     }
   };
   return (
-    <Pill variant="tonal" pill size="lg" icon={<PartyPopper size={17} />} disabled={disabled || busy} onClick={() => void run()}>
-      {t("partyWatchTogether")}
-    </Pill>
+    <IconPill label={t("partyWatchTogether")} icon={<PartyPopper size={18} />} disabled={disabled || busy} onClick={() => void run()} />
   );
 }

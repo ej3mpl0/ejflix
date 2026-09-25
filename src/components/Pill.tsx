@@ -44,3 +44,30 @@ export function Pill({
     </button>
   );
 }
+
+/**
+ * Icon-only round action for the row next to a details page's Play button, the size of a
+ * `lg` pill. The label is its accessible name and its tooltip.
+ */
+export function IconPill({
+  label,
+  icon,
+  className,
+  ...rest
+}: Omit<ComponentProps<"button">, "children"> & { label: string; icon: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      {...rest}
+      className={cn(ICON_PILL, "text-text", className)}
+    >
+      {icon}
+    </button>
+  );
+}
+
+/** Shared with the toggles that draw their own round button (My list, watched); no text colour, each sets its own. */
+export const ICON_PILL =
+  "btn-press grid h-12 w-12 shrink-0 place-items-center rounded-full bg-white/12 hover:bg-white/18 disabled:opacity-[var(--opacity-disabled)] disabled:active:scale-100";

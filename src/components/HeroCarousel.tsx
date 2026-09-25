@@ -11,6 +11,7 @@ import { useTrailerGate, useTrailerUrl } from "../lib/trailer-autoplay";
 import { useSettings } from "../lib/settings-context";
 import { useArtworkAccent } from "../lib/auto-accent";
 import { useReducedMotion } from "../lib/motion";
+import { useLocalizedInfo } from "../lib/localized";
 
 const AUTO_ADVANCE_MS = 8000;
 const DRAG_THRESHOLD = 60;
@@ -64,6 +65,8 @@ export function HeroCarousel({
   const { settings } = useSettings();
   const gate = useTrailerGate();
   const trailer = useTrailerUrl(current, gate.hero && settings.appearance.autoplayTrailers && !reduced);
+  const localized = useLocalizedInfo(current);
+  const overview = localized?.overview ?? current?.overview ?? null;
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
   const [muted, setMuted] = useState(true);
   const trailerBusy = trailerPhase === "loading" || trailerPhase === "playing";
@@ -252,9 +255,9 @@ export function HeroCarousel({
           ) : null}
           <QualityBadges badges={current.badges.slice(0, 3)} className="ml-1" />
         </div>
-        {current.overview ? (
+        {overview ? (
           <p className="enter enter-d2 mb-6 line-clamp-3 max-w-[560px] text-[15px] leading-[1.6] text-muted">
-            {current.overview}
+            {overview}
           </p>
         ) : null}
         <div className="enter enter-d3 flex flex-wrap items-center gap-3" data-hero-actions>

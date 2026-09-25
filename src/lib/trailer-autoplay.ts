@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import type { Movie } from "./types";
 import { api } from "./api";
 import { playableTrailer } from "../components/TrailerDialog";
+import { useLocalizedInfo } from "./localized";
 
 /**
  * Where a muted trailer may play right now. Home owns it: nothing plays while the player
@@ -17,10 +18,20 @@ export function useTrailerGate() {
 const onlineTrailers = new Map<string, Promise<string | null>>();
 
 /**
- * The YouTube trailer of a title. Jellyfin items carry it already; for an online title the
- * addon metadata is fetched, only while `wanted` (so a carousel does not query every slide).
+ * The YouTube trailer of a title, in the content language when TMDB has one (nothing
+ * until that is known, so the player does not start twice). Otherwise: Jellyfin items
+ * carry it already; for an online title the addon metadata is fetched, only while
+ * `wanted` (so a carousel does not query every slide).
  */
 export function useTrailerUrl(movie: Movie | null | undefined, wanted: boolean): string | null {
+  const localized = useLocalizedInfo(movie, wanted);
+  const own = useOwnTrailerUrl(movie, wanted && localized !== undefined && !localized?.trailers.length);
+  if (localized === undefined) return null;
+  return (localized ? playableTrailer(localized.trailers) : null) ?? own;
+}
+
+/** The trailer the addon or the server gives. */
+function useOwnTrailerUrl(movie: Movie | null | undefined, wanted: boolean): string | null {
   const known = movie ? playableTrailer(movie.remoteTrailers) : null;
   const external = movie?.external && !movie.external.stream ? movie.external : null;
   const key = external ? `${external.type}:${external.metaId}` : "";

@@ -34,6 +34,8 @@ import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { Avatar } from "../components/Avatar";
 import { LanguageSelect } from "../components/LanguageSelect";
+import { Select } from "../components/Select";
+import { CONTENT_LANGUAGES } from "../lib/localized";
 import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
@@ -65,7 +67,7 @@ type Section =
 
 /** Titles and row labels of each section, for the settings search. */
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
-  appearance: ["language", "appLanguage", "theme", "themeAuto", "amoled", "posterSize", "autoplayTrailers"],
+  appearance: ["language", "appLanguage", "contentLanguage", "theme", "themeAuto", "amoled", "posterSize", "autoplayTrailers"],
   playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "subOutline", "subPosition", "subAssOverride", "playbackSpeed", "rememberSpeed", "showTimeRemaining", "whilePlayingTitle", "watchedThreshold", "nightModeDefault", "opensubtitlesTitle", "opensubtitlesApiKey"],
   addons: ["addons", "importAddons", "cinemetaRow"],
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
@@ -429,6 +431,18 @@ export function Settings({
               <SettingsSection title={t("language")}>
                 <SettingsRow label={t("appLanguage")}>
                   <LanguageSelect />
+                </SettingsRow>
+                <SettingsRow label={t("contentLanguage")} hint={t("contentLanguageHint")}>
+                  <Select
+                    label={t("contentLanguage")}
+                    value={appearance.contentLanguage}
+                    options={[
+                      { value: "auto", label: t("contentLanguageAuto") },
+                      { value: "source", label: t("contentLanguageSource") },
+                      ...CONTENT_LANGUAGES.map(({ tag, label }) => ({ value: tag, label })),
+                    ]}
+                    onChange={(contentLanguage) => void update({ appearance: { contentLanguage } })}
+                  />
                 </SettingsRow>
               </SettingsSection>
               <SettingsSection title={t("theme")} description={t("themeHint")}>

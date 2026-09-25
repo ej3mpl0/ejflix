@@ -3,6 +3,7 @@ import type { Movie } from "../lib/types";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useUserData } from "../lib/userdata-context";
+import { ICON_PILL } from "./Pill";
 
 /** Mark as watched / unwatched. For seasons and series, watched = nothing left to play. */
 export function WatchedButton({
@@ -14,8 +15,11 @@ export function WatchedButton({
   tabIndex,
 }: {
   movie: Movie;
-  /** `icon`: dark round button over artwork; `outline`: bordered round button (hover card). */
-  variant?: "action" | "icon" | "outline";
+  /**
+   * `round`: icon-only pill for the details page row; `icon`: dark round button over
+   * artwork; `outline`: bordered round button (hover card).
+   */
+  variant?: "action" | "round" | "icon" | "outline";
   scope?: "item" | "season";
   pill?: boolean;
   className?: string;
@@ -34,6 +38,25 @@ export function WatchedButton({
       : watched
         ? t("markUnwatched")
         : t("markWatched");
+
+  if (variant === "round") {
+    return (
+      <button
+        type="button"
+        disabled={busy}
+        aria-pressed={watched}
+        aria-label={label}
+        title={label}
+        onClick={(e) => {
+          e.stopPropagation();
+          void setPlayed(movie, !watched);
+        }}
+        className={cn(ICON_PILL, watched ? "text-accent" : "text-text", className)}
+      >
+        {watched ? <CircleCheck size={19} /> : <Eye size={19} />}
+      </button>
+    );
+  }
 
   if (variant !== "action") {
     return (

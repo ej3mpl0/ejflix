@@ -14,7 +14,7 @@ import { isParentalBlocked } from "../lib/parental";
 import { RestrictedNotice } from "../components/RestrictedNotice";
 import { useSettings } from "../lib/settings-context";
 import { useUserData } from "../lib/userdata-context";
-import { Pill } from "../components/Pill";
+import { IconPill, Pill } from "../components/Pill";
 import { FavoriteButton } from "../components/FavoriteButton";
 import { WatchedButton } from "../components/WatchedButton";
 import { MetaChips } from "../components/MetaChips";
@@ -30,6 +30,7 @@ import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
 import { PersonDialog } from "../components/PersonDialog";
 import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
 import { useTrailerGate } from "../lib/trailer-autoplay";
+import { useLocalizedInfo } from "../lib/localized";
 import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
@@ -88,6 +89,7 @@ export function DetailsPage({
   const [trailerMuted, setTrailerMuted] = useState(true);
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
   useArtworkAccent(`details:${route.key}`, route.leaving ? null : detail?.backdropUrl);
+  const localized = useLocalizedInfo(detail);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
 
@@ -163,7 +165,10 @@ export function DetailsPage({
     : resume && movie
       ? t("resumeFrom", { time: formatClock(ticksToSeconds(movie.playbackPositionTicks)) })
       : t("play");
-  const trailer = movie ? playableTrailer(movie.remoteTrailers) : null;
+  // In the content language when TMDB has one; none until that is known (no double start).
+  const trailer =
+    !movie || localized === undefined ? null : playableTrailer(localized?.trailers ?? []) ?? playableTrailer(movie.remoteTrailers);
+  const overview = localized?.overview ?? movie?.overview ?? null;
   const currentSeason = seasons.find((season) => season.id === seasonId) ?? null;
   const chapters = movie && !isSeries && hasChapterImages(movie.chapters) ? movie.chapters : [];
   const genresLine = movie?.genres.slice(0, 3).join(" • ") ?? "";
@@ -275,87 +280,73 @@ export function DetailsPage({
                     "linear-gradient(180deg, transparent 0%, color-mix(in oklab, var(--details-tint) 40%, transparent) 45%, color-mix(in oklab, var(--details-tint) 85%, transparent) 80%, var(--details-tint) 100%)",
                 }}
               />
-              <div className="relative w-full max-w-[768px] px-page pt-28 pb-8 md:max-w-[min(768px,75%)]">
-                {movie.logoUrl ? (
-                  <img
-                    src={movie.logoUrl}
-                    alt={movie.name}
-                    className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]"
-                  />
-                ) : (
-                  <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
-                    {movie.name}
-                  </h1>
-                )}
-                {movie.tagline ? <p className="enter enter-d1 mb-2 text-[15px] text-text/80 italic">{movie.tagline}</p> : null}
-                {genresLine ? <p className="enter enter-d1 mb-5 text-[14px] text-muted">{genresLine}</p> : null}
-                <div className="enter enter-d2 flex flex-wrap items-center gap-3">
-                  <Pill
-                    variant="primary"
-                    pill
-                    size="lg"
-                    className="btn-play"
-                    icon={<Play size={18} fill="currentColor" />}
-                    onClick={play}
-                    disabled={isSeries && !startEpisode}
-                  >
-                    {playLabel}
-                  </Pill>
-                  <WatchTogetherButton onPlay={play} disabled={isSeries && !startEpisode} />
-                  {resume ? (
+              {/* The gutter sits outside the width cap: inside it, a wide window's gutter ate the column. */}
+              <div className="relative w-full px-page pt-28 pb-8">
+                <div className="max-w-[768px]">
+                  {movie.logoUrl ? (
+                    <img
+                      src={movie.logoUrl}
+                      alt={movie.name}
+                      className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]"
+                    />
+                  ) : (
+                    <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
+                      {movie.name}
+                    </h1>
+                  )}
+                  {movie.tagline ? <p className="enter enter-d1 mb-2 text-[15px] text-text/80 italic">{movie.tagline}</p> : null}
+                  {genresLine ? <p className="enter enter-d1 mb-5 text-[14px] text-muted">{genresLine}</p> : null}
+                  {/* Play keeps its label; the rest are icons (named by their tooltip), always one row. */}
+                  <div className="enter enter-d2 flex items-center gap-3">
                     <Pill
-                      variant="tonal"
+                      variant="primary"
                       pill
                       size="lg"
-                      icon={<RotateCcw size={16} />}
-                      onClick={() => onPlay({ ...movie, playbackPositionTicks: 0 })}
+                      className="btn-play"
+                      icon={<Play size={18} fill="currentColor" />}
+                      onClick={play}
+                      disabled={isSeries && !startEpisode}
                     >
-                      {t("startOver")}
+                      {playLabel}
                     </Pill>
-                  ) : null}
-                  <FavoriteButton movie={movie} pill className="h-12" />
-                  <Pill variant="tonal" pill size="lg" icon={<ListPlus size={17} />} onClick={() => openPicker(movie)}>
-                    {t("listsButton")}
-                  </Pill>
-                  <WatchedButton movie={movie} pill className="h-12" />
-                  {isSeries && seasons.length ? (
-                    <>
-                      <Pill
-                        variant="tonal"
-                        pill
-                        size="lg"
-                        icon={<ListVideo size={17} />}
-                        disabled={starting != null}
-                        title={t("playAllHint")}
-                        onClick={() => begin("all")}
-                      >
-                        {t("playAll")}
-                      </Pill>
-                      <Pill
-                        variant="tonal"
-                        pill
-                        size="lg"
-                        icon={<Shuffle size={16} />}
-                        disabled={starting != null}
-                        title={t("shuffleHint")}
-                        onClick={() => begin("shuffle")}
-                      >
-                        {t("shuffle")}
-                      </Pill>
-                    </>
-                  ) : null}
-                  {trailer ? (
-                    <Pill variant="tonal" pill size="lg" icon={<Clapperboard size={16} />} onClick={() => setShowTrailer(true)}>
-                      {t("trailer")}
-                    </Pill>
-                  ) : null}
-                  {onlineRef ? (
-                    <Pill variant="tonal" pill size="lg" icon={<Globe size={16} />} onClick={() => openOnline(movie)}>
-                      {t("onlineSources")}
-                    </Pill>
-                  ) : null}
+                    {resume ? (
+                      <IconPill
+                        label={t("startOver")}
+                        icon={<RotateCcw size={18} />}
+                        onClick={() => onPlay({ ...movie, playbackPositionTicks: 0 })}
+                      />
+                    ) : null}
+                    <WatchTogetherButton onPlay={play} disabled={isSeries && !startEpisode} />
+                    <FavoriteButton movie={movie} variant="round" />
+                    <IconPill label={t("listsButton")} icon={<ListPlus size={19} />} onClick={() => openPicker(movie)} />
+                    <WatchedButton movie={movie} variant="round" />
+                    {isSeries && seasons.length ? (
+                      <>
+                        <IconPill
+                          label={t("playAll")}
+                          title={`${t("playAll")}: ${t("playAllHint")}`}
+                          icon={<ListVideo size={19} />}
+                          disabled={starting != null}
+                          onClick={() => begin("all")}
+                        />
+                        <IconPill
+                          label={t("shuffle")}
+                          title={`${t("shuffle")}: ${t("shuffleHint")}`}
+                          icon={<Shuffle size={18} />}
+                          disabled={starting != null}
+                          onClick={() => begin("shuffle")}
+                        />
+                      </>
+                    ) : null}
+                    {trailer ? (
+                      <IconPill label={t("trailer")} icon={<Clapperboard size={18} />} onClick={() => setShowTrailer(true)} />
+                    ) : null}
+                    {onlineRef ? (
+                      <IconPill label={t("onlineSources")} icon={<Globe size={18} />} onClick={() => openOnline(movie)} />
+                    ) : null}
+                  </div>
+                  {startError ? <p className="mt-3 text-[13px] text-danger" role="alert">{startError}</p> : null}
                 </div>
-                {startError ? <p className="mt-3 text-[13px] text-danger" role="alert">{startError}</p> : null}
               </div>
               {trailerPhase === "playing" ? (
                 <TrailerMuteButton
@@ -378,12 +369,12 @@ export function DetailsPage({
               {/* Synopsis on the left, the production details in a column beside it. */}
               <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
                 <div className="max-w-[72ch]">
-                  {movie.overview ? (
+                  {overview ? (
                     <>
                       <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>
-                        {movie.overview}
+                        {overview}
                       </p>
-                      {movie.overview.length > 240 ? (
+                      {overview.length > 240 ? (
                         <button
                           type="button"
                           aria-expanded={expanded}

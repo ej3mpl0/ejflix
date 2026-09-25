@@ -1987,6 +1987,19 @@ async fn addon_meta(
     state.addons.meta(&addons, &kind, &id).await
 }
 
+/// Overview and trailers of a title in `lang` (the profile's content language), for the
+/// details pages and the hero; `None` keeps what the addon or the server sent, an error
+/// means the service did not answer.
+#[tauri::command]
+async fn localized_info(
+    state: State<'_, AppState>,
+    kind: String,
+    ids: Vec<String>,
+    lang: String,
+) -> Result<Option<addons::LocalizedInfo>, String> {
+    state.addons.localized(&kind, &ids, &lang).await
+}
+
 #[tauri::command]
 async fn addon_streams(
     app: tauri::AppHandle,
@@ -2785,6 +2798,7 @@ pub fn run() {
             torrent_status,
             addon_catalog,
             addon_meta,
+            localized_info,
             addon_streams,
             addon_progress_list,
             addon_progress_remove,
