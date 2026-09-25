@@ -2105,6 +2105,11 @@ const en: typeof es = {
 export const dictionaries = { es, en };
 export type MessageKey = keyof typeof es;
 
+/** The release notes (`noteN`), newest first: a release only adds its note to the dictionaries. */
+export const RELEASE_NOTE_KEYS = (Object.keys(es) as MessageKey[])
+  .filter((key) => /^note\d+$/.test(key))
+  .sort((a, b) => Number(b.slice(4)) - Number(a.slice(4)));
+
 export function detectLocale(): Locale {
   const lang = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "es";
   return lang.startsWith("en") ? "en" : "es";

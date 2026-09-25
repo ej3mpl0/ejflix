@@ -3,12 +3,13 @@ import { Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { makeStyles } from "../../theme/ThemeProvider";
 import { text } from "../../theme/typography";
 import { useI18n } from "../../lib/locale-context";
+import { RELEASE_NOTE_KEYS } from "../../lib/i18n";
 
 /** What's new in this version (bullet list with accent dots), from the i18n `noteN` keys. */
 export function ReleaseNotesCard({ style, size = 15 }: { style?: StyleProp<ViewStyle>; size?: number }) {
   const s = useStyles();
   const { t } = useI18n();
-  const notes = [t("note10"), t("note9"), t("note8"), t("note7"), t("note6"), t("note5"), t("note4"), t("note3"), t("note2"), t("note1")];
+  const notes = RELEASE_NOTE_KEYS.map((key) => t(key));
   return (
     <View style={[s.list, style]}>
       {notes.map((note) => (
