@@ -524,6 +524,7 @@ const es = {
   serverHelpRemote: "Desde fuera de casa: la dirección pública o el dominio con el que lo abres en el navegador (https://…).",
   serverHelpDashboard: "En Jellyfin la tienes en Panel de control › Redes, o en la barra del navegador cuando entras a su web.",
   serverHelpSamePcMobile: "Mismo Wi-Fi que el servidor: usa la IP del equipo, no localhost (localhost es el propio móvil).",
+  note11: "0.7.1 y 0.7.2: correcciones para la app de Windows; en el móvil no cambia nada.",
   note10: "0.7.0: ver en grupo (únete con el código de un amigo), imagen en imagen y audio en segundo plano, descargas para ver sin conexión, control parental por perfil, recordatorios y catch-up en TV en directo, errores con acciones (transcodificar, otra fuente), vibración, etiqueta «Nuevo» en episodios y posición de los subtítulos. Además, muchos errores corregidos.",
   note9: "0.6.5: eliges tema, idioma y subtítulos al crear un perfil y traes tus addons de Stremio (o pegando las URLs de Nuvio y otras apps); Mi lista y visto para títulos online; menú en Continuar viendo; Ver todo en las filas; tráileres y reparto con su filmografía; subtítulos desde archivo con tamaño, color y retraso; ordenar fuentes; guía de TV en rejilla; y buscador en Ajustes.",
   // --- profiles & integrations ---
@@ -1219,6 +1220,7 @@ const en: typeof es = {
   serverHelpRemote: "From outside your home: the public address or domain you open it with in the browser (https://…).",
   serverHelpDashboard: "In Jellyfin it is under Dashboard › Networking, or in the browser address bar when you open its website.",
   serverHelpSamePcMobile: "Same Wi-Fi as the server: use the IP of the computer, not localhost (localhost is the phone itself).",
+  note11: "0.7.1 and 0.7.2: fixes for the Windows app; nothing changes on mobile.",
   note10: "0.7.0: watch together (join with a friend's code), picture-in-picture and background audio, offline downloads, per-profile parental controls, reminders and catch-up in Live TV, errors with actions (transcode, another source), haptics, a New badge on episodes and subtitle position. Plus many bug fixes.",
   note9: "0.6.5: pick theme, language and subtitles when creating a profile and bring your addons from Stremio (or by pasting URLs from Nuvio and other apps); My list and watched for online titles; a menu in Continue watching; See all on rows; trailers and cast with their filmography; subtitles from a file with size, colour and delay; source sorting; a TV guide grid; and a search box in Settings.",
   // --- profiles & integrations ---
