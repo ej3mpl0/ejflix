@@ -1,6 +1,6 @@
 [package]
 name = "ejflix"
-version = "0.7.2"
+version = "0.7.3"
 description = "Reproductor ligero para Windows 11: todas tus películas y series en un solo lugar"
 license = "MIT"
 repository = "https://github.com/ej3mpl0/ejflix"
