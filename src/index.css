@@ -422,7 +422,10 @@ p {
 .vol-range::-webkit-slider-runnable-track {
   height: 4px;
   border-radius: 999px;
-  background: rgb(255 255 255 / 0.25);
+  /* The mark in the middle is 100%. The rest of the track is the boost past unity. */
+  background:
+    linear-gradient(90deg, transparent calc(50% - 1px), rgb(255 255 255 / 0.85) calc(50% - 1px) calc(50% + 1px), transparent calc(50% + 1px)),
+    rgb(255 255 255 / 0.25);
 }
 .vol-range::-webkit-slider-thumb {
   margin-top: -6px;

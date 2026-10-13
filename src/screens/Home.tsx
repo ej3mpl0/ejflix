@@ -41,6 +41,7 @@ import { useAutoAccent } from "../lib/auto-accent";
 import { useSpatialNavigation } from "../lib/spatial-nav";
 import { clearSettingsIntent, requestSettingsIntent } from "../lib/settings-intent";
 import { CalendarPage } from "./CalendarPage";
+import { LocalPlayer } from "./LocalPlayer";
 import { MyListPage } from "./MyListPage";
 import { useCalendar } from "../lib/calendar";
 import { usePartyGuest } from "../hooks/usePartyGuest";
@@ -558,6 +559,9 @@ export function Home({
         hidden={hasStack || seeAll != null}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
+        onPlayFile={(path, title) => {
+          void api.playerStartFile({ path, title }).catch((err) => onToast(errorText(t, err)));
+        }}
         actions={<PartyButton status={party.status} onClick={() => setPartyOpen(true)} />}
       />
       <TrailerGate.Provider value={trailerGate}>
@@ -616,6 +620,8 @@ export function Home({
           <Discover hasServer={hasServer} onOpen={openDetails} onPlay={play} onError={onToast} onImportAddons={importAddons} />
         ) : view === "calendar" ? (
           <CalendarPage userId={session.userId} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
+        ) : view === "player" ? (
+          <LocalPlayer userId={session.userId} onError={onToast} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (

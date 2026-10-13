@@ -8,6 +8,7 @@ mod iptv;
 mod jellyfin;
 mod opensubs;
 mod lists;
+mod local_media;
 mod player;
 mod profiles;
 mod protect;
@@ -312,6 +313,18 @@ fn presence_for_item(session: &Session, movie: &Movie, server_name: Option<Strin
             session.server_url
         )),
         source: server_name.unwrap_or_else(|| "Jellyfin".to_string()),
+        live_window: None,
+    }
+}
+
+fn presence_for_file(title: &str) -> discord::PresenceInfo {
+    discord::PresenceInfo {
+        title: title.to_string(),
+        episode: None,
+        year: None,
+        kind: "movie".into(),
+        poster_url: None,
+        source: "Local".into(),
         live_window: None,
     }
 }
@@ -1080,7 +1093,7 @@ async fn player_stop(
                     );
                 }
             }
-            PlaybackSource::Live { .. } => {}
+            PlaybackSource::Live { .. } | PlaybackSource::Local => {}
         }
     }
     // A torrent nobody is reading any more stops using the connection right away.
@@ -1816,7 +1829,7 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
                         );
                     }
                 }
-                PlaybackSource::Live { .. } => {}
+                PlaybackSource::Live { .. } | PlaybackSource::Local => {}
             }
             let _ = app.emit("player://state", snap);
             refresh_presence(&app).await;
@@ -2129,6 +2142,82 @@ struct ExternalPlayArgs {
     start_seconds: Option<f64>,
     /// Identity of what is playing, kept with the local progress.
     entry: ResumeEntry,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalPlayArgs {
+    path: String,
+    #[serde(default)]
+    title: String,
+}
+
+/// Plays a file from disk. The path is checked before mpv sees it.
+#[tauri::command]
+async fn player_start_file(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    args: LocalPlayArgs,
+) -> Result<PlayerState, String> {
+    let path = local_media::media_path(&args.path)?;
+    let title = local_media::display_title(&args.title, &path);
+    let path = path.to_string_lossy().to_string();
+    let playback = match settings_user(&app, &state).await {
+        Some(uid) => settings::load(&app, &uid).unwrap_or_default().playback,
+        None => settings::Settings::default().playback,
+    };
+    let prefs = PlaybackPrefs::from_settings(&playback);
+    let ctx = PlaybackContext {
+        source: PlaybackSource::Local,
+        presence: presence_for_file(&title),
+    };
+    state
+        .player
+        .start(&app, &path, &[], &title, 0.0, ctx, prefs)
+        .await?;
+    show_player_overlay(&app);
+    refresh_presence(&app).await;
+    Ok(state.player.snapshot().await)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PickFileArgs {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    video_label: String,
+    #[serde(default)]
+    audio_label: String,
+    #[serde(default)]
+    initial_dir: Option<String>,
+}
+
+/// Opens the system file dialog. `None` is the user cancelling.
+#[tauri::command]
+async fn player_pick_file(app: tauri::AppHandle, args: PickFileArgs) -> Result<Option<String>, String> {
+    let owner = app
+        .get_webview_window("main")
+        .and_then(|window| {
+            // Copy the HWND out: the handle borrows the window and cannot leave this closure.
+            let handle = window.window_handle().ok()?;
+            match handle.as_raw() {
+                RawWindowHandle::Win32(win) => Some(win.hwnd.get()),
+                _ => None,
+            }
+        })
+        .unwrap_or(0);
+    let PickFileArgs {
+        title,
+        video_label,
+        audio_label,
+        initial_dir,
+    } = args;
+    tokio::task::spawn_blocking(move || {
+        local_media::pick_media_file(owner, &title, &video_label, &audio_label, initial_dir.as_deref())
+    })
+    .await
+    .map_err(|_| crate::errors::code("mediaDialog"))?
 }
 
 /// Plays an online stream (Stremio addon). The Jellyfin token is never sent along.
@@ -2855,6 +2944,8 @@ pub fn run() {
             downloads_clear,
             download_reveal,
             player_start_url,
+            player_start_file,
+            player_pick_file,
             player_start,
             player_stop,
             player_toggle_pause,

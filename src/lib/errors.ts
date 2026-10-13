@@ -38,6 +38,8 @@ const CODES: Record<string, MessageKey> = {
   passwordTooLong: "errPasswordTooLong",
   m3uPick: "errM3uPick",
   fileNotFound: "errFileNotFound",
+  notMedia: "errNotMedia",
+  mediaDialog: "errMediaDialog",
   xtreamLogin: "errXtreamLogin",
   fileTooLarge: "errFileTooLarge",
   notM3u: "errNotM3u",

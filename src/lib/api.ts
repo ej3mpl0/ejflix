@@ -159,6 +159,11 @@ export const api = {
     startSeconds?: number;
     entry: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs">;
   }) => invoke<PlayerState>("player_start_url", { args }),
+  /** Plays a file from disk in mpv. `title` is optional; the file name is used otherwise. */
+  playerStartFile: (args: { path: string; title?: string }) => invoke<PlayerState>("player_start_file", { args }),
+  /** System file dialog. `null` when the user cancels. */
+  playerPickFile: (args: { title: string; videoLabel: string; audioLabel: string; initialDir?: string }) =>
+    invoke<string | null>("player_pick_file", { args }),
   /** A bare torrent from an addon becomes a local URL (waits for its file list). */
   torrentResolve: (args: { infoHash: string; fileIdx: number | null; sources: string[] }) =>
     invoke<TorrentResolved>("torrent_resolve", { args }),

@@ -17,6 +17,7 @@ export type NavView =
   | "tv"
   | "mylist"
   | "calendar"
+  | "player"
   | "search"
   | "settings"
   | `lib:${string}`;
@@ -90,6 +91,7 @@ export function GlassHeader({
   hidden = false,
   onSwitchProfile,
   onLogout,
+  onPlayFile,
   actions,
 }: {
   userName: string;
@@ -116,6 +118,8 @@ export function GlassHeader({
   hidden?: boolean;
   onSwitchProfile: () => void;
   onLogout: () => void;
+  /** Plays a finished download in the local player. */
+  onPlayFile?: (path: string, title: string) => void;
   /** Extra buttons before the downloads (the watch party). */
   actions?: ReactNode;
 }) {
@@ -139,6 +143,7 @@ export function GlassHeader({
     { id: "discover", label: t("discover") },
     { id: "mylist", label: t("myList") },
     { id: "calendar", label: t("calendar") },
+    { id: "player", label: t("playerTab") },
     ...(hasServer ? [{ id: "myserver" as NavView, label: t("myServer") }] : []),
     ...(hasServer ? libraries.map((lib) => ({ id: libraryView(lib.id), label: lib.name, library: lib })) : []),
     ...(hasTv ? [{ id: "tv" as NavView, label: t("tvTab") }] : []),
@@ -380,7 +385,7 @@ export function GlassHeader({
       </div>
       <div className="flex h-full items-center gap-1 pr-1">
         {actions}
-        <DownloadsButton />
+        <DownloadsButton onPlayFile={onPlayFile} />
         <form
           role="search"
           onSubmit={(e) => e.preventDefault()}

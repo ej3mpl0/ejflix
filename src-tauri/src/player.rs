@@ -187,6 +187,8 @@ pub enum PlaybackSource {
     Addon { entry: crate::addons::ResumeEntry },
     /// An IPTV channel: nothing to report, the presence follows the guide.
     Live { channel_id: String },
+    /// A file from disk. Nothing is reported anywhere.
+    Local,
 }
 
 #[derive(Clone)]
@@ -203,7 +205,7 @@ impl PlaybackSource {
         match self {
             PlaybackSource::Jellyfin { item_id, .. } => Some(item_id.clone()),
             PlaybackSource::Addon { entry } => Some(entry.key.clone()).filter(|k| !k.is_empty()),
-            PlaybackSource::Live { .. } => None,
+            PlaybackSource::Live { .. } | PlaybackSource::Local => None,
         }
     }
 }
@@ -249,6 +251,18 @@ impl PlaybackPrefs {
             sub_delay: 0.0,
             audio_delay: 0.0,
         }
+    }
+}
+
+/// mpv's volume is a percent of unity. Above 100 it amplifies, up to `volume-max`
+/// (mpv's own default stops at 130). 200 is the slider's ceiling.
+pub const VOLUME_MAX: f64 = 200.0;
+
+fn clamp_volume(volume: f64) -> f64 {
+    if volume.is_finite() {
+        volume.clamp(0.0, VOLUME_MAX)
+    } else {
+        100.0
     }
 }
 
@@ -804,7 +818,11 @@ impl Player {
     }
 
     pub async fn set_volume(&self, volume: f64) -> Result<f64, String> {
-        let volume = volume.clamp(0.0, 100.0);
+        let volume = clamp_volume(volume);
+        // Also a process argument. Set again so a reused mpv accepts the boost.
+        let _ = self
+            .command(json!(["set_property", "volume-max", VOLUME_MAX]), false)
+            .await;
         self.command(json!(["set_property", "volume", volume]), false)
             .await?;
         self.state.write().await.volume = volume;
@@ -1071,6 +1089,7 @@ impl Player {
             "--audio-channels=stereo".into(),
             "--audio-normalize-downmix=yes".into(),
             "--ad-lavc-downmix=yes".into(),
+            format!("--volume-max={VOLUME_MAX}"),
             format!("--input-ipc-server={pipe_name}"),
         ];
         if video != 0 {
@@ -1277,7 +1296,7 @@ async fn apply_property(state: &Arc<RwLock<PlayerState>>, msg: &Value) {
         "time-pos" => state.time = data.and_then(|v| v.as_f64()).unwrap_or(state.time),
         "duration" => state.duration = data.and_then(|v| v.as_f64()).unwrap_or(state.duration),
         "pause" => state.paused = data.and_then(|v| v.as_bool()).unwrap_or(state.paused),
-        "volume" => state.volume = data.and_then(|v| v.as_f64()).unwrap_or(state.volume),
+        "volume" => state.volume = data.and_then(|v| v.as_f64()).map(clamp_volume).unwrap_or(state.volume),
         "mute" => state.mute = data.and_then(|v| v.as_bool()).unwrap_or(state.mute),
         "eof-reached" => state.eof = data.and_then(|v| v.as_bool()).unwrap_or(false),
         "paused-for-cache" => state.buffering = data.and_then(|v| v.as_bool()).unwrap_or(false),
@@ -1595,5 +1614,14 @@ mod tests {
         assert_eq!(clamp_delay(0.123), 0.1);
         assert_eq!(clamp_delay(-45.0), -30.0);
         assert_eq!(clamp_delay(f64::INFINITY), 0.0);
+    }
+
+    #[test]
+    fn volume_can_pass_unity_and_stops_at_the_cap() {
+        assert_eq!(clamp_volume(100.0), 100.0);
+        assert_eq!(clamp_volume(140.0), 140.0);
+        assert_eq!(clamp_volume(250.0), VOLUME_MAX);
+        assert_eq!(clamp_volume(-4.0), 0.0);
+        assert_eq!(clamp_volume(f64::NAN), 100.0);
     }
 }

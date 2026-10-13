@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { PlayerControls, type PlayerMenu } from "../components/PlayerControls";
+import { VOLUME_MAX } from "../components/VolumeSlider";
 import { SPEEDS } from "../components/SpeedMenu";
 import { QualityBadges } from "../components/QualityBadge";
 import { SkipButton } from "../components/SkipButton";
@@ -602,7 +603,7 @@ export function Player({
   const currentVolume = () => volTarget.current ?? stateRef.current.volume;
 
   const changeVolume = async (value: number) => {
-    volTarget.current = Math.max(0, Math.min(100, value));
+    volTarget.current = Math.max(0, Math.min(VOLUME_MAX, value));
     const next = await api.playerSetVolume(volTarget.current);
     setVolHud(next);
     window.clearTimeout(volTimer.current);

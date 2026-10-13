@@ -2,6 +2,9 @@ import { Volume2, VolumeX } from "lucide-react";
 import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 
+/** Unity is 100. Above that mpv amplifies, up to the same cap as `VOLUME_MAX` in player.rs. */
+export const VOLUME_MAX = 200;
+
 export function VolumeSlider({
   volume,
   mute,
@@ -34,21 +37,23 @@ export function VolumeSlider({
         </span>
       </button>
       {/* Opens on hover and on keyboard focus, so Tab can reach the slider. */}
-      <div className="w-0 overflow-hidden transition-[width] duration-200 ease-out group-hover/vol:w-24 group-focus-within/vol:w-24">
+      <div className="flex w-0 min-w-0 items-center overflow-hidden transition-[width] duration-200 ease-out group-hover/vol:w-40 group-focus-within/vol:w-40">
         <input
           type="range"
           min={0}
-          max={100}
-          value={mute ? 0 : volume}
+          max={VOLUME_MAX}
+          value={mute ? 0 : Math.min(VOLUME_MAX, volume)}
           aria-label={t("volume")}
           aria-valuetext={`${Math.round(mute ? 0 : volume)}%`}
+          title={t("volumeHint")}
           onChange={(e) => {
             onVolume(Number(e.target.value));
             // Dragging the slider while muted means "I want sound".
             if (mute) onMute();
           }}
-          className={cn("vol-range mx-1 w-20 cursor-pointer appearance-none accent-accent")}
+          className={cn("vol-range mx-1 w-24 cursor-pointer appearance-none accent-accent")}
         />
+        <span className="w-10 shrink-0 text-right text-[11px] tabular text-white/80">{Math.round(mute ? 0 : volume)}%</span>
       </div>
     </div>
   );

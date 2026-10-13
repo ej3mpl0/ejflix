@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, Download, FolderOpen, LoaderCircle, Trash2, X } from "lucide-react";
+import { CheckCircle2, Download, FolderOpen, LoaderCircle, Play, Trash2, X } from "lucide-react";
 import type { DownloadItem } from "../lib/types";
 import { cn, formatBytes } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { errorText } from "../lib/errors";
+import { isMediaPath } from "../lib/media-file";
 import { useDownloads } from "../lib/downloads-context";
 
 function percent(item: DownloadItem): number {
@@ -15,7 +16,7 @@ function percent(item: DownloadItem): number {
  * Header button with the list of downloads: progress of what is running, and what
  * finished (with a shortcut to its folder). Hidden while there is nothing to show.
  */
-export function DownloadsButton() {
+export function DownloadsButton({ onPlayFile }: { onPlayFile?: (path: string, title: string) => void }) {
   const { t } = useI18n();
   const { items, active, cancel, remove, reveal, clearFinished } = useDownloads();
   const [open, setOpen] = useState(false);
@@ -115,6 +116,20 @@ export function DownloadsButton() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-0.5">
+                    {item.status === "done" && onPlayFile && isMediaPath(item.path) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpen(false);
+                          onPlayFile(item.path, item.title || item.name);
+                        }}
+                        aria-label={`${t("play")} ${item.title || item.name}`}
+                        title={t("play")}
+                        className="grid h-8 w-8 place-items-center rounded-full text-dim hover:bg-white/10 hover:text-text"
+                      >
+                        <Play size={15} fill="currentColor" />
+                      </button>
+                    ) : null}
                     {item.status === "done" ? (
                       <button
                         type="button"
