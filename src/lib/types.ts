@@ -186,6 +186,8 @@ export type Movie = {
   external?: ExternalRef | null;
   /** Present for IPTV channels (kind "LiveTv"). */
   live?: LiveRef | null;
+  /** A file from disk. The player starts it itself; nothing is reported to Jellyfin. */
+  localFile?: { path: string } | null;
   /** Jellyfin item type; anything unknown is treated like a movie. */
   kind: ItemKind | string;
   seriesId: string | null;

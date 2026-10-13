@@ -5,8 +5,9 @@ import { api } from "../lib/api";
 import { useDownloads } from "../lib/downloads-context";
 import { errorText } from "../lib/errors";
 import { cn } from "../lib/format";
-import { fileName, isMediaPath, parentDir } from "../lib/media-file";
+import { fileName, isMediaPath, localMovie, parentDir } from "../lib/media-file";
 import { useI18n } from "../lib/locale-context";
+import type { Movie } from "../lib/types";
 
 type RecentFile = { path: string; name: string; at: number };
 
@@ -44,7 +45,15 @@ function saveRecent(userId: string, items: RecentFile[]) {
  * Local files in the same mpv player as everything else. Drop a download on the page
  * or pick it; finished downloads from the app are listed so they can be played too.
  */
-export function LocalPlayer({ userId, onError }: { userId: string; onError: (message: string) => void }) {
+export function LocalPlayer({
+  userId,
+  onError,
+  onPlay,
+}: {
+  userId: string;
+  onError: (message: string) => void;
+  onPlay: (movie: Movie) => void;
+}) {
   const { t } = useI18n();
   const { items } = useDownloads();
   const [recent, setRecent] = useState<RecentFile[]>(() => loadRecent(userId));
@@ -84,22 +93,17 @@ export function LocalPlayer({ userId, onError }: { userId: string; onError: (mes
   );
 
   const playPaths = useCallback(
-    async (paths: string[], title?: string) => {
-      let last: unknown = null;
-      for (const path of paths) {
-        try {
-          await api.playerStartFile({ path, title });
-          remember(path);
-          return;
-        } catch (err) {
-          last = err;
-          const message = err instanceof Error ? err.message : String(err ?? "");
-          if (message.startsWith("err:fileNotFound")) forget(path);
-        }
+    (paths: string[], title?: string) => {
+      const path = paths.find((item) => isMediaPath(item));
+      if (!path) {
+        if (paths.length) onErrorRef.current(t("errNotMedia"));
+        return;
       }
-      if (last) onErrorRef.current(errorText(t, last));
+      remember(path);
+      // The player screen starts mpv and opens the overlay, so the controls mount.
+      onPlay(localMovie(path, title));
     },
-    [forget, remember, t],
+    [onPlay, remember, t],
   );
 
   useEffect(() => {

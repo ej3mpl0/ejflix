@@ -246,6 +246,17 @@ export function Player({
         }
         if (cancelled) return;
         try {
+          if (movie.localFile) {
+            // Already a disk path: start it here so leaving the player stops mpv,
+            // the same way a library title does. The overlay only draws controls.
+            const request = api.playerStartFile({ path: movie.localFile.path, title });
+            starting = request;
+            const next = await request;
+            if (cancelled) return;
+            void api.openPlayer(movie);
+            setState(next);
+            return;
+          }
           if (movie.live?.multiview?.length) {
             // Multi-view: the overlay only lists the channels that could be opened.
             const cells = movie.live.multiview;
@@ -426,8 +437,9 @@ export function Player({
   };
 
   // Watch party: the host's player reports, a guest's follows (overlay only; not live TV).
+  const localFile = Boolean(movie.localFile);
   const partySync = usePartySync({
-    enabled: overlay && !live,
+    enabled: overlay && !live && !localFile,
     movie,
     state,
     party,
@@ -521,9 +533,19 @@ export function Player({
     return () => window.clearTimeout(handle);
   }, [ready]);
 
+  // A local file has no poster splash worth waiting on: show the transport as soon as
+  // mpv reports the file, then let it hide on its own like every other title.
+  const showedLocalControls = useRef(false);
+  useEffect(() => {
+    if (!overlay || !localFile || !ready || showedLocalControls.current) return;
+    showedLocalControls.current = true;
+    bump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [overlay, localFile, ready]);
+
   // Items coming from list queries lack trickplay/chapters; fetch the detail once.
   useEffect(() => {
-    if (!overlay || movie.external || movie.live) return;
+    if (!overlay || movie.external || movie.live || movie.localFile) return;
     if (movie.trickplay || movie.chapters.length) return;
     let alive = true;
     api
@@ -723,7 +745,7 @@ export function Player({
   // Skip intro / recap / credits and the next-episode card (overlay only). A party guest
   // does not chain on its own: the host's next title arrives through the party.
   const chainNext = partySync.guest ? null : nextEpisode;
-  const segments = useSegments(movie, state.duration, overlay && !live);
+  const segments = useSegments(movie, state.duration, overlay && !live && !localFile);
   const outro = segments.find((segment) => segment.kind === "outro") ?? null;
   // Stopping inside the credits marks the title watched (decided in Rust on stop).
   const creditsStart = outro?.startSeconds ?? null;
@@ -768,11 +790,13 @@ export function Player({
   const stream = movie.external?.stream ?? null;
   const sourceLabel = live
     ? t("statsSourceLive", { name: live.sourceName })
-    : movie.external
-      ? stream?.infoHash && !stream.url
-        ? t("statsSourceTorrent")
-        : t("statsSourceAddon", { name: stream?.addonName ?? "" })
-      : t("statsSourceDirect");
+    : localFile
+      ? t("statsSourceLocal")
+      : movie.external
+        ? stream?.infoHash && !stream.url
+          ? t("statsSourceTorrent")
+          : t("statsSourceAddon", { name: stream?.addonName ?? "" })
+        : t("statsSourceDirect");
 
   const escape = () => {
     if (help) setHelp(false);
@@ -1214,7 +1238,7 @@ export function Player({
           onSearchSubs={() => setSubSearch(true)}
           party={party?.active ? { count: party.members.length } : null}
           partyOpen={partyPanel}
-          onParty={live ? undefined : togglePartyPanel}
+          onParty={live || localFile ? undefined : togglePartyPanel}
         />
       )}
       {overlay && !live && !mini ? <PartyReactions showChat={!partyPanel && !locked} /> : null}

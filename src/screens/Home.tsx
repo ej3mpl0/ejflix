@@ -42,6 +42,7 @@ import { useSpatialNavigation } from "../lib/spatial-nav";
 import { clearSettingsIntent, requestSettingsIntent } from "../lib/settings-intent";
 import { CalendarPage } from "./CalendarPage";
 import { LocalPlayer } from "./LocalPlayer";
+import { localMovie } from "../lib/media-file";
 import { MyListPage } from "./MyListPage";
 import { useCalendar } from "../lib/calendar";
 import { usePartyGuest } from "../hooks/usePartyGuest";
@@ -559,9 +560,7 @@ export function Home({
         hidden={hasStack || seeAll != null}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
-        onPlayFile={(path, title) => {
-          void api.playerStartFile({ path, title }).catch((err) => onToast(errorText(t, err)));
-        }}
+        onPlayFile={(path, title) => play(localMovie(path, title))}
         actions={<PartyButton status={party.status} onClick={() => setPartyOpen(true)} />}
       />
       <TrailerGate.Provider value={trailerGate}>
@@ -621,7 +620,7 @@ export function Home({
         ) : view === "calendar" ? (
           <CalendarPage userId={session.userId} hasServer={hasServer} onOpen={openDetails} onPlay={play} />
         ) : view === "player" ? (
-          <LocalPlayer userId={session.userId} onError={onToast} />
+          <LocalPlayer userId={session.userId} onError={onToast} onPlay={play} />
         ) : error ? (
           retry
         ) : homeLoading && view === "mylist" ? (

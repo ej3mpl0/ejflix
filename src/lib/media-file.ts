@@ -1,3 +1,6 @@
+import { emptyMovie } from "./addons";
+import type { Movie } from "./types";
+
 /** Same extensions `local_media.rs` allows. The check there is the one that matters. */
 const MEDIA_EXTS = new Set([
   "mkv",
@@ -39,6 +42,14 @@ export function parentDir(path: string): string | undefined {
   const cut = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
   if (cut <= 0) return undefined;
   return path.slice(0, cut);
+}
+
+/** Movie the overlay player can draw controls for. Playback starts from `path`. */
+export function localMovie(path: string, title?: string): Movie {
+  const file = fileName(path);
+  const stem = file.replace(/\.[^.]+$/, "") || file;
+  const name = title?.replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 180) || stem || "ejFlix";
+  return { ...emptyMovie(`local:${path}`, "Movie", name), localFile: { path } };
 }
 
 export function isMediaPath(path: string): boolean {
