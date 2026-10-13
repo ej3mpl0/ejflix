@@ -531,8 +531,9 @@ export type Settings = {
     opensubtitlesUser: string;
   };
   library: { pinned: string[] };
-  /** `disabled` holds the URLs of addons kept in the list but switched off. */
-  addons: { urls: string[]; cinemeta: boolean; disabled: string[] };
+  /** `disabled` holds the URLs of addons kept in the list but switched off.
+   * `peerflix` installs the free Peerflix addon unless `urls` already has one. */
+  addons: { urls: string[]; cinemeta: boolean; disabled: string[]; peerflix: boolean };
   /** Discord Rich Presence; templates accept {title} {episode} {year} {type} {source}. */
   discord: {
     enabled: boolean;
@@ -793,7 +794,7 @@ export const DEFAULT_SETTINGS: Settings = {
     opensubtitlesUser: "",
   },
   library: { pinned: [] },
-  addons: { urls: [], cinemeta: true, disabled: [] },
+  addons: { urls: [], cinemeta: true, disabled: [], peerflix: true },
   discord: {
     enabled: false,
     clientId: "",

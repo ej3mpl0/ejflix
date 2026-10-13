@@ -1450,7 +1450,7 @@ async fn build_doc(
                 "items": {
                     "appearance": s.appearance,
                     "playback": s.playback,
-                    "addons": { "cinemeta": s.addons.cinemeta },
+                    "addons": { "cinemeta": s.addons.cinemeta, "peerflix": s.addons.peerflix },
                     "discord": s.discord,
                     "iptv": s.iptv,
                     "iptvFavorites": iptv::favorites(app, uid),

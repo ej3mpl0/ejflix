@@ -81,7 +81,7 @@ export function SearchPage({
 }) {
   const { t } = useI18n();
   const { settings } = useSettings();
-  const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
+  const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.peerflix}`;
   const [results, setResults] = useState<Movie[]>([]);
   const [online, setOnline] = useState<Movie[]>([]);
   const [searched, setSearched] = useState("");

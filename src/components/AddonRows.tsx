@@ -58,7 +58,7 @@ export function AddonRows({
 }) {
   const { settings } = useSettings();
   const [catalogs, setCatalogs] = useState<AddonCatalog[] | null>(null);
-  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
+  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.peerflix}`;
 
   useEffect(() => {
     let alive = true;

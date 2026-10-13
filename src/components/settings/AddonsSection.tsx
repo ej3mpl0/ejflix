@@ -11,6 +11,7 @@ import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
 import { ConfirmButton } from "../ConfirmButton";
 import { fieldClass } from "../../lib/ui";
+import { isPeerflixUrl } from "../../lib/addons";
 import { cn } from "../../lib/format";
 import { AddonImport } from "../AddonImport";
 import { ListRowsSkeleton } from "../Skeletons";
@@ -78,7 +79,7 @@ export function AddonsSection({
       ? t("torrentsCacheUsage", { size: formatSize(cache.bytes) || "0 MB", count: String(cache.torrents) })
       : t("torrentsCacheEmpty")
     : "";
-  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.disabled.join("|")}`;
+  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.peerflix}|${settings.addons.disabled.join("|")}`;
 
   /** Switches one addon off (kept in the list) or back on. */
   const setEnabled = (addon: AddonInfo, enabled: boolean) => {
@@ -229,6 +230,19 @@ export function AddonsSection({
         <div ref={importRef} className="max-w-[520px] py-4">
           <AddonImport />
         </div>
+      </SettingsSection>
+      <SettingsSection title="Peerflix">
+        <SettingsRow
+          label={t("peerflixRow")}
+          hint={settings.addons.urls.some(isPeerflixUrl) ? t("peerflixCustom") : t("peerflixHint")}
+        >
+          <Toggle
+            checked={settings.addons.peerflix && !settings.addons.urls.some(isPeerflixUrl)}
+            disabled={settings.addons.urls.some(isPeerflixUrl)}
+            onChange={(peerflix) => void update({ addons: { peerflix } })}
+            label={t("peerflixRow")}
+          />
+        </SettingsRow>
       </SettingsSection>
       <SettingsSection title="Cinemeta">
         <SettingsRow label={t("cinemetaRow")} hint={t("cinemetaHint")}>

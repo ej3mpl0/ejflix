@@ -13,7 +13,7 @@ const PER_CATALOG = 4;
  */
 export function useAddonFeatured(): { featured: Movie[]; catalogs: number | null } {
   const { settings } = useSettings();
-  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
+  const key = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.peerflix}`;
   const [featured, setFeatured] = useState<Movie[]>([]);
   const [catalogs, setCatalogs] = useState<number | null>(null);
 

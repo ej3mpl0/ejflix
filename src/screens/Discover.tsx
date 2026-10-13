@@ -84,7 +84,7 @@ export function Discover({
   const parental = useParental();
   const restricted = useRef(false);
   restricted.current = parental?.active ?? false;
-  const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}`;
+  const addonsKey = `${settings.addons.urls.join("|")}|${settings.addons.cinemeta}|${settings.addons.peerflix}`;
   const [addons, setAddons] = useState<AddonInfo[] | null>(null);
   const [serverGenres, setServerGenres] = useState<string[]>([]);
   const [source, setSource] = useState<Source>(lastFilters.source);

@@ -113,9 +113,10 @@ Two server-side settings are worth turning on:
 <br>
 
 Pick *Watch online with addons* on the welcome screen and create a profile. Cinemeta is
-built in for the popular rows and the metadata; add your own `manifest.json` in
-**Settings › Addons** (Peerflix, Torrentio, Comet, AIOStreams... with or without a
-debrid key) to get sources.
+built in for the popular rows and the metadata, and the free Peerflix addon is installed
+for sources. The first-run setup lets you keep that free Peerflix or paste a manifest
+from [its configurator](https://config.peerflix.mov) (languages, qualities, debrid).
+More `manifest.json` URLs (Torrentio, Comet, AIOStreams...) go in **Settings › Addons**.
 
 - The addon's catalogs become rows on Home and feed Discover and search.
 - Opening a title lists the streams of every addon that serves it. http(s) streams (a

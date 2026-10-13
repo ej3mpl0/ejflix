@@ -4,10 +4,12 @@ export function Toggle({
   checked,
   onChange,
   label,
+  disabled = false,
 }: {
   checked: boolean;
   onChange: (value: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -15,9 +17,10 @@ export function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-std",
+        "relative h-7 w-12 shrink-0 rounded-full transition-colors duration-200 ease-std disabled:cursor-not-allowed disabled:opacity-[var(--opacity-disabled)]",
         checked ? "bg-accent" : "bg-white/15 hover:bg-white/20",
       )}
     >

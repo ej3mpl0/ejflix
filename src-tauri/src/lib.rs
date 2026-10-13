@@ -1833,8 +1833,9 @@ async fn addon_prefs(app: &tauri::AppHandle, state: &AppState) -> settings::Addo
     }
 }
 
-/// Manifest URLs to consult, in priority order (built-in Cinemeta last). Addons the
-/// profile switched off are left out.
+/// Manifest URLs to consult, in priority order (built-in Peerflix, then Cinemeta).
+/// Addons the profile switched off are left out. Free Peerflix is included unless
+/// the profile turned it off or already installed its own Peerflix manifest.
 async fn addon_urls(app: &tauri::AppHandle, state: &AppState) -> Vec<(String, bool)> {
     let prefs = addon_prefs(app, state).await;
     let mut list: Vec<(String, bool)> = prefs
@@ -1843,6 +1844,9 @@ async fn addon_urls(app: &tauri::AppHandle, state: &AppState) -> Vec<(String, bo
         .filter(|u| !prefs.disabled.contains(u))
         .map(|u| (u.clone(), false))
         .collect();
+    if addons::wants_free_peerflix(&prefs.urls, prefs.peerflix) {
+        list.push((addons::PEERFLIX_URL.to_string(), true));
+    }
     if prefs.cinemeta && !list.iter().any(|(u, _)| u == addons::CINEMETA_URL) {
         list.push((addons::CINEMETA_URL.to_string(), true));
     }
@@ -1857,7 +1861,12 @@ async fn addons_all(app: tauri::AppHandle, state: State<'_, AppState>) -> Result
     for url in &prefs.urls {
         if let Ok(mut info) = state.addons.manifest(url, false).await {
             info.enabled = !prefs.disabled.contains(url);
-            out.push(info);
+            out.push(addons::polish_addon(info));
+        }
+    }
+    if addons::wants_free_peerflix(&prefs.urls, prefs.peerflix) {
+        if let Ok(info) = state.addons.manifest(addons::PEERFLIX_URL, true).await {
+            out.push(addons::polish_addon(info));
         }
     }
     if prefs.cinemeta && !prefs.urls.iter().any(|u| u == addons::CINEMETA_URL) {
@@ -1872,7 +1881,7 @@ async fn loaded_addons(app: &tauri::AppHandle, state: &AppState) -> Vec<AddonInf
     let mut out = Vec::new();
     for (url, builtin) in addon_urls(app, state).await {
         if let Ok(info) = state.addons.manifest(&url, builtin).await {
-            out.push(info);
+            out.push(addons::polish_addon(info));
         }
     }
     out
@@ -1892,13 +1901,33 @@ async fn addon_add(app: tauri::AppHandle, state: State<'_, AppState>, url: Strin
         .await
         .ok_or_else(|| crate::errors::code("noSession"))?;
     let _guard = state.settings_lock.lock().await;
-    let mut urls = settings::load(&app, &uid)?.addons.urls;
-    if !urls.contains(&url) {
-        urls.push(url);
-    }
-    let saved = settings::merge_and_save(&app, &uid, serde_json::json!({ "addons": { "urls": urls } }))?;
+    let current = settings::load(&app, &uid)?.addons;
+    let mut urls = current.urls;
+    let mut disabled = current.disabled;
+    let peerflix_url = addons::is_peerflix_url(&url);
+    let free_peerflix = addons::is_free_peerflix(&url);
+    let peerflix = if peerflix_url {
+        // One Peerflix install. The free one is the built-in; a configured manifest replaces it.
+        urls.retain(|u| !addons::is_peerflix_url(u));
+        disabled.retain(|u| !addons::is_peerflix_url(u));
+        if !free_peerflix {
+            urls.push(url);
+        }
+        free_peerflix
+    } else {
+        disabled.retain(|u| u != &url);
+        if !urls.contains(&url) {
+            urls.push(url);
+        }
+        current.peerflix
+    };
+    let saved = settings::merge_and_save(
+        &app,
+        &uid,
+        serde_json::json!({ "addons": { "urls": urls, "disabled": disabled, "peerflix": peerflix } }),
+    )?;
     let _ = app.emit("settings://changed", &saved);
-    Ok(info)
+    Ok(addons::polish_addon(info))
 }
 
 /// Addons of a Stremio account, for the import in the first-run setup and in Settings.
@@ -1925,10 +1954,12 @@ async fn addon_remove(app: tauri::AppHandle, state: State<'_, AppState>, url: St
     let urls: Vec<String> = current.urls.into_iter().filter(|u| u != &url).collect();
     let disabled: Vec<String> = current.disabled.into_iter().filter(|u| u != &url).collect();
     let cinemeta = if url == addons::CINEMETA_URL { false } else { current.cinemeta };
+    // Removing Peerflix, free or configured, does not bring the free one back.
+    let peerflix = if addons::is_peerflix_url(&url) { false } else { current.peerflix };
     let saved = settings::merge_and_save(
         &app,
         &uid,
-        serde_json::json!({ "addons": { "urls": urls, "disabled": disabled, "cinemeta": cinemeta } }),
+        serde_json::json!({ "addons": { "urls": urls, "disabled": disabled, "cinemeta": cinemeta, "peerflix": peerflix } }),
     )?;
     state.addons.forget(&url);
     let _ = app.emit("settings://changed", &saved);

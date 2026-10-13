@@ -174,7 +174,7 @@ export function DetailsPage({
   const genresLine = movie?.genres.slice(0, 3).join(" • ") ?? "";
   const tintValue = settings.appearance.amoled ? null : tint;
   const seriesImdb = movie?.providerIds.Imdb ?? null;
-  const hasAddons = settings.addons.urls.length > 0;
+  const hasAddons = settings.addons.urls.length > 0 || settings.addons.peerflix;
   /** Online sources of this movie (movies only; episodes get a button per row). */
   const onlineRef = movie && hasAddons && !isSeries ? externalRefForJellyfin(movie) : null;
   const openOnline = (item: Movie) => {

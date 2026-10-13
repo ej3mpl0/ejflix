@@ -14,6 +14,11 @@ use serde_json::Value;
 use tauri_plugin_store::StoreExt;
 
 pub const CINEMETA_URL: &str = "https://v3-cinemeta.strem.io/manifest.json";
+/// Free Peerflix (Spanish and English sources, no account). A configured install
+/// uses the same host with options in the path; the old host is accepted too.
+pub const PEERFLIX_URL: &str = "https://addon.peerflix.mov/manifest.json";
+/// Official configurator. The addon host redirects `/configure` here.
+pub const PEERFLIX_CONFIGURE_URL: &str = "https://config.peerflix.mov";
 /// Public instance of the TMDB addon. With a language in its config it answers a title's
 /// overview and trailers in that language, for TMDB and IMDb ids alike. The user's own
 /// addons fix their language inside their config (often on their server), out of reach.
@@ -648,6 +653,37 @@ impl AddonClient {
     }
 }
 
+/// True for the free manifest and for one generated at config.peerflix.mov
+/// (`https://addon.peerflix.mov/<options>/manifest.json`, including older hosts).
+pub fn is_peerflix_url(raw: &str) -> bool {
+    let Ok(url) = normalize_manifest_url(raw) else {
+        return false;
+    };
+    let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(&url);
+    let host = rest.split(['/', ':']).next().unwrap_or("").to_ascii_lowercase();
+    host == "peerflix.mov" || host.ends_with(".peerflix.mov") || host == "peerflix-addon.onrender.com"
+}
+
+/// The unconfigured manifests. Anything else on those hosts is a personal install.
+pub fn is_free_peerflix(url: &str) -> bool {
+    url == PEERFLIX_URL || url == "https://peerflix.mov/manifest.json"
+}
+
+/// Free Peerflix is consulted unless the profile turned it off or already has
+/// its own Peerflix manifest (configured or not, even if that one is switched off).
+pub fn wants_free_peerflix(urls: &[String], peerflix: bool) -> bool {
+    peerflix && !urls.iter().any(|u| is_peerflix_url(u))
+}
+
+/// The gear of every Peerflix install opens the official configurator. A path
+/// like `/language=es/configure` is not that page.
+pub fn polish_addon(mut info: AddonInfo) -> AddonInfo {
+    if is_peerflix_url(&info.url) {
+        info.configure_url = Some(PEERFLIX_CONFIGURE_URL.to_string());
+    }
+    info
+}
+
 pub fn normalize_manifest_url(raw: &str) -> Result<String, String> {
     let mut url = raw.trim().to_string();
     if url.is_empty() || url.len() > 2048 {
@@ -1211,6 +1247,34 @@ pub fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recognizes_peerflix_manifests() {
+        assert!(is_peerflix_url(PEERFLIX_URL));
+        assert!(is_peerflix_url("stremio://addon.peerflix.mov/manifest.json"));
+        assert!(is_peerflix_url(
+            "https://addon.peerflix.mov/language=es%7Cqualityfilter=480p/manifest.json"
+        ));
+        assert!(is_peerflix_url("https://peerflix.mov/manifest.json"));
+        assert!(is_peerflix_url(
+            "https://peerflix-addon.onrender.com/language=es/manifest.json"
+        ));
+        assert!(!is_peerflix_url("https://torrentio.strem.fun/manifest.json"));
+        assert!(!is_peerflix_url("https://notpeerflix.mov/manifest.json"));
+        assert!(!is_peerflix_url("not a url"));
+        assert!(is_free_peerflix(PEERFLIX_URL));
+        assert!(is_free_peerflix("https://peerflix.mov/manifest.json"));
+        assert!(!is_free_peerflix(
+            "https://addon.peerflix.mov/language=es/manifest.json"
+        ));
+        assert!(wants_free_peerflix(&[], true));
+        assert!(!wants_free_peerflix(&[], false));
+        assert!(!wants_free_peerflix(&[PEERFLIX_URL.to_string()], true));
+        assert!(!wants_free_peerflix(
+            &["https://addon.peerflix.mov/language=es/manifest.json".into()],
+            true,
+        ));
+    }
 
     #[test]
     fn splits_video_ids() {

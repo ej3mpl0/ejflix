@@ -137,8 +137,16 @@ pub struct AddonPrefs {
     pub urls: Vec<String>,
     /// Keep Cinemeta (Stremio's public catalog/metadata addon) as a built-in addon.
     pub cinemeta: bool,
+    /// Install the free Peerflix addon. A Peerflix manifest in `urls` (the configured
+    /// one) replaces it. Missing on profiles saved before it existed, so it turns on.
+    #[serde(default = "default_peerflix")]
+    pub peerflix: bool,
     /// Addons kept in `urls` but switched off: no catalogs, no sources.
     pub disabled: Vec<String>,
+}
+
+fn default_peerflix() -> bool {
+    true
 }
 
 impl Default for AddonPrefs {
@@ -146,8 +154,24 @@ impl Default for AddonPrefs {
         Self {
             urls: Vec::new(),
             cinemeta: true,
+            peerflix: default_peerflix(),
             disabled: Vec::new(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_profiles_get_free_peerflix() {
+        let old = serde_json::json!({ "urls": [], "cinemeta": true, "disabled": [] });
+        let prefs: AddonPrefs = serde_json::from_value(old).unwrap();
+        assert!(prefs.peerflix);
+        let off = serde_json::json!({ "urls": [], "cinemeta": true, "peerflix": false });
+        let prefs: AddonPrefs = serde_json::from_value(off).unwrap();
+        assert!(!prefs.peerflix);
     }
 }
 

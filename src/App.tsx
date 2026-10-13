@@ -31,7 +31,7 @@ type Gate = "welcome" | "login" | "profiles" | "create";
 type AccountGate = "checking" | "none" | "intro" | "mfa";
 
 /**
- * First-run setup (torrents, addon import) of a profile that has not been through it.
+ * First-run setup (torrents, Peerflix, addon import) of a profile that has not been through it.
  * `children` learns whether it is showing, so the screen behind can step out of reach.
  */
 function SetupGate({ enabled, children }: { enabled: boolean; children: (showing: boolean) => ReactNode }) {
