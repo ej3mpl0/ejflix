@@ -187,8 +187,9 @@ pub enum PlaybackSource {
     Addon { entry: crate::addons::ResumeEntry },
     /// An IPTV channel: nothing to report, the presence follows the guide.
     Live { channel_id: String },
-    /// A file from disk. Nothing is reported anywhere.
-    Local,
+    /// A file from disk. Nothing is reported anywhere. `path` tells a late metadata
+    /// lookup which file is still on screen.
+    Local { path: String },
 }
 
 #[derive(Clone)]
@@ -205,7 +206,7 @@ impl PlaybackSource {
         match self {
             PlaybackSource::Jellyfin { item_id, .. } => Some(item_id.clone()),
             PlaybackSource::Addon { entry } => Some(entry.key.clone()).filter(|k| !k.is_empty()),
-            PlaybackSource::Live { .. } | PlaybackSource::Local => None,
+            PlaybackSource::Live { .. } | PlaybackSource::Local { .. } => None,
         }
     }
 }

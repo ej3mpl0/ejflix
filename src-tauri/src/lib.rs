@@ -329,6 +329,101 @@ fn presence_for_file(title: &str) -> discord::PresenceInfo {
     }
 }
 
+/// The filename often is a release name. Look the film (or the episode) up and, when
+/// the match is the title itself, show it on Discord the way an online play does:
+/// real name, year, poster. Playback does not wait for this.
+fn enrich_local_presence(app: tauri::AppHandle, path: String, file_name: String) {
+    tauri::async_runtime::spawn(async move {
+        let Some(guess) = local_media::parse_release(&file_name) else {
+            return;
+        };
+        let state = app.state::<AppState>();
+        let Some(presence) = presence_for_release(&state, &guess).await else {
+            return;
+        };
+        {
+            let mut guard = state.player.context.write().await;
+            let Some(ctx) = guard.as_mut() else { return };
+            match &ctx.source {
+                PlaybackSource::Local { path: playing } if playing == &path => ctx.presence = presence,
+                _ => return,
+            }
+        }
+        refresh_presence(&app).await;
+    });
+}
+
+async fn presence_for_release(state: &AppState, guess: &local_media::ReleaseGuess) -> Option<discord::PresenceInfo> {
+    let info = state.addons.manifest(addons::CINEMETA_URL, true).await.ok()?;
+    let episode = guess.season.is_some() && guess.episode.is_some();
+    let kind = if episode { "series" } else { "movie" };
+    let catalog = info.catalogs.iter().find(|c| c.kind == kind && c.searchable)?;
+    let metas = state
+        .addons
+        .catalog(&info, kind, &catalog.id, &[("search".to_string(), guess.title.clone())])
+        .await
+        .ok()?;
+    let mut best: Option<(i32, addons::AddonMeta)> = None;
+    for meta in metas.into_iter().take(12) {
+        let score = local_media::release_match_score(&guess.title, guess.year, &meta.name, meta.year);
+        if score < local_media::RELEASE_MATCH_MIN {
+            continue;
+        }
+        if best.as_ref().map(|(current, _)| score > *current).unwrap_or(true) {
+            best = Some((score, meta));
+        }
+    }
+    let (_, meta) = best?;
+    let full = state.addons.meta(std::slice::from_ref(&info), kind, &meta.id).await;
+    if matches!(&full, Err(err) if err == crate::parental::BLOCKED) {
+        return None;
+    }
+    let full = full.ok();
+    let title = clean_presence(full.as_ref().map(|item| item.meta.name.clone()).unwrap_or(meta.name));
+    if title.chars().count() < 2 {
+        return None;
+    }
+    let year = full.as_ref().and_then(|item| item.meta.year).or(meta.year).or(guess.year);
+    let poster = public_poster(full.as_ref().and_then(|item| item.meta.poster.clone()).or(meta.poster));
+    let episode_line = match (guess.season, guess.episode) {
+        (Some(season), Some(episode_n)) => {
+            let video_title = full.as_ref().and_then(|item| {
+                item.videos
+                    .iter()
+                    .find(|video| video.season == Some(season) && video.episode == Some(episode_n))
+                    .map(|video| clean_presence(video.title.clone()))
+            });
+            let code = format!("S{season}:E{episode_n}");
+            let name = video_title.filter(|text| text.len() > 1 && !text.eq_ignore_ascii_case(&code));
+            Some(match name {
+                Some(name) => format!("{code} · {name}"),
+                None => code,
+            })
+        }
+        _ => None,
+    };
+    Some(discord::PresenceInfo {
+        title,
+        episode: episode_line,
+        year,
+        kind: if episode { "series".into() } else { "movie".into() },
+        poster_url: poster,
+        source: "Local".into(),
+        live_window: None,
+    })
+}
+
+fn clean_presence(text: String) -> String {
+    text.chars().filter(|c| !c.is_control()).take(180).collect::<String>().trim().to_string()
+}
+
+fn public_poster(url: Option<String>) -> Option<String> {
+    url.filter(|url| {
+        let url = url.trim();
+        (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= 2000 && !url.contains(' ')
+    })
+}
+
 fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
     let is_episode = entry.kind == "series" && entry.season.is_some();
     let episode = if is_episode {
@@ -1093,7 +1188,7 @@ async fn player_stop(
                     );
                 }
             }
-            PlaybackSource::Live { .. } | PlaybackSource::Local => {}
+            PlaybackSource::Live { .. } | PlaybackSource::Local { .. } => {}
         }
     }
     // A torrent nobody is reading any more stops using the connection right away.
@@ -1829,7 +1924,7 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
                         );
                     }
                 }
-                PlaybackSource::Live { .. } | PlaybackSource::Local => {}
+                PlaybackSource::Live { .. } | PlaybackSource::Local { .. } => {}
             }
             let _ = app.emit("player://state", snap);
             refresh_presence(&app).await;
@@ -2161,6 +2256,8 @@ async fn player_start_file(
 ) -> Result<PlayerState, String> {
     let path = local_media::media_path(&args.path)?;
     let title = local_media::display_title(&args.title, &path);
+    let file_name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("").to_string();
+    let audio = local_media::is_audio_file(&path);
     let path = path.to_string_lossy().to_string();
     let playback = match settings_user(&app, &state).await {
         Some(uid) => settings::load(&app, &uid).unwrap_or_default().playback,
@@ -2168,7 +2265,7 @@ async fn player_start_file(
     };
     let prefs = PlaybackPrefs::from_settings(&playback);
     let ctx = PlaybackContext {
-        source: PlaybackSource::Local,
+        source: PlaybackSource::Local { path: path.clone() },
         presence: presence_for_file(&title),
     };
     state
@@ -2177,6 +2274,9 @@ async fn player_start_file(
         .await?;
     show_player_overlay(&app);
     refresh_presence(&app).await;
+    if !audio {
+        enrich_local_presence(app.clone(), path, file_name);
+    }
     Ok(state.player.snapshot().await)
 }
 
