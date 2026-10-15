@@ -52,6 +52,8 @@ pub struct PresenceInfo {
 /// Activity as sent to Discord.
 #[derive(Debug, Clone)]
 pub struct Activity {
+    /// Shown as "Watching {name}". Discord drops the activity when this is missing.
+    pub name: String,
     pub details: Option<String>,
     pub state: Option<String>,
     /// (start, end) unix seconds.
@@ -60,6 +62,22 @@ pub struct Activity {
     pub large_text: String,
     /// Discord `status_display_type`: 0 = application name, 1 = state, 2 = details.
     pub status_display: u8,
+}
+
+/// Which optional fields this Discord client accepted. A rejected image or an
+/// unknown `status_display_type` makes Discord throw away the whole activity,
+/// so the pipe remembers the shape that actually stuck.
+#[derive(Clone, Copy)]
+struct Shape {
+    assets: bool,
+    status_display: bool,
+    watching: bool,
+}
+
+impl Shape {
+    fn full() -> Self {
+        Self { assets: true, status_display: true, watching: true }
+    }
 }
 
 impl Activity {
@@ -77,19 +95,31 @@ impl Activity {
             }
             _ => false,
         };
-        ts && self.details == other.details
+        ts && self.name == other.name
+            && self.details == other.details
             && self.state == other.state
             && self.large_image == other.large_image
             && self.large_text == other.large_text
             && self.status_display == other.status_display
     }
 
-    fn to_command(&self) -> Value {
+    /// `SET_ACTIVITY` body. Assets are omitted unless the image itself is usable:
+    /// a hover text with no picture, or an empty hover text, is enough for Discord
+    /// to refuse the activity and show nothing.
+    fn command(&self, shape: Shape) -> Value {
         let mut activity = json!({
-            "type": 3,
+            "type": if shape.watching { 3 } else { 0 },
+            "name": activity_name(&self.name),
             "instance": false,
-            "status_display_type": self.status_display,
         });
+        if shape.status_display {
+            let display = match self.status_display {
+                1 if self.state.is_some() => 1,
+                2 if self.details.is_some() => 2,
+                _ => 0,
+            };
+            activity["status_display_type"] = json!(display);
+        }
         if let Some(details) = &self.details {
             activity["details"] = Value::String(details.clone());
         }
@@ -97,17 +127,27 @@ impl Activity {
             activity["state"] = Value::String(state.clone());
         }
         if let Some((start, end)) = self.timestamps {
-            let mut ts = json!({ "start": start });
-            if let Some(end) = end {
-                ts["end"] = json!(end);
+            let end_ok = match end {
+                Some(end) => end > start,
+                None => true,
+            };
+            if start > 0 && end_ok {
+                let mut ts = json!({ "start": start });
+                if let Some(end) = end {
+                    ts["end"] = json!(end);
+                }
+                activity["timestamps"] = ts;
             }
-            activity["timestamps"] = ts;
         }
-        let mut assets = json!({ "large_text": self.large_text });
-        if let Some(image) = &self.large_image {
-            assets["large_image"] = Value::String(image.clone());
+        if shape.assets {
+            if let Some(image) = usable_image(self.large_image.as_deref()) {
+                let mut assets = json!({ "large_image": image });
+                if let Some(text) = clamp_text(self.large_text.clone()) {
+                    assets["large_text"] = Value::String(text);
+                }
+                activity["assets"] = assets;
+            }
         }
-        activity["assets"] = assets;
         json!({
             "cmd": "SET_ACTIVITY",
             "args": { "pid": std::process::id(), "activity": activity },
@@ -178,6 +218,7 @@ impl Discord {
             let mut conn: Option<NamedPipeClient> = None;
             let mut connected_id = String::new();
             let mut sent: Option<Activity> = None;
+            let mut shape = Shape::full();
             let mut retry_after: Option<Instant> = None;
             loop {
                 tokio::select! {
@@ -197,6 +238,7 @@ impl Discord {
                 if conn.is_some() && connected_id != client_id {
                     conn = None;
                     sent = None;
+                    shape = Shape::full();
                 }
                 if conn.is_none() {
                     if retry_after.is_some_and(|at| at > Instant::now()) {
@@ -219,18 +261,23 @@ impl Discord {
                 if sent.as_ref().is_some_and(|s| s.same_as(&desired)) {
                     continue;
                 }
-                let Some(client) = conn.as_mut() else { continue };
-                let mut result = send_activity(client, &desired).await;
-                if result.is_err() && desired.large_image.is_some() {
-                    // A picture Discord cannot use makes it refuse everything: try without it.
-                    let plain = Activity { large_image: None, ..desired.clone() };
-                    result = send_activity(client, &plain).await;
+                // A new poster gets one more try. The same rejected picture is not sent again
+                // on every progress tick, or Discord would clear the presence each time.
+                let image_changed = sent.as_ref().map(|prev| prev.large_image != desired.large_image).unwrap_or(true);
+                if image_changed {
+                    shape.assets = true;
                 }
-                match result {
-                    Ok(()) => sent = Some(desired),
+                let Some(client) = conn.as_mut() else { continue };
+                match push_activity(client, &desired, shape).await {
+                    Ok(used) => {
+                        sent = Some(desired);
+                        shape = used;
+                        me.set_status(true, None).await;
+                    }
                     Err(err) => {
                         conn = None;
                         sent = None;
+                        shape = Shape::full();
                         retry_after = Some(Instant::now() + Duration::from_secs(5));
                         me.set_status(false, Some(err)).await;
                     }
@@ -280,18 +327,92 @@ async fn handshake(client: &mut NamedPipeClient, hello: &Value) -> Result<(), St
     Ok(())
 }
 
-async fn send_activity(client: &mut NamedPipeClient, activity: &Activity) -> Result<(), String> {
-    write_frame(client, 1, &activity.to_command()).await?;
+enum SendFail {
+    /// The pipe broke or Discord never answered. Reconnecting is the only recovery.
+    Io(String),
+    /// Discord parsed the frame and refused the activity. A smaller payload may pass.
+    Rejected(String),
+}
+
+/// Sends the activity, dropping fields Discord refused until one shape is accepted.
+async fn push_activity(client: &mut NamedPipeClient, activity: &Activity, mut shape: Shape) -> Result<Shape, String> {
+    let mut previous = String::new();
+    let mut last_error = "Discord rechazó la actividad".to_string();
+    loop {
+        let payload = activity.command(shape);
+        let encoded = payload.to_string();
+        if encoded == previous {
+            if !degrade(&mut shape) {
+                return Err(last_error);
+            }
+            continue;
+        }
+        previous = encoded;
+        match send_payload(client, &payload).await {
+            Ok(()) => return Ok(shape),
+            Err(SendFail::Io(err)) => return Err(err),
+            Err(SendFail::Rejected(err)) => {
+                last_error = err;
+                if !degrade(&mut shape) {
+                    return Err(last_error);
+                }
+            }
+        }
+    }
+}
+
+fn degrade(shape: &mut Shape) -> bool {
+    if shape.assets {
+        shape.assets = false;
+        return true;
+    }
+    if shape.status_display {
+        shape.status_display = false;
+        return true;
+    }
+    if shape.watching {
+        shape.watching = false;
+        return true;
+    }
+    false
+}
+
+async fn send_payload(client: &mut NamedPipeClient, payload: &Value) -> Result<(), SendFail> {
+    write_frame(client, 1, payload).await.map_err(SendFail::Io)?;
     // Discord answers every command; draining the reply keeps the pipe healthy.
-    let (_, value) = read_frame(client).await?;
+    let (_, value) = read_frame(client).await.map_err(SendFail::Io)?;
     if value.get("evt").and_then(|v| v.as_str()) == Some("ERROR") {
         let message = value
             .pointer("/data/message")
             .and_then(|v| v.as_str())
             .unwrap_or("Discord rechazó la actividad");
-        return Err(message.to_string());
+        let message = match value.pointer("/data/code").and_then(|code| code.as_i64()) {
+            Some(code) => format!("{message} ({code})"),
+            None => message.to_string(),
+        };
+        return Err(SendFail::Rejected(message));
     }
     Ok(())
+}
+
+/// 1–128 characters. Watching is rendered as "Watching {name}"; without it Discord shows nothing.
+fn activity_name(text: &str) -> String {
+    let text: String = text.chars().filter(|c| !c.is_control()).take(MAX_TEXT).collect();
+    let text = text.trim();
+    if text.chars().count() < 2 {
+        "ejFlix".to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+fn usable_image(url: Option<&str>) -> Option<&str> {
+    let url = url?.trim();
+    if url.starts_with("https://") && image_fits(url) && !url.contains(' ') {
+        Some(url)
+    } else {
+        None
+    }
 }
 
 async fn write_frame(client: &mut NamedPipeClient, op: u32, payload: &Value) -> Result<(), String> {
@@ -375,4 +496,98 @@ pub fn clamp_text(text: String) -> Option<String> {
         return None;
     }
     Some(text.chars().take(MAX_TEXT).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample() -> Activity {
+        Activity {
+            name: "The Matrix".to_string(),
+            details: Some("The Matrix".to_string()),
+            state: None,
+            timestamps: Some((1_700_000_000, Some(1_700_003_600))),
+            large_image: None,
+            large_text: "The Matrix".to_string(),
+            status_display: 2,
+        }
+    }
+
+    fn activity_of(value: &Value) -> &Value {
+        value.pointer("/args/activity").unwrap()
+    }
+
+    #[test]
+    fn a_title_without_a_poster_still_names_the_activity() {
+        let value = sample().command(Shape::full());
+        let activity = activity_of(&value);
+        assert_eq!(activity["type"], json!(3));
+        assert_eq!(activity["name"], json!("The Matrix"));
+        assert_eq!(activity["details"], json!("The Matrix"));
+        assert_eq!(activity["status_display_type"], json!(2));
+        assert!(activity.get("assets").is_none());
+        assert!(activity.get("state").is_none());
+    }
+
+    #[test]
+    fn hover_text_is_sent_only_next_to_a_real_image() {
+        let mut activity = sample();
+        activity.large_image = Some("https://images.metahub.space/poster/medium/tt0133093/img".to_string());
+        let with_image = activity.command(Shape::full());
+        let with_image = activity_of(&with_image);
+        assert_eq!(
+            with_image["assets"]["large_image"],
+            json!("https://images.metahub.space/poster/medium/tt0133093/img")
+        );
+        assert_eq!(with_image["assets"]["large_text"], json!("The Matrix"));
+
+        activity.large_text = "x".to_string();
+        let short = activity.command(Shape::full());
+        let short = activity_of(&short);
+        assert!(short["assets"].get("large_text").is_none());
+
+        activity.large_image = Some(format!("https://example.com/{}", "a".repeat(300)));
+        let long = activity.command(Shape::full());
+        assert!(activity_of(&long).get("assets").is_none());
+
+        activity.large_image = Some("http://192.168.1.20/poster.jpg".to_string());
+        let local = activity.command(Shape::full());
+        assert!(activity_of(&local).get("assets").is_none());
+    }
+
+    #[test]
+    fn a_picky_client_can_drop_the_fields_that_get_the_activity_rejected() {
+        let activity = sample();
+        let bare = activity.command(Shape { assets: false, status_display: false, watching: true });
+        let bare = activity_of(&bare);
+        assert_eq!(bare["type"], json!(3));
+        assert_eq!(bare["name"], json!("The Matrix"));
+        assert!(bare.get("status_display_type").is_none());
+        assert!(bare.get("assets").is_none());
+
+        let playing = activity.command(Shape { assets: false, status_display: false, watching: false });
+        let playing = activity_of(&playing);
+        assert_eq!(playing["type"], json!(0));
+        assert_eq!(playing["name"], json!("The Matrix"));
+    }
+
+    #[test]
+    fn an_empty_name_still_leaves_something_discord_can_show() {
+        let mut activity = sample();
+        activity.name = "  ".to_string();
+        activity.details = None;
+        activity.status_display = 2;
+        let value = activity.command(Shape::full());
+        let value = activity_of(&value);
+        assert_eq!(value["name"], json!("ejFlix"));
+        assert_eq!(value["status_display_type"], json!(0));
+    }
+
+    #[test]
+    fn a_backwards_clock_is_left_out() {
+        let mut activity = sample();
+        activity.timestamps = Some((50, Some(40)));
+        assert!(activity_of(&activity.command(Shape::full())).get("timestamps").is_none());
+    }
 }

@@ -143,22 +143,29 @@ pub fn parse_release(name: &str) -> Option<ReleaseGuess> {
     if tokens.is_empty() {
         return None;
     }
-    let mut end = tag_index(&tokens).unwrap_or(tokens.len());
-    while end > 0 && is_group(&tokens[end - 1]) {
-        end -= 1;
-    }
+    // The year stays even when a language tag sits in front of it ("Latino.1972"):
+    // cutting at the first tag first would throw the year away with the tag.
+    let mut end = tokens.len();
     let mut year = None;
-    if let Some(pos) = tokens[..end].iter().rposition(|token| year_of(&token.raw).is_some()) {
+    if let Some(pos) = tokens.iter().rposition(|token| year_of(&token.raw).is_some()) {
         if pos > 0 {
             year = year_of(&tokens[pos].raw);
             end = pos;
         }
     }
-    while end > 0 && is_group(&tokens[end - 1]) {
+    // "YTS.The.Matrix…" — a group glued to the front is not the title.
+    let mut start = 0;
+    while start < end && is_tag_at(&tokens, start) {
+        start += 1;
+    }
+    if let Some(rel) = tag_index(&tokens[start..end]) {
+        end = start + rel;
+    }
+    while end > start && is_group(&tokens[end - 1]) {
         end -= 1;
     }
-    let title = tokens[..end].iter().map(|token| token.raw.as_str()).collect::<Vec<_>>().join(" ");
-    let title = title.trim();
+    let title = tokens[start..end].iter().map(|token| token.raw.as_str()).collect::<Vec<_>>().join(" ");
+    let title = title.trim().trim_matches(|c: char| matches!(c, '-' | '.' | '_')).trim();
     if title.chars().count() < 2 || !title.chars().any(|c| c.is_alphabetic()) || generic_title(title) {
         return None;
     }
@@ -168,6 +175,12 @@ pub fn parse_release(name: &str) -> Option<ReleaseGuess> {
         season,
         episode,
     })
+}
+
+/// One catalog row the release search returned, in the order the catalog ranked it.
+pub struct ReleaseCandidate {
+    pub name: String,
+    pub year: Option<i32>,
 }
 
 /// How well `name` (and its year) is the release `query`. 0 means it is a different title.
@@ -188,10 +201,36 @@ pub fn release_match_score(query: &str, year: Option<i32>, name: &str, meta_year
     match (year, meta_year) {
         (Some(want), Some(got)) if want == got => score += 30,
         (Some(want), Some(got)) if (want - got).abs() == 1 => score += 10,
-        (Some(want), Some(got)) if (want - got).abs() >= 2 => score -= 30,
+        // A namesake from another year ("El padrino", 2004) is a different film.
+        // The penalty has to sink an exact word match under `RELEASE_MATCH_MIN`.
+        (Some(want), Some(got)) if (want - got).abs() >= 2 => score -= 50,
         _ => {}
     }
     score
+}
+
+/// Which search row is this file. `None` when none of them is the film.
+///
+/// The catalog's first row is its best guess, including a title it only knows in
+/// another language: "El Padrino" (1972) comes back as "The Godfather". That row
+/// shares no words with the file, so the word score is zero, but the year is the
+/// file's year. A later row that copies the words and misses the year loses.
+pub fn choose_release(guess: &ReleaseGuess, candidates: &[ReleaseCandidate]) -> Option<usize> {
+    let mut best: Option<(i32, usize)> = None;
+    for (index, candidate) in candidates.iter().take(12).enumerate() {
+        let mut score = release_match_score(&guess.title, guess.year, &candidate.name, candidate.year);
+        let same_year = matches!((guess.year, candidate.year), (Some(want), Some(got)) if want == got);
+        if same_year && index == 0 && score < RELEASE_MATCH_MIN {
+            score = RELEASE_MATCH_MIN;
+        }
+        if score < RELEASE_MATCH_MIN {
+            continue;
+        }
+        if best.as_ref().map(|(current, _)| score > *current).unwrap_or(true) {
+            best = Some((score, index));
+        }
+    }
+    best.map(|(_, index)| index)
 }
 
 struct Tok {
@@ -206,8 +245,139 @@ fn tokenize(input: &str) -> Vec<Tok> {
     input
         .split(|c: char| c.is_whitespace() || matches!(c, '.' | '_' | '[' | ']' | '(' | ')' | '{' | '}'))
         .filter(|part| !part.is_empty())
-        .map(|part| Tok { raw: part.to_string() })
+        .flat_map(expand_glued)
+        .map(|raw| Tok { raw })
         .collect()
+}
+
+/// `Tenet4KUHDRIp2kadfasd` is one token: the quality tags were glued to the title.
+/// Peel those tags off so the search word is `Tenet`. A dotted name never reaches this.
+fn expand_glued(raw: &str) -> Vec<String> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    let mut pieces = Vec::new();
+    let mut rest = raw;
+    let mut peeled = false;
+    while !rest.is_empty() {
+        let take = tag_prefix_len(rest);
+        if take > 0 {
+            pieces.push(rest[..take].to_string());
+            rest = &rest[take..];
+            peeled = true;
+            continue;
+        }
+        match first_glued_cut(rest) {
+            Some(pos) if pos > 0 => {
+                pieces.push(rest[..pos].to_string());
+                rest = &rest[pos..];
+                peeled = true;
+            }
+            _ => {
+                // "2kadfasd" after a tag is a group suffix, not part of the title.
+                if !(peeled && !title_word(rest)) {
+                    pieces.push(rest.to_string());
+                }
+                break;
+            }
+        }
+    }
+    if pieces.is_empty() { vec![raw.to_string()] } else { pieces }
+}
+
+fn title_word(text: &str) -> bool {
+    let mut letters = 0;
+    for c in text.chars() {
+        if c.is_alphabetic() {
+            letters += 1;
+        } else if c.is_ascii_digit() || !matches!(c, '\'' | '-' | '&') {
+            return false;
+        }
+    }
+    letters >= 2
+}
+
+/// Earliest index, after at least two letters, where a quality tag or a year starts.
+fn first_glued_cut(token: &str) -> Option<usize> {
+    let mut letters = 0;
+    let mut start = None;
+    for (idx, ch) in token.char_indices() {
+        if ch.is_alphabetic() {
+            letters += 1;
+        }
+        if letters >= 2 {
+            start = Some(idx + ch.len_utf8());
+            break;
+        }
+    }
+    let mut i = start?;
+    while i < token.len() {
+        if token.is_char_boundary(i) && tag_prefix_len(&token[i..]) > 0 {
+            return Some(i);
+        }
+        let ch = token[i..].chars().next()?;
+        i += ch.len_utf8();
+    }
+    None
+}
+
+fn tag_prefix_len(text: &str) -> usize {
+    if text.is_empty() {
+        return 0;
+    }
+    let lower = text.to_ascii_lowercase();
+    let mut best = safe_prefix_len(&lower, text);
+    for tag in GLUED_SHORT {
+        if lower.starts_with(tag) {
+            let after = &text[tag.len()..];
+            let after_lower = &lower[tag.len()..];
+            let followed = after.is_empty()
+                || after.starts_with(|c: char| c.is_ascii_digit())
+                || safe_prefix_len(after_lower, after) > 0;
+            if followed {
+                best = best.max(tag.len());
+            }
+        }
+    }
+    best
+}
+
+fn safe_prefix_len(lower: &str, original: &str) -> usize {
+    glued_tag_len(lower).max(resolution_prefix_len(lower)).max(year_prefix_len(original))
+}
+
+fn glued_tag_len(lower: &str) -> usize {
+    GLUED.iter().filter(|tag| lower.starts_with(*tag)).map(|tag| tag.len()).max().unwrap_or(0)
+}
+
+fn resolution_prefix_len(lower: &str) -> usize {
+    let bytes = lower.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_digit() {
+        i += 1;
+    }
+    if (3..=4).contains(&i) && bytes.get(i) == Some(&b'p') {
+        i + 1
+    } else {
+        0
+    }
+}
+
+fn year_prefix_len(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    if bytes.len() < 4 || !bytes[..4].iter().all(|b| b.is_ascii_digit()) || year_of(&text[..4]).is_none() {
+        return 0;
+    }
+    let after = &text[4..];
+    let after_lower = after.to_ascii_lowercase();
+    // "20204K" — the next digit begins a tag, not a longer number. "20010" does not.
+    if after.starts_with(|c: char| c.is_ascii_digit())
+        && glued_tag_len(&after_lower) == 0
+        && resolution_prefix_len(&after_lower) == 0
+    {
+        return 0;
+    }
+    4
 }
 
 /// `(1999)` stays as a year. `[1080p]` and other brackets go away.
@@ -358,9 +528,23 @@ fn generic_title(title: &str) -> bool {
     words.is_empty() || words.iter().all(|word| GENERIC.iter().any(|item| item == word))
 }
 
+fn fold_char(c: char) -> char {
+    match c {
+        'á' | 'à' | 'ä' | 'â' | 'ã' => 'a',
+        'é' | 'è' | 'ë' | 'ê' => 'e',
+        'í' | 'ì' | 'ï' | 'î' => 'i',
+        'ó' | 'ò' | 'ö' | 'ô' | 'õ' => 'o',
+        'ú' | 'ù' | 'ü' | 'û' => 'u',
+        'ñ' => 'n',
+        'ç' => 'c',
+        other => other,
+    }
+}
+
 fn words(text: &str) -> Vec<String> {
     text.to_lowercase()
         .chars()
+        .map(fold_char)
         .map(|c| if c.is_ascii_alphanumeric() { c } else { ' ' })
         .collect::<String>()
         .split_whitespace()
@@ -369,18 +553,31 @@ fn words(text: &str) -> Vec<String> {
         .collect()
 }
 
+/// Quality and codec tags that stay recognizable when a release glues them to the title.
+const GLUED: &[&str] = &[
+    "hdr10plus", "hdr10", "blu-ray", "bluray", "bdremux", "web-rip", "webrip", "web-dl", "webdl", "bdrip", "brrip",
+    "hdrip", "dvdrip", "dvdscr", "hdcam", "telesync", "truehd", "2160p", "1080p", "720p", "480p", "576p", "10bit",
+    "12bit", "8bit", "x264", "x265", "h264", "h265", "hevc", "xvid", "divx", "uhd", "hdr", "hlg", "dovi", "avc",
+    "remux", "hdtv", "4k", "8k", "amzn", "dsnp", "hmax", "atvp", "yify", "yts",
+];
+
+/// Short tags that are also ordinary words. Only peel them when a real tag follows.
+const GLUED_SHORT: &[&str] = &["rip"];
+
 const TAGS: &[&str] = &[
     "4k", "8k", "uhd", "hdr", "hdr10", "hdr10plus", "hlg", "dovi", "bluray", "blu-ray", "bdrip", "brrip", "bdremux",
     "remux", "webrip", "web-dl", "webdl", "web-rip", "hdtv", "hdrip", "dvdrip", "dvdscr", "hdcam", "cam", "telesync",
     "x264", "x265", "h264", "h265", "hevc", "avc", "xvid", "divx", "atmos", "10bit", "8bit", "12bit", "yify", "yts",
     "rarbg", "ettv", "eztv", "amzn", "dsnp", "hmax", "atvp", "proper", "repack", "rerip", "extended", "unrated",
-    "theatrical", "remastered", "subbed", "dubbed",
+    "theatrical", "remastered", "subbed", "dubbed", "latino", "latina", "castellano", "spanish", "espanol", "español",
+    "multi", "dual", "dualaudio", "subs", "vose", "vostfr", "truefrench",
 ];
 
 const STOP: &[&str] = &["the", "a", "an", "of", "and", "el", "la", "los", "las", "de", "del", "y"];
 
 const GENERIC: &[&str] = &[
-    "video", "movie", "sample", "trailer", "clip", "test", "track", "audio", "temp", "download", "file",
+    "video", "movie", "movies", "sample", "trailer", "clip", "test", "track", "audio", "temp", "download",
+    "downloads", "file", "files", "videos", "series", "tv", "peliculas", "pelis", "desktop", "descargas", "ejflix",
 ];
 
 fn wide(text: &str) -> Vec<u16> {
@@ -552,6 +749,46 @@ mod tests {
 
         assert!(parse_release("video").is_none());
         assert!(parse_release("sample").is_none());
+    }
+
+    #[test]
+    fn a_glued_release_name_keeps_the_movie_word() {
+        let tenet = parse_release("Tenet4KUHDRIp2kadfasd").unwrap();
+        assert_eq!(tenet.title, "Tenet");
+        assert_eq!(tenet.year, None);
+
+        let dated = parse_release("Tenet20204K").unwrap();
+        assert_eq!(dated.title, "Tenet");
+        assert_eq!(dated.year, Some(2020));
+
+        let yts = parse_release("YTS.The.Matrix.1999.1080p.BluRay").unwrap();
+        assert_eq!(yts.title, "The Matrix");
+        assert_eq!(yts.year, Some(1999));
+
+        let padrino = parse_release("El.Padrino.Latino.1972.1080p").unwrap();
+        assert_eq!(padrino.title, "El Padrino");
+        assert_eq!(padrino.year, Some(1972));
+
+        assert!(parse_release("Movies").is_none());
+        assert!(parse_release("Peliculas").is_none());
+    }
+
+    #[test]
+    fn a_spanish_query_prefers_the_film_from_that_year() {
+        assert!(release_match_score("El Padrino", Some(1972), "El padrino", Some(2004)) < RELEASE_MATCH_MIN);
+        let candidates = [
+            ReleaseCandidate { name: "The Godfather".to_string(), year: Some(1972) },
+            ReleaseCandidate { name: "El padrino".to_string(), year: Some(2004) },
+        ];
+        let guess = ReleaseGuess { title: "El Padrino".to_string(), year: Some(1972), season: None, episode: None };
+        assert_eq!(choose_release(&guess, &candidates), Some(0));
+
+        let dunes = [
+            ReleaseCandidate { name: "Dune: Part Two".to_string(), year: Some(2024) },
+            ReleaseCandidate { name: "Dune".to_string(), year: Some(2021) },
+        ];
+        let dune = ReleaseGuess { title: "Dune".to_string(), year: Some(2021), season: None, episode: None };
+        assert_eq!(choose_release(&dune, &dunes), Some(1));
     }
 
     #[test]

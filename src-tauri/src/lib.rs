@@ -262,6 +262,7 @@ async fn refresh_presence(app: &tauri::AppHandle) {
         None
     };
     let activity = discord::Activity {
+        name: info.title.clone(),
         details,
         state: state_text,
         timestamps,
@@ -317,16 +318,36 @@ fn presence_for_item(session: &Session, movie: &Movie, server_name: Option<Strin
     }
 }
 
-fn presence_for_file(title: &str) -> discord::PresenceInfo {
+fn presence_for_file(file_name: &str, path: &str, fallback: &str) -> discord::PresenceInfo {
+    let guess = local_media::parse_release(file_name).or_else(|| parent_folder_release(path));
+    let title = guess
+        .as_ref()
+        .map(|guess| guess.title.clone())
+        .filter(|title| title.chars().count() >= 2)
+        .unwrap_or_else(|| fallback.to_string());
+    let episode = guess.as_ref().and_then(|guess| match (guess.season, guess.episode) {
+        (Some(season), Some(episode)) => Some(format!("S{season}:E{episode}")),
+        _ => None,
+    });
     discord::PresenceInfo {
-        title: title.to_string(),
-        episode: None,
-        year: None,
-        kind: "movie".into(),
+        title,
+        episode,
+        year: guess.as_ref().and_then(|guess| guess.year),
+        kind: if guess.as_ref().is_some_and(|guess| guess.season.is_some()) {
+            "series".into()
+        } else {
+            "movie".into()
+        },
         poster_url: None,
         source: "Local".into(),
         live_window: None,
     }
+}
+
+fn parent_folder_release(path: &str) -> Option<local_media::ReleaseGuess> {
+    let parent = std::path::Path::new(path).parent()?;
+    let name = parent.file_name()?.to_string_lossy();
+    local_media::parse_release(&name)
 }
 
 /// The filename often is a release name. Look the film (or the episode) up and, when
@@ -334,7 +355,7 @@ fn presence_for_file(title: &str) -> discord::PresenceInfo {
 /// real name, year, poster. Playback does not wait for this.
 fn enrich_local_presence(app: tauri::AppHandle, path: String, file_name: String) {
     tauri::async_runtime::spawn(async move {
-        let Some(guess) = local_media::parse_release(&file_name) else {
+        let Some(guess) = local_media::parse_release(&file_name).or_else(|| parent_folder_release(&path)) else {
             return;
         };
         let state = app.state::<AppState>();
@@ -363,28 +384,30 @@ async fn presence_for_release(state: &AppState, guess: &local_media::ReleaseGues
         .catalog(&info, kind, &catalog.id, &[("search".to_string(), guess.title.clone())])
         .await
         .ok()?;
-    let mut best: Option<(i32, addons::AddonMeta)> = None;
-    for meta in metas.into_iter().take(12) {
-        let score = local_media::release_match_score(&guess.title, guess.year, &meta.name, meta.year);
-        if score < local_media::RELEASE_MATCH_MIN {
-            continue;
-        }
-        if best.as_ref().map(|(current, _)| score > *current).unwrap_or(true) {
-            best = Some((score, meta));
-        }
-    }
-    let (_, meta) = best?;
+    let metas: Vec<_> = metas.into_iter().take(12).collect();
+    let candidates: Vec<_> = metas
+        .iter()
+        .map(|meta| local_media::ReleaseCandidate { name: meta.name.clone(), year: meta.year })
+        .collect();
+    let index = local_media::choose_release(guess, &candidates)?;
+    let meta = metas.into_iter().nth(index)?;
     let full = state.addons.meta(std::slice::from_ref(&info), kind, &meta.id).await;
     if matches!(&full, Err(err) if err == crate::parental::BLOCKED) {
         return None;
     }
     let full = full.ok();
-    let title = clean_presence(full.as_ref().map(|item| item.meta.name.clone()).unwrap_or(meta.name));
+    let title = clean_presence(full.as_ref().map(|item| item.meta.name.clone()).unwrap_or_else(|| meta.name.clone()));
     if title.chars().count() < 2 {
         return None;
     }
     let year = full.as_ref().and_then(|item| item.meta.year).or(meta.year).or(guess.year);
-    let poster = public_poster(full.as_ref().and_then(|item| item.meta.poster.clone()).or(meta.poster));
+    let imdb = full
+        .as_ref()
+        .and_then(|item| imdb_id(&item.meta))
+        .or_else(|| imdb_id(&meta));
+    let poster = metahub_poster(imdb.as_deref())
+        .or_else(|| public_poster(full.as_ref().and_then(|item| item.meta.poster.clone()).or(meta.poster)))
+        .filter(|url| discord::image_fits(url));
     let episode_line = match (guess.season, guess.episode) {
         (Some(season), Some(episode_n)) => {
             let video_title = full.as_ref().and_then(|item| {
@@ -415,6 +438,21 @@ async fn presence_for_release(state: &AppState, guess: &local_media::ReleaseGues
 
 fn clean_presence(text: String) -> String {
     text.chars().filter(|c| !c.is_control()).take(180).collect::<String>().trim().to_string()
+}
+
+fn imdb_id(meta: &addons::AddonMeta) -> Option<String> {
+    meta.imdb
+        .clone()
+        .filter(|id| id.starts_with("tt"))
+        .or_else(|| meta.id.starts_with("tt").then(|| meta.id.clone()))
+}
+
+fn metahub_poster(imdb: Option<&str>) -> Option<String> {
+    let imdb = imdb?.trim();
+    if !(imdb.starts_with("tt") && imdb[2..].chars().all(|c| c.is_ascii_digit())) {
+        return None;
+    }
+    Some(format!("https://images.metahub.space/poster/medium/{imdb}/img"))
 }
 
 fn public_poster(url: Option<String>) -> Option<String> {
@@ -2263,7 +2301,7 @@ async fn player_start_file(
 ) -> Result<PlayerState, String> {
     let path = local_media::media_path(&args.path)?;
     let title = local_media::display_title(&args.title, &path);
-    let file_name = path.file_stem().and_then(|name| name.to_str()).unwrap_or("").to_string();
+    let file_name = path.file_stem().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let audio = local_media::is_audio_file(&path);
     let path = path.to_string_lossy().to_string();
     let playback = match settings_user(&app, &state).await {
@@ -2273,7 +2311,7 @@ async fn player_start_file(
     let prefs = PlaybackPrefs::from_settings(&playback);
     let ctx = PlaybackContext {
         source: PlaybackSource::Local { path: path.clone() },
-        presence: presence_for_file(&title),
+        presence: presence_for_file(&file_name, &path, &title),
     };
     state
         .player
