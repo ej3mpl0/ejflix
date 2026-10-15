@@ -1,160 +1,253 @@
-import { useRef, useState } from "react";
-import { ArrowLeft, CheckCircle2, ChevronDown, LoaderCircle, Wifi } from "lucide-react";
-import { Logo } from "../components/Logo";
-import { WindowControls } from "../components/WindowControls";
-import { LanguageSelect } from "../components/LanguageSelect";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Check, LoaderCircle, UserPlus } from "lucide-react";
 import { api } from "../lib/api";
 import { useI18n } from "../lib/locale-context";
 import { errorText } from "../lib/errors";
-import type { SavedServer } from "../lib/types";
+import type { PublicInfo, PublicUser, SavedServer, Session } from "../lib/types";
 import { fieldLgClass } from "../lib/ui";
 import { cn } from "../lib/format";
+import { Avatar } from "../components/Avatar";
+import { Pill } from "../components/Pill";
+import { OnboardingFrame, StepHeading } from "../components/onboarding/OnboardingFrame";
+import { ServerVisual } from "../components/onboarding/Visuals";
 
+/** How long typing has to pause before the address is tried. */
+const CHECK_DELAY_MS = 600;
+
+/**
+ * Connect a Jellyfin server. The address is tried while it is typed (no "test" button);
+ * once the server answers, its users show up as circles and signing in happens right here.
+ * A server that hides its users asks for the name instead.
+ */
 export function Login({
   onConnected,
+  onSignedIn,
   onBack,
 }: {
+  /** The server is saved; the caller picks who signs in (the profiles screen). */
   onConnected: (server: SavedServer) => void;
+  /** Signed in from here: straight into the app. */
+  onSignedIn?: (session: Session) => void;
   /** Return to the previous screen (welcome or profiles). */
   onBack?: () => void;
 }) {
   const { t } = useI18n();
   const [url, setUrl] = useState("http://localhost:8096");
+  const [found, setFound] = useState<PublicInfo | null>(null);
+  const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [tested, setTested] = useState<string | null>(null);
-  const [help, setHelp] = useState(false);
+  const [users, setUsers] = useState<PublicUser[]>([]);
+  const [user, setUser] = useState<PublicUser | null>(null);
+  const [manual, setManual] = useState(false);
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
   const urlRef = useRef(url);
   urlRef.current = url;
 
-  const test = async () => {
+  // Try the address once typing pauses; a newer address wins over an older answer.
+  useEffect(() => {
+    const tried = url.trim();
+    setFound(null);
+    setUsers([]);
+    setUser(null);
     setError("");
-    setTested(null);
-    setTesting(true);
-    const tried = url;
-    try {
-      const info = await api.testServer(tried);
-      // The address was edited meanwhile: this answer is about another server.
-      if (urlRef.current === tried) setTested(`${info.serverName} · Jellyfin ${info.version}`);
-    } catch (err) {
-      if (urlRef.current === tried) setError(errorText(t, err));
-    } finally {
-      setTesting(false);
-    }
-  };
+    if (!/^https?:\/\/[^/\s]+/i.test(tried)) return;
+    setChecking(true);
+    const handle = window.setTimeout(() => {
+      api
+        .testServer(tried)
+        .then(async (info) => {
+          if (urlRef.current.trim() !== tried) return;
+          setFound(info);
+          const list = await api.listPublicUsers(tried).catch(() => [] as PublicUser[]);
+          if (urlRef.current.trim() !== tried) return;
+          setUsers(list);
+          setManual(list.length === 0);
+        })
+        .catch((err) => {
+          if (urlRef.current.trim() === tried) setError(errorText(t, err));
+        })
+        .finally(() => {
+          if (urlRef.current.trim() === tried) setChecking(false);
+        });
+    }, CHECK_DELAY_MS);
+    return () => window.clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
 
-  const connect = async () => {
+  const name = manual ? username.trim() : user?.name ?? "";
+  const needsPassword = manual || (user?.hasPassword ?? true);
+
+  const signIn = async () => {
+    if (!found) return;
+    setBusy(true);
     setError("");
-    setLoading(true);
     try {
-      const info = await api.probeServer(url);
+      // Saving the server first is what the profiles screen expects too.
+      await api.probeServer(url);
+      if (name && onSignedIn) {
+        onSignedIn(await api.login(url.trim().replace(/\/+$/, ""), name, needsPassword ? password : ""));
+        return;
+      }
       const saved = await api.savedServer();
-      onConnected(
-        saved ?? {
-          serverUrl: url.trim().replace(/\/+$/, ""),
-          serverName: info.serverName,
-        },
-      );
+      onConnected(saved ?? { serverUrl: url.trim().replace(/\/+$/, ""), serverName: found.serverName });
     } catch (err) {
       setError(errorText(t, err));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
   return (
-    <div className="grain relative flex h-full flex-col bg-base">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(800px_circle_at_50%_20%,color-mix(in_oklab,var(--color-accent)_15%,transparent),transparent_60%)]" />
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_40%,var(--color-base)_100%)]" />
-      <div className="relative z-10 flex h-[60px] items-center justify-between pl-6">
-        {onBack ? (
-          <button
-            type="button"
-            onClick={onBack}
-            className="inline-flex min-h-10 items-center gap-2 rounded-pill px-3 text-sm text-dim hover:text-text"
-          >
-            <ArrowLeft size={16} />
-            {t("back")}
-          </button>
-        ) : (
-          <span />
-        )}
-        <div className="flex items-center gap-2">
-          <LanguageSelect />
-          <WindowControls />
-        </div>
-      </div>
-      <div className="relative z-10 flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
-        <form
-          className="w-[420px] max-w-full rounded-2xl bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void connect();
-          }}
-        >
-          <div className="mb-8 text-center">
-            <Logo size="login" />
-          </div>
-          <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
-            {t("jellyfinServer")}
-          </label>
-          <input
-            autoFocus
-            value={url}
-            onChange={(e) => {
-              setUrl(e.target.value);
-              setTested(null);
-            }}
-            placeholder="http://192.168.1.10:8096"
-            className={cn("mb-2", fieldLgClass)}
-          />
-          {error ? (
-            <p className="mb-3 text-sm text-danger">{error}</p>
-          ) : tested ? (
-            <p className="mb-3 flex items-center gap-1.5 text-sm text-success" role="status">
-              <CheckCircle2 size={15} />
-              {tested}
-            </p>
-          ) : (
-            <div className="mb-3 h-5" />
-          )}
-          <button
-            type="submit"
-            disabled={loading || !url.trim()}
-            className="btn-press flex h-12 w-full items-center justify-center gap-2 rounded-btn bg-accent text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
-          >
-            {loading ? <LoaderCircle size={16} className="animate-spin" /> : null}
-            {t("connect")}
-          </button>
-          <button
-            type="button"
-            disabled={testing || loading || !url.trim()}
-            onClick={() => void test()}
-            className="btn-press mt-2 flex h-11 w-full items-center justify-center gap-2 rounded-btn bg-white/8 text-sm font-semibold hover:bg-white/12 disabled:opacity-60"
-          >
-            {testing ? <LoaderCircle size={16} className="animate-spin" /> : <Wifi size={16} />}
-            {t("testConnection")}
-          </button>
-          <button
-            type="button"
-            aria-expanded={help}
-            onClick={() => setHelp((v) => !v)}
-            className="mt-4 flex w-full items-center justify-center gap-1 text-[13px] text-dim hover:text-text"
-          >
-            {t("serverHelpTitle")}
-            <ChevronDown size={14} className={cn("transition-transform", help && "rotate-180")} />
-          </button>
-          {help ? (
-            <ul className="mt-3 space-y-2 rounded-btn bg-black/25 p-4 text-[12.5px] leading-[1.5] text-muted">
-              <li>{t("serverHelpSamePc")}</li>
-              <li>{t("serverHelpLan")}</li>
-              <li>{t("serverHelpRemote")}</li>
-              <li>{t("serverHelpDashboard")}</li>
-            </ul>
+    <OnboardingFrame
+      step={2}
+      visual={<ServerVisual found={found ? { name: found.serverName, version: found.version } : null} users={users.length} />}
+      footer={
+        <>
+          {onBack ? (
+            <Pill variant="tonal" size="lg" className="mr-auto" icon={<ArrowLeft size={17} />} onClick={onBack}>
+              {t("back")}
+            </Pill>
           ) : null}
-        </form>
-      </div>
-    </div>
+          <Pill
+            variant="primary"
+            size="lg"
+            type="submit"
+            form="server-form"
+            disabled={!found || busy || (onSignedIn != null && !name)}
+            icon={busy ? <LoaderCircle size={17} className="animate-spin" /> : undefined}
+          >
+            {onSignedIn ? t("signInAction") : t("connect")}
+          </Pill>
+        </>
+      }
+    >
+      <form
+        id="server-form"
+        className="max-w-[460px]"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void signIn();
+        }}
+      >
+        <StepHeading title={t("connectServerTitle")} />
+        <label className="mb-2 block text-[13.5px] font-semibold text-muted" htmlFor="server-url">
+          {t("serverAddress")}
+        </label>
+        <input
+          id="server-url"
+          autoFocus
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="http://192.168.1.10:8096"
+          spellCheck={false}
+          className={fieldLgClass}
+        />
+        <p className="mt-2.5 flex min-h-5 items-center gap-2 text-[13.5px]" role="status">
+          {error ? (
+            <span className="text-danger">{error}</span>
+          ) : found ? (
+            <>
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-text text-base">
+                <Check size={13} strokeWidth={3} />
+              </span>
+              {t("serverFound", { name: found.serverName, version: found.version })}
+            </>
+          ) : checking ? (
+            <span className="flex items-center gap-2 text-muted">
+              <LoaderCircle size={14} className="animate-spin" />
+              {t("serverChecking")}
+            </span>
+          ) : null}
+        </p>
+
+        {found && onSignedIn ? (
+          <div className="mt-6">
+            <p className="mb-3 text-[13.5px] font-semibold text-muted">{t("whoAreYou")}</p>
+            {users.length ? (
+              <div className="mb-5 flex flex-wrap gap-5" role="radiogroup" aria-label={t("whoAreYou")}>
+                {users.map((u) => {
+                  const on = !manual && user?.id === u.id;
+                  return (
+                    <button
+                      key={u.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      onClick={() => {
+                        setManual(false);
+                        setUser(u);
+                        setPassword("");
+                      }}
+                      className="group flex w-16 flex-col items-center gap-2"
+                    >
+                      <span
+                        className={cn(
+                          "rounded-full ring-offset-[3px] ring-offset-base transition-[box-shadow,filter] duration-150",
+                          on ? "ring-2 ring-text" : "brightness-75 group-hover:brightness-100",
+                        )}
+                      >
+                        <Avatar src={u.avatarUrl} name={u.name} size={64} />
+                      </span>
+                      <span className={cn("max-w-full truncate text-[14px] font-semibold", on ? "text-text" : "text-muted")}>
+                        {u.name}
+                      </span>
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={manual}
+                  onClick={() => {
+                    setManual(true);
+                    setUser(null);
+                  }}
+                  className="group flex w-16 flex-col items-center gap-2"
+                >
+                  <span
+                    className={cn(
+                      "grid h-16 w-16 place-items-center rounded-full border-2 border-dashed text-muted transition-colors",
+                      manual ? "border-text text-text" : "border-line group-hover:border-white/40",
+                    )}
+                  >
+                    <UserPlus size={22} />
+                  </span>
+                  <span className={cn("text-[14px] font-semibold", manual ? "text-text" : "text-muted")}>{t("otherUser")}</span>
+                </button>
+              </div>
+            ) : null}
+            {manual ? (
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder={t("usernamePlaceholder")}
+                aria-label={t("username")}
+                autoComplete="username"
+                className={cn(fieldLgClass, "mb-3")}
+              />
+            ) : null}
+            {name && needsPassword ? (
+              <>
+                <label className="mb-2 block text-[13.5px] font-semibold text-muted" htmlFor="server-password">
+                  {manual ? t("password") : t("passwordOf", { name })}
+                </label>
+                <input
+                  id="server-password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={t("passwordPlaceholder")}
+                  autoComplete="current-password"
+                  autoFocus={!manual}
+                  className={fieldLgClass}
+                />
+              </>
+            ) : null}
+          </div>
+        ) : null}
+      </form>
+    </OnboardingFrame>
   );
 }

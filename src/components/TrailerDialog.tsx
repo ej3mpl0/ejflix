@@ -29,7 +29,7 @@ export function TrailerDialog({ url, title, onClose }: { url: string; title: str
     >
       <div className="flex items-center gap-3 bg-surface px-4 py-2.5">
         <h2 id="trailer-title" className="min-w-0 flex-1 truncate text-[14px] font-semibold">
-          {t("trailer")} · {title}
+          {t("trailer")}: {title}
         </h2>
         <Pill variant="ghost" size="sm" icon={<ExternalLink size={14} />} onClick={() => void api.openExternal(url).catch(() => undefined)}>
           {t("openOnYoutube")}

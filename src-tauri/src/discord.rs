@@ -21,6 +21,13 @@ const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_FRAME: usize = 64 * 1024;
 /// Discord requires 2..=128 characters for `details` / `state`.
 const MAX_TEXT: usize = 128;
+/// Longest `large_image` Discord accepts; a longer one makes it reject the whole activity.
+const MAX_IMAGE: usize = 256;
+
+/// Whether Discord will take this image URL (it refuses the activity otherwise).
+pub fn image_fits(url: &str) -> bool {
+    url.len() <= MAX_IMAGE
+}
 
 /// What is playing, as far as the presence cares (filled by the play commands).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -213,7 +220,13 @@ impl Discord {
                     continue;
                 }
                 let Some(client) = conn.as_mut() else { continue };
-                match send_activity(client, &desired).await {
+                let mut result = send_activity(client, &desired).await;
+                if result.is_err() && desired.large_image.is_some() {
+                    // A picture Discord cannot use makes it refuse everything: try without it.
+                    let plain = Activity { large_image: None, ..desired.clone() };
+                    result = send_activity(client, &plain).await;
+                }
+                match result {
                     Ok(()) => sent = Some(desired),
                     Err(err) => {
                         conn = None;

@@ -103,7 +103,7 @@ export function StatsPanel({
       onClick={(e) => e.stopPropagation()}
     >
       <div className="mb-2 flex items-center justify-between">
-        <p className="text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("statsTitle")}</p>
+        <p className="text-[13px] font-semibold text-muted">{t("statsTitle")}</p>
         <button type="button" onClick={onClose} aria-label={t("close")} className="grid h-7 w-7 place-items-center rounded-full hover:bg-white/10">
           <X size={14} />
         </button>

@@ -18,6 +18,7 @@ export function Dialog({
   onBackdrop,
   className,
   z = "z-[70]",
+  side = false,
   children,
 }: {
   labelledBy?: string;
@@ -26,6 +27,8 @@ export function Dialog({
   /** Classes of the panel itself. */
   className?: string;
   z?: string;
+  /** A sheet on the right edge, full height, with what it belongs to still in sight. */
+  side?: boolean;
   children: ReactNode;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -78,14 +81,21 @@ export function Dialog({
   }, []);
 
   return (
-    <div className={cn("fixed inset-0 grid place-items-center bg-black/70 p-4 md:p-6", z)} onClick={onBackdrop}>
+    <div
+      className={cn(
+        "fixed inset-0",
+        side ? "flex justify-end bg-black/45" : "grid place-items-center bg-black/70 p-4 md:p-6",
+        z,
+      )}
+      onClick={onBackdrop}
+    >
       <div
         ref={panel}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
         tabIndex={-1}
-        className={cn("modal-enter outline-none", className)}
+        className={cn(side ? "panel-in h-full outline-none" : "modal-enter outline-none", className)}
         onClick={(e) => e.stopPropagation()}
       >
         {children}

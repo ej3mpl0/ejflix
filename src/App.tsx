@@ -6,12 +6,12 @@ import { Home } from "./screens/Home";
 import { Player } from "./screens/Player";
 import { AccountStep } from "./screens/AccountStep";
 import { ToastStack } from "./components/Toast";
-import { Logo } from "./components/Logo";
+import { Mark } from "./components/Mark";
+import { OnboardingFrame, StepHeading } from "./components/onboarding/OnboardingFrame";
+import { PosterWall } from "./components/onboarding/Visuals";
 import { UpdateModal } from "./components/UpdateModal";
 import { UpdateAvailableModal } from "./components/UpdateAvailableModal";
 import { ProfileForm } from "./components/ProfileForm";
-import { WindowControls } from "./components/WindowControls";
-import { LanguageSelect } from "./components/LanguageSelect";
 import { SettingsProvider, useSettings } from "./lib/settings-context";
 import { UserDataProvider } from "./lib/userdata-context";
 import { UpdateProvider, useUpdate } from "./lib/update-context";
@@ -196,9 +196,10 @@ function AppInner() {
   };
 
   if (boot) {
+    // The one moment the user does not trigger: the dot of the j lights up while we load.
     return (
-      <div className="grid h-full place-items-center bg-base">
-        <Logo size="login" />
+      <div className="grid h-full place-items-center bg-base" data-tauri-drag-region>
+        <Mark size={132} lighting />
       </div>
     );
   }
@@ -280,24 +281,16 @@ function AppInner() {
             setServer(next);
             setGate("profiles");
           }}
+          onSignedIn={(next) => {
+            void api.savedServer().then(setServer).catch(() => undefined);
+            setSession(next);
+          }}
           onBack={() => setGate(backFromLogin)}
         />
       ) : gate === "create" ? (
-        <div className="grain relative flex h-full flex-col bg-base">
-          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
-          <div className="relative z-10 flex h-[60px] items-center justify-between px-6" data-tauri-drag-region>
-            <div data-tauri-drag-region>
-              <Logo />
-            </div>
-            <div className="flex items-center gap-2">
-              <LanguageSelect />
-              <WindowControls />
-            </div>
-          </div>
-          <div className="relative z-10 flex flex-1 items-start justify-center overflow-y-auto px-6 py-8">
-            <div className="modal-enter w-[460px] max-w-full rounded-card bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]">
-              <h1 className="mb-1 text-[24px] font-semibold tracking-tight">{t("newProfile")}</h1>
-              <p className="mb-6 text-[13px] text-dim">{t("optionOnlineHint")}</p>
+        <OnboardingFrame step={2} visual={<PosterWall />}>
+          <div className="max-w-[460px]">
+            <StepHeading title={t("newProfileTitle")} text={t("optionOnlineHint")} />
               <ProfileForm
                 onCancel={() => setGate(backFromLogin)}
                 onSaved={(profile, pin) => {
@@ -311,9 +304,8 @@ function AppInner() {
                     });
                 }}
               />
-            </div>
           </div>
-        </div>
+        </OnboardingFrame>
       ) : (
         <Profiles
           server={server}

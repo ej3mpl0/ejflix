@@ -25,7 +25,7 @@ export function PauseInfo({ movie, heading }: { movie: Movie; heading: string })
       ) : null}
       <div className="min-w-0">
         <p className="truncate text-[15px] font-semibold text-white">{heading}</p>
-        {meta.length ? <p className="mt-0.5 text-[12px] text-white/70 tabular">{meta.join(" · ")}</p> : null}
+        {meta.length ? <p className="mt-0.5 text-[12px] text-white/70 tabular">{meta.join(",  ")}</p> : null}
         {genres ? <p className="text-[12px] text-white/60">{genres}</p> : null}
         {overview ? <p className="mt-1.5 line-clamp-3 text-[13px] leading-[1.5] text-muted">{overview}</p> : null}
       </div>

@@ -9,6 +9,7 @@ import { errorText } from "../lib/errors";
 import { Chip } from "./Chip";
 import { Shimmer } from "./Shimmer";
 import { SeasonChips } from "./SeasonChips";
+import { ProgressTrack } from "./ProgressTrack";
 
 /**
  * Side panel inside the player: versions of the current item (when it has several
@@ -146,7 +147,7 @@ export function EpisodesPanel({
     >
       <div className="flex items-center gap-3 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">
+          <p className="text-[13px] font-semibold text-muted">
             {listed ? t("episodes") : t("versions")}
           </p>
           <p className="truncate text-[16px] font-semibold">{movie.seriesName ?? movie.name}</p>
@@ -163,7 +164,7 @@ export function EpisodesPanel({
 
       {movie.mediaSources.length > 1 ? (
         <div className="px-5 pb-3">
-          <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("versions")}</p>
+          <p className="mb-2 text-[13px] font-semibold text-muted">{t("versions")}</p>
           <div className="no-scrollbar flex gap-2 overflow-x-auto">
             {movie.mediaSources.map((source) => (
               <Chip
@@ -223,7 +224,7 @@ export function EpisodesPanel({
                   )}
                   aria-current={current ? "true" : undefined}
                 >
-                  {current ? <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent" /> : null}
+                  {current ? <span className="absolute top-1/2 left-1 h-[7px] w-[7px] -translate-y-1/2 rounded-full bg-live" /> : null}
                   <div className="img-outline relative aspect-video w-[120px] shrink-0 overflow-hidden rounded-md bg-panel">
                     {episode.thumbUrl ? (
                       <img src={episode.thumbUrl} alt="" loading="lazy" className="h-full w-full object-cover" />
@@ -241,14 +242,12 @@ export function EpisodesPanel({
                       </span>
                     ) : null}
                     {progress > 0 ? (
-                      <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
-                        <div className="h-full bg-accent" style={{ width: `${progress}%` }} />
-                      </div>
+<ProgressTrack percent={progress} size="sm" />
                     ) : null}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className={cn("truncate text-[13px]", current ? "font-semibold text-white" : "text-text")}>
-                      {[code, episode.name].filter(Boolean).join(" · ")}
+                      {[code, episode.name].filter(Boolean).join(" ")}
                     </p>
                     {runtime ? <p className="text-[11px] text-dim tabular">{runtime}</p> : null}
                   </div>

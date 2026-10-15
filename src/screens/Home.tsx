@@ -37,7 +37,6 @@ import { Shimmer } from "../components/Shimmer";
 import { CommandPalette } from "../components/CommandPalette";
 import { ShortcutsHelp } from "../components/ShortcutsHelp";
 import { TrailerGate } from "../lib/trailer-autoplay";
-import { useAutoAccent } from "../lib/auto-accent";
 import { useSpatialNavigation } from "../lib/spatial-nav";
 import { clearSettingsIntent, requestSettingsIntent } from "../lib/settings-intent";
 import { CalendarPage } from "./CalendarPage";
@@ -407,7 +406,6 @@ export function Home({
   // Arrow keys / gamepad across the whole window, and the accent that follows the artwork,
   // while Home is on screen (the player has its own keys).
   useSpatialNavigation(!hidden);
-  useAutoAccent(settings.appearance.autoAccent && !hidden);
 
   // Ctrl+K: command palette (even from a text field); "?": the shortcuts sheet.
   useEffect(() => {

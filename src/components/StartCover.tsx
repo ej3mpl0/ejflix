@@ -90,7 +90,7 @@ export function StartCover({
                   </div>
                   {percent > 0 ? (
                     <div className="h-1 overflow-hidden rounded-full bg-white/15">
-                      <div className="h-full bg-accent transition-[width] duration-500" style={{ width: `${percent}%` }} />
+                      <div className="h-full bg-live transition-[width] duration-500" style={{ width: `${percent}%` }} />
                     </div>
                   ) : null}
                 </div>

@@ -26,7 +26,7 @@ export function PartyCode({ code }: { code: string }) {
 
   return (
     <div className="rounded-xl bg-white/6 p-3">
-      <p className="mb-1 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("partyCode")}</p>
+      <p className="mb-1 text-[13px] font-semibold text-muted">{t("partyCode")}</p>
       <div className="flex items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-[20px] font-semibold tracking-[0.06em] text-text select-all tabular">
           {code}
@@ -101,7 +101,7 @@ export function PartyInfo({ status, onLeft }: { status: PartyStatus; onLeft?: ()
         </label>
       ) : null}
       <div>
-        <p className="mb-2 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">
+        <p className="mb-2 text-[13px] font-semibold text-muted">
           {t("partyMembers", { n: status.members.length })}
         </p>
         <ul className="space-y-1">

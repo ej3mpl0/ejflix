@@ -116,8 +116,8 @@ export function TrackMenu({
         const next = items[Math.min(items.length - 1, Math.max(0, index + (e.key === "ArrowDown" ? 1 : -1)))];
         next?.focus();
       }}
-      className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 max-h-[calc(100vh-190px)] w-[330px] -translate-x-1/2 overflow-y-auto rounded-2xl bg-panel/95 p-3 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
-      <p className="mb-2 px-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
+      className="modal-enter absolute right-0 bottom-[calc(100%+14px)] max-h-[calc(100vh-190px)] w-[340px] overflow-y-auto rounded-card bg-surface/95 p-3 text-sm shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md">
+      <p className="mb-2 px-2 text-[13px] font-semibold text-muted">
         {kind === "audio" ? t("audio") : t("subtitles")}
       </p>
       <ul

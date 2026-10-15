@@ -89,7 +89,7 @@ export function ChannelsPanel({
     >
       <div className="flex items-center gap-3 px-5 pt-5 pb-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("channels")}</p>
+          <p className="text-[13px] font-semibold text-muted">{t("channels")}</p>
           <p className="truncate text-[16px] font-semibold">{live.group || live.sourceName || t("liveTv")}</p>
         </div>
         <button
@@ -139,7 +139,7 @@ export function ChannelsPanel({
               )}
               aria-current={current ? "true" : undefined}
             >
-              {current ? <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-accent" /> : null}
+              {current ? <span className="absolute top-1/2 left-1 h-[7px] w-[7px] -translate-y-1/2 rounded-full bg-live" /> : null}
               <RowLogo channel={channel} />
               <div className="min-w-0 flex-1">
                 <p className={cn("truncate text-[13px]", current ? "font-semibold text-white" : "text-text")}>
@@ -150,7 +150,7 @@ export function ChannelsPanel({
                   <>
                     <p className="truncate text-[11px] text-dim">{now.title}</p>
                     <div className="mt-1 h-[2px] w-full rounded-full bg-white/15">
-                      <div className="h-full rounded-full bg-accent" style={{ width: `${programmeProgress(now)}%` }} />
+                      <div className="h-full rounded-full bg-live" style={{ width: `${programmeProgress(now)}%` }} />
                     </div>
                   </>
                 ) : (

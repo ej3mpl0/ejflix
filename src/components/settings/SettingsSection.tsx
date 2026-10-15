@@ -10,10 +10,11 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-card bg-surface p-6 shadow-[0_0_0_1px_rgb(255_255_255_/_0.05)]">
-      <h3 className="text-[17px] font-semibold">{title}</h3>
-      {description ? <p className="mt-1 text-[13px] text-dim">{description}</p> : null}
-      <div className="mt-4 divide-y divide-white/6">{children}</div>
+    // Flat: a heading and rows split by hairlines, no card around every group.
+    <section>
+      <h3 className="text-[20px] font-semibold tracking-[-0.01em]">{title}</h3>
+      {description ? <p className="mt-1 max-w-[64ch] text-[13.5px] text-muted">{description}</p> : null}
+      <div className="mt-2 divide-y divide-line">{children}</div>
     </section>
   );
 }
@@ -32,10 +33,10 @@ export function SettingsRow({
 }) {
   return (
     // A wide control drops under its label instead of squeezing it on a narrow window.
-    <div className={stacked ? "py-4" : "flex min-h-14 flex-wrap items-center justify-between gap-x-6 gap-y-3 py-3"}>
+    <div className={stacked ? "py-4" : "flex min-h-16 flex-wrap items-center justify-between gap-x-6 gap-y-3 py-4"}>
       <div className="min-w-[min(220px,100%)] flex-1">
-        <p className="text-[14px] font-medium text-text">{label}</p>
-        {hint ? <p className="mt-0.5 text-[12px] text-dim">{hint}</p> : null}
+        <p className="text-[15px] font-semibold text-text">{label}</p>
+        {hint ? <p className="mt-0.5 max-w-[60ch] text-[13px] text-muted">{hint}</p> : null}
       </div>
       <div className={stacked ? "mt-3" : "max-w-full"}>{children}</div>
     </div>

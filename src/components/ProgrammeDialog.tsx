@@ -65,7 +65,7 @@ export function ProgrammeDialog({
         </span>
         <div className="min-w-0">
           <p className="truncate text-[13px] font-medium text-muted">{channel.name}</p>
-          <p className="text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{status}</p>
+          <p className="text-[13px] font-semibold text-muted">{status}</p>
         </div>
       </div>
       <h2 id="programme-title" className="text-[20px] leading-tight font-semibold">

@@ -52,10 +52,10 @@ export function DownloadsButton({ onPlayFile }: { onPlayFile?: (path: string, ti
   const line = (item: DownloadItem) => {
     if (item.status === "downloading") {
       return item.total > 0
-        ? `${Math.round(percent(item))}% · ${formatBytes(item.received)} / ${formatBytes(item.total)}`
+        ? `${Math.round(percent(item))}%, ${formatBytes(item.received)} / ${formatBytes(item.total)}`
         : formatBytes(item.received);
     }
-    if (item.status === "done") return `${t("downloadDone")} · ${formatBytes(item.received)}`;
+    if (item.status === "done") return `${t("downloadDone")}, ${formatBytes(item.received)}`;
     if (item.status === "error") return item.error ? errorText(t, item.error) : t("downloadFailedShort");
     return t("downloadCanceled");
   };

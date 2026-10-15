@@ -170,7 +170,7 @@ export function Timeline({
         ? segments.map((segment) => (
             <div
               key={`${segment.kind}:${segment.startSeconds}`}
-              className="pointer-events-none absolute inset-y-0 rounded-sm bg-white/28"
+              className="pointer-events-none absolute inset-y-0 rounded-full bg-amber/85"
               style={{
                 left: `${pct(segment.startSeconds)}%`,
                 width: `${Math.max(0.2, pct(segment.endSeconds) - pct(segment.startSeconds))}%`,
@@ -189,9 +189,9 @@ export function Timeline({
               />
             ))
         : null}
-      <div className="absolute inset-y-0 left-0 rounded-full bg-accent" style={{ width: `${progress}%` }} />
+      <div className="absolute inset-y-0 left-0 rounded-full bg-live" style={{ width: `${progress}%` }} />
       <div
-        className="absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-accent opacity-0 shadow-[0_0_0_2px_rgb(0_0_0_/_0.25)] transition-[opacity,transform] duration-150 group-hover/bar:opacity-100 group-data-[dragging=true]/bar:scale-125 group-data-[dragging=true]/bar:opacity-100"
+        className="absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full bg-live shadow-[0_0_0_4px_var(--color-live-soft)] transition-transform duration-150 group-hover/bar:scale-125 group-data-[dragging=true]/bar:scale-125"
         style={{ left: `calc(${progress}% - 7px)` }}
       />
       {previewSeconds != null && interactive ? (
@@ -201,7 +201,7 @@ export function Timeline({
         >
           {hoverSegment ? (
             <p className="mb-1.5 text-center">
-              <span className="rounded-full bg-black/75 px-2.5 py-0.5 text-[11px] font-semibold tracking-wide text-white uppercase">
+              <span className="rounded-full bg-amber px-2.5 py-0.5 text-[11.5px] font-semibold text-on-accent">
                 {t(segmentLabel(hoverSegment.kind))}
               </span>
             </p>

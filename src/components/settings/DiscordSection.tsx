@@ -206,7 +206,7 @@ export function DiscordSection() {
 
           {/* Discord-style card */}
           <div className="self-start rounded-2xl bg-[#111214] p-4 text-white shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
-            <p className="mb-3 truncate text-[11px] font-bold tracking-wide text-white/60 uppercase">
+            <p className="mb-3 truncate text-[13px] font-bold text-white/60">
               {t("discordWatching", { what: previewHeader })}
             </p>
             <div className="flex gap-3">

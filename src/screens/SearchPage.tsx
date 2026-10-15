@@ -18,6 +18,7 @@ import { PosterGridItemsSkeleton } from "../components/Skeletons";
 import { metaToMovie } from "../lib/addons";
 import { EmptyState } from "../components/EmptyState";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
+import { BestResult } from "../components/BestResult";
 
 const MAX_SEARCH_CATALOGS = 6;
 const DEBOUNCE_MS = 300;
@@ -207,6 +208,13 @@ export function SearchPage({
   const shownResults = ofKind(results);
   const shownOnline = ofKind(online);
   const nothing = searched && !loading && !shownResults.length && !shownOnline.length;
+  // The closest match in big (ready to play), the next few beside it, the rest in the grids.
+  const combined = [...shownResults, ...shownOnline];
+  const best = searched ? combined[0] ?? null : null;
+  const side = searched ? combined.slice(1, 6) : [];
+  const lifted = new Set([best, ...side].filter(Boolean).map((movie) => movie!.id));
+  const restResults = shownResults.filter((movie) => !lifted.has(movie.id));
+  const restOnline = shownOnline.filter((movie) => !lifted.has(movie.id));
   // Nothing found: earlier searches, a shorter query and the genres to try instead.
   const shorter = searched.split(/\s+/).length > 1 ? searched.split(/\s+/).slice(0, -1).join(" ") : "";
   const suggestions = nothing
@@ -232,10 +240,16 @@ export function SearchPage({
       {showDiscover ? (
         <h1 className="mb-6 text-[28px] font-semibold tracking-[-0.02em]">{t("search")}</h1>
       ) : (
-        <h1 className="mb-6 flex items-center gap-3 text-[22px] font-semibold tracking-[-0.01em]">
-          <span className="truncate">{t("resultsFor", { query: searched || query })}</span>
+        // What is being typed in the header box, at full size: the search owns the page.
+        <h1 className="mb-6 flex items-center gap-4 border-b border-line pb-5">
+          <Search size={30} className="shrink-0 text-muted" aria-hidden />
+          <span className="sr-only">{t("resultsFor", { query: searched || query })}</span>
+          <span aria-hidden className="flex min-w-0 items-center text-[46px] leading-none font-bold tracking-[-0.025em]">
+            <span className="truncate">{query}</span>
+            <span className="search-caret ml-1 h-[44px] w-[3px] shrink-0 rounded-full bg-live" />
+          </span>
           {loading ? (
-            <span role="status" aria-label={t("searching")} className="shimmer relative h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-white/10" />
+            <span role="status" aria-label={t("searching")} className="shimmer relative ml-auto h-1.5 w-14 shrink-0 overflow-hidden rounded-full bg-white/10" />
           ) : null}
         </h1>
       )}
@@ -325,29 +339,59 @@ export function SearchPage({
               <PosterGridItemsSkeleton count={12} titles />
             </div>
           ) : null}
-          {shownResults.length ? (
+          {best ? (
+            <div className="mb-12 grid gap-8 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,1fr)]">
+              <BestResult movie={best} onOpen={open} onPlay={play} />
+              {side.length ? (
+                <div className="min-w-0">
+                  <h2 className="mb-3 text-[19px] font-semibold">{t("moreResults")}</h2>
+                  <div className="-mx-2 space-y-1">
+                    {side.map((movie) => (
+                      <button
+                        key={movie.id}
+                        type="button"
+                        onClick={() => open(movie)}
+                        className="flex w-full items-center gap-3.5 rounded-xl p-2 text-left transition-colors duration-150 hover:bg-surface"
+                      >
+                        <span className="img-outline h-[87px] w-[58px] shrink-0 overflow-hidden rounded-md bg-panel">
+                          {movie.posterUrl ? <img src={movie.posterUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[15px] font-semibold">{movie.name}</span>
+                          <span className="block truncate text-[13px] text-muted">
+                            {[movie.kind === "Series" ? t("kindSeries") : t("kindMovie"), movie.year].filter(Boolean).join(", ")}
+                          </span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {restResults.length ? (
             <>
               <h2 className="mb-4 flex items-center gap-2 text-[18px] font-semibold">
                 <Server size={17} className="text-dim" />
                 {t("myServer")}
-                <span className="text-[13px] font-normal text-dim tabular">{shownResults.length}</span>
+                <span className="text-[13px] font-normal text-dim tabular">{restResults.length}</span>
               </h2>
               <div className={grid}>
-                {shownResults.map((movie, i) => (
+                {restResults.map((movie, i) => (
                   <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
             </>
           ) : null}
-          {shownOnline.length ? (
+          {restOnline.length ? (
             <>
-              <h2 className={cn("mb-4 flex items-center gap-2 text-[18px] font-semibold", shownResults.length > 0 && "mt-10")}>
+              <h2 className={cn("mb-4 flex items-center gap-2 text-[18px] font-semibold", restResults.length > 0 && "mt-10")}>
                 <Globe size={17} className="text-dim" />
                 {t("online")}
-                <span className="text-[13px] font-normal text-dim tabular">{shownOnline.length}</span>
+                <span className="text-[13px] font-normal text-dim tabular">{restOnline.length}</span>
               </h2>
               <div className={grid}>
-                {shownOnline.map((movie, i) => (
+                {restOnline.map((movie, i) => (
                   <PosterCard key={movie.id} movie={movie} onOpen={open} onPlay={play} layout="grid" delay={i * 20} />
                 ))}
               </div>
@@ -363,7 +407,7 @@ export function SearchPage({
             >
               {suggestions.length ? (
                 <div className="mt-6">
-                  <p className="mb-2 text-[12px] font-semibold tracking-[0.08em] text-dim uppercase">{t("searchSuggestions")}</p>
+                  <p className="mb-2 text-[13px] font-semibold text-muted">{t("searchSuggestions")}</p>
                   <div className="flex flex-wrap justify-center gap-2">
                     {suggestions.map((item, i) => (
                       // A past search can be named like a genre: the label alone is not unique.

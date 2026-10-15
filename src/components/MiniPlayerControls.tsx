@@ -87,7 +87,7 @@ export function MiniPlayerControls({
       </div>
       {!live ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
-          <div className="h-full bg-accent" style={{ width: `${progress}%` }} />
+          <div className="h-full bg-live" style={{ width: `${progress}%` }} />
         </div>
       ) : null}
     </div>

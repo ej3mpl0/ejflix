@@ -15,7 +15,7 @@ export function UpdateModal({ version, onClose }: { version: string; onClose: ()
       <div className="mb-4 text-center md:mb-6">
         <Logo size="login" />
       </div>
-      <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
+      <p className="mb-1 text-center text-[13px] font-semibold text-muted">
         {t("update")}
       </p>
       <h2 id="updated-title" className="mb-5 text-center text-[20px] font-semibold">{t("updatedTo", { version })}</h2>

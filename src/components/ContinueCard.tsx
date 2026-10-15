@@ -4,6 +4,7 @@ import { episodeCode, formatRuntime, remainingMinutes } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { useItemFlags, useUserData } from "../lib/userdata-context";
 import { KebabMenu } from "./KebabMenu";
+import { ProgressTrack } from "./ProgressTrack";
 
 /** 16:9 card for "Continue watching" and "Next up" (movies and episodes). */
 export function ContinueCard({
@@ -27,7 +28,7 @@ export function ContinueCard({
   const isEpisode = movie.kind === "Episode";
   const code = isEpisode ? episodeCode(movie, t("episodeCode")) : "";
   const title = isEpisode ? (movie.seriesName ?? movie.name) : movie.name;
-  const subtitle = isEpisode ? [code, movie.name].filter(Boolean).join(" · ") : null;
+  const subtitle = isEpisode ? [code, movie.name].filter(Boolean).join(" ") : null;
   const image = movie.thumbUrl || movie.backdropUrl || movie.posterUrl;
   const label = isEpisode ? `${title} ${subtitle ?? ""}`.trim() : movie.name;
 
@@ -48,12 +49,12 @@ export function ContinueCard({
           )}
         </button>
         {variant === "new" && !started ? (
-          <span className="pointer-events-none absolute top-2 left-2 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+          <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-on-accent shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
             {t("newBadge")}
           </span>
         ) : null}
         {variant === "nextUp" && !started ? (
-          <span className="pointer-events-none absolute top-2 left-2 rounded-[4px] bg-black/70 px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-white uppercase backdrop-blur-sm">
+          <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-black/70 px-2 py-0.5 text-[11px] font-semibold text-white backdrop-blur-sm">
             {t("nextUpBadge")}
           </span>
         ) : null}
@@ -91,12 +92,10 @@ export function ContinueCard({
           </div>
         ) : null}
         {started ? (
-          <div className="absolute inset-x-0 bottom-0 h-1 bg-white/20">
-            <div className="h-full bg-accent" style={{ width: `${Math.min(100, progress)}%` }} />
-          </div>
+<ProgressTrack percent={progress} />
         ) : null}
       </div>
-      <p className="mt-2 truncate text-sm text-text">{title}</p>
+      <p className="mt-2.5 truncate text-[14.5px] font-semibold text-text">{title}</p>
       {subtitle ? <p className="truncate text-[12px] text-muted">{subtitle}</p> : null}
       <p className="text-[12px] text-dim tabular">
         {started ? t("remaining", { n: remaining }) : formatRuntime(movie.runtimeTicks)}

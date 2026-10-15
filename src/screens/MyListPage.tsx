@@ -10,33 +10,67 @@ import { PosterCard } from "../components/PosterCard";
 import { EmptyState } from "../components/EmptyState";
 import { ListActions } from "../components/ListActions";
 import { Pill } from "../components/Pill";
+import { Chip } from "../components/Chip";
+import { Select } from "../components/Select";
+import { useUserData } from "../lib/userdata-context";
 
-/** A custom list as a tile: a strip of its first posters, its name and size. */
-function ListTile({ list, items, onOpen }: { list: CustomList; items: Movie[]; onOpen: () => void }) {
-  const { t } = useI18n();
-  const posters = items.slice(0, 4);
+/** A list as a shelf: its last three covers fanned out, its name and size. */
+function Shelf({
+  name,
+  count,
+  items,
+  active,
+  onSelect,
+}: {
+  name: string;
+  count: string;
+  items: Movie[];
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const covers = items.filter((movie) => movie.posterUrl).slice(0, 3);
   return (
-    <button type="button" onClick={onOpen} className="group block w-full text-left">
-      <div className="card-depth grid aspect-[16/9] grid-cols-4 gap-0.5 overflow-hidden rounded-poster bg-surface transition-transform duration-200 group-hover:scale-[1.02]">
-        {posters.length ? (
-          posters.map((movie) => (
-            <div key={movie.id} className="h-full bg-white/5">
-              {movie.posterUrl ? <img src={movie.posterUrl} alt="" loading="lazy" className="h-full w-full object-cover" /> : null}
-            </div>
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onSelect}
+      className={cn(
+        "group w-[236px] shrink-0 rounded-card p-4 text-left transition-colors duration-150",
+        active ? "bg-panel shadow-[inset_0_0_0_2px_var(--color-text)]" : "bg-surface hover:bg-panel",
+      )}
+    >
+      <span className="relative mb-3 block h-[118px]">
+        {covers.length ? (
+          covers.map((movie, i) => (
+            <img
+              key={movie.id}
+              src={movie.posterUrl ?? ""}
+              alt=""
+              loading="lazy"
+              className={cn(
+                "absolute bottom-0 rounded-md object-cover shadow-[0_8px_20px_rgb(0_0_0_/_0.5)] transition-transform duration-200 ease-std",
+                i === 1 ? "left-[62px] z-[2] h-[116px] w-[78px]" : "h-[108px] w-[72px]",
+                i === 0 && "left-2 -rotate-[7deg] group-hover:-rotate-[10deg]",
+                i === 2 && "left-[124px] rotate-[7deg] group-hover:rotate-[10deg]",
+              )}
+            />
           ))
         ) : (
-          <div className="col-span-4 grid place-items-center text-muted">
+          <span className="grid h-full place-items-center rounded-md bg-white/5 text-muted">
             <ListPlus size={26} />
-          </div>
+          </span>
         )}
-      </div>
-      <p className="mt-2 truncate text-[14px] font-medium text-text group-hover:text-white">{list.name}</p>
-      <p className="text-[12px] text-dim tabular">{t("listCount", { n: list.items.length })}</p>
+      </span>
+      <span className="block truncate font-display text-[16px] font-semibold">{name}</span>
+      <span className="block text-[13px] text-muted tabular">{count}</span>
     </button>
   );
 }
 
-/** "My list" tab: the saved titles (with Play all / Shuffle) and the profile's custom lists. */
+type Kind = "all" | "movies" | "series" | "unwatched";
+type Order = "added" | "name" | "year";
+
+/** "My list" tab: the saved titles and the custom lists, as shelves; the chosen one fills the grid. */
 export function MyListPage({
   items,
   hasServer,
@@ -54,8 +88,12 @@ export function MyListPage({
   const { t } = useI18n();
   const { lists, moviesOf, create } = useCustomLists();
   const openSeeAll = useSeeAll();
+  const { flags } = useUserData();
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
+  const [shelf, setShelf] = useState<string>("all");
+  const [kind, setKind] = useState<Kind>("all");
+  const [order, setOrder] = useState<Order>("added");
 
   const add = async () => {
     if (!name.trim()) return;
@@ -63,40 +101,37 @@ export function MyListPage({
     if (list) {
       setName("");
       setAdding(false);
+      setShelf(list.id);
     }
   };
 
-  return (
-    <div className="page-enter px-page pt-24 pb-16">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <h2 className="text-[22px] font-semibold tracking-[-0.01em]">{t("myList")}</h2>
-        {items.length ? (
-          <div className="flex flex-wrap items-center gap-3">
-            <ListActions items={items} onPlay={onPlay} />
-          </div>
-        ) : null}
-      </div>
-      {items.length ? (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-rail">
-          {items.map((movie, i) => (
-            <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} layout="grid" delay={i * 20} />
-          ))}
-        </div>
-      ) : (
-        <EmptyState
-          title={t("emptyList")}
-          hint={t("emptyListHint")}
-          icon={<Compass size={26} />}
-          action={onExplore ? { label: t("exploreAction"), icon: <Compass size={16} />, onClick: onExplore } : undefined}
-        />
-      )}
+  // Server items cannot open without the server they came from.
+  const listMovies = (list: CustomList) => moviesOf(list).filter((movie) => hasServer || movie.external);
+  const current = lists.find((list) => list.id === shelf) ?? null;
+  const source = current ? listMovies(current) : items;
+  const isSeries = (movie: Movie) => movie.kind === "Series" || movie.kind === "Episode";
+  const counts = {
+    all: source.length,
+    movies: source.filter((movie) => !isSeries(movie)).length,
+    series: source.filter(isSeries).length,
+  };
+  const shown = source
+    .filter((movie) =>
+      kind === "movies" ? !isSeries(movie) : kind === "series" ? isSeries(movie) : kind === "unwatched" ? !flags(movie).played : true,
+    )
+    .slice();
+  if (order === "name") shown.sort((a, b) => a.name.localeCompare(b.name));
+  if (order === "year") shown.sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
 
-      <section className="mt-section pt-4">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <h2 className="text-[18px] font-semibold">{t("yourLists")}</h2>
+  return (
+    <div className="page-enter px-page pt-28 pb-16">
+      <div className="mb-7 flex flex-wrap items-end justify-between gap-4">
+        <h1 className="text-[40px] leading-none font-extrabold tracking-[-0.025em]">{t("myList")}</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          {shown.length ? <ListActions items={shown} onPlay={onPlay} /> : null}
           {adding ? (
             <form
-              className="flex w-full max-w-[440px] gap-2"
+              className="flex w-[min(400px,100%)] gap-2"
               onSubmit={(e) => {
                 e.preventDefault();
                 void add();
@@ -121,30 +156,98 @@ export function MyListPage({
               </Pill>
             </form>
           ) : (
-            <Pill variant="tonal" pill icon={<Plus size={16} />} onClick={() => setAdding(true)}>
+            <Pill variant="tonal" icon={<Plus size={16} />} onClick={() => setAdding(true)}>
               {t("newList")}
             </Pill>
           )}
         </div>
-        {lists.length ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-rail">
-            {lists.map((list) => {
-              // Server items cannot open without the server they came from.
-              const movies = moviesOf(list).filter((movie) => hasServer || movie.external);
-              return (
-                <ListTile
-                  key={list.id}
-                  list={list}
-                  items={movies}
-                  onOpen={() => openSeeAll?.({ title: list.name, items: movies, listId: list.id })}
-                />
-              );
-            })}
-          </div>
-        ) : (
-          <EmptyState icon={<ListPlus size={26} />} title={t("noCustomLists")} hint={t("noCustomListsHint")} />
-        )}
-      </section>
+      </div>
+
+      <div className="no-scrollbar -mx-page mb-8 flex gap-4 overflow-x-auto px-page pb-1" role="group" aria-label={t("yourLists")}>
+        <Shelf
+          name={t("shelfAll")}
+          count={t("listCount", { n: items.length })}
+          items={items.slice(0, 3)}
+          active={!current}
+          onSelect={() => setShelf("all")}
+        />
+        {lists.map((list) => {
+          const movies = listMovies(list);
+          return (
+            <Shelf
+              key={list.id}
+              name={list.name}
+              count={t("listCount", { n: list.items.length })}
+              items={movies.slice(-3).reverse()}
+              active={current?.id === list.id}
+              onSelect={() => setShelf(list.id)}
+            />
+          );
+        })}
+        <button
+          type="button"
+          onClick={() => setAdding(true)}
+          className="flex w-[236px] shrink-0 flex-col items-center justify-center gap-2.5 rounded-card border-2 border-dashed border-line text-[14px] font-semibold text-muted transition-colors duration-150 hover:border-white/30 hover:text-text"
+        >
+          <Plus size={28} />
+          {t("newList")}
+        </button>
+      </div>
+
+      <div className="mb-6 flex flex-wrap items-center gap-2">
+        {(
+          [
+            ["all", t("sourceAll"), counts.all],
+            ["movies", t("movies"), counts.movies],
+            ["series", t("series"), counts.series],
+            ["unwatched", t("unwatched"), null],
+          ] as const
+        ).map(([value, label, n]) => (
+          <Chip key={value} selected={kind === value} onClick={() => setKind(value)}>
+            {label}
+            {n != null ? <span className="text-[12px] opacity-70 tabular">{n}</span> : null}
+          </Chip>
+        ))}
+        <span className="ml-auto flex items-center gap-3">
+          {current ? (
+            <button
+              type="button"
+              onClick={() => openSeeAll?.({ title: current.name, items: listMovies(current), listId: current.id })}
+              className="text-[14px] font-semibold text-text hover:underline"
+            >
+              {t("manageList")}
+            </button>
+          ) : null}
+          <Select<Order>
+            label={t("sortBy")}
+            value={order}
+            onChange={setOrder}
+            variant="pill"
+            options={[
+              { value: "added", label: t("sortAdded") },
+              { value: "name", label: t("sortName") },
+              { value: "year", label: t("sortYear") },
+            ]}
+          />
+        </span>
+      </div>
+
+      {shown.length ? (
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-x-4 gap-y-2">
+          {shown.map((movie, i) => (
+            <PosterCard key={movie.id} movie={movie} onOpen={onOpen} onPlay={onPlay} layout="grid" delay={Math.min(i, 24) * 20} />
+          ))}
+        </div>
+      ) : current ? (
+        <EmptyState icon={<ListPlus size={26} />} title={t("emptyCustomList")} hint={t("noCustomListsHint")} />
+      ) : (
+        <EmptyState
+          title={t("emptyList")}
+          hint={t("emptyListHint")}
+          icon={<Compass size={26} />}
+          action={onExplore ? { label: t("exploreAction"), icon: <Compass size={16} />, onClick: onExplore } : undefined}
+        />
+      )}
     </div>
   );
 }

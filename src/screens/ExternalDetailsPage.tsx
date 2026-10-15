@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCheck, Clapperboard, Globe, ListPlus, ListVideo, Play, RotateCcw, Shuffle } from "lucide-react";
+import { CheckCheck, Clapperboard, ListPlus, ListVideo, Play, RotateCcw, Shuffle } from "lucide-react";
 import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
@@ -27,10 +27,10 @@ import { useUserData } from "../lib/userdata-context";
 import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
 import { useTrailerGate } from "../lib/trailer-autoplay";
 import { useLocalizedInfo } from "../lib/localized";
-import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
 import { WatchTogetherButton } from "../components/PartyButton";
+import { ProgressTrack } from "../components/ProgressTrack";
 
 /**
  * Details of an online title (Stremio addon metadata). Playing anything opens the
@@ -77,7 +77,6 @@ export function ExternalDetailsPage({
   const trailerGate = useTrailerGate();
   const [trailerMuted, setTrailerMuted] = useState(true);
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
-  useArtworkAccent(`details:${route.key}`, route.leaving ? null : movie?.backdropUrl);
   const localized = useLocalizedInfo(movie);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
@@ -211,7 +210,6 @@ export function ExternalDetailsPage({
     : startItem && startItem.playbackPositionTicks > 0
       ? t("resume")
       : t("playOnline");
-  const genresLine = movie.genres.slice(0, 3).join(" • ");
   // In the content language when TMDB has one; none until that is known (no double start).
   const trailer = localized === undefined ? null : playableTrailer(localized?.trailers ?? []) ?? playableTrailer(movie.remoteTrailers);
   const overview = localized?.overview ?? movie.overview;
@@ -258,7 +256,7 @@ export function ExternalDetailsPage({
         {(
           <>
             {/* Grows with its content instead of clipping it on a short window. */}
-            <section className="relative flex min-h-[max(58vh,420px)] w-full items-end overflow-hidden">
+            <section className="relative flex min-h-[max(72vh,520px)] w-full items-end overflow-hidden">
               <div className="absolute inset-0 will-change-transform" style={{ transform: "translateY(calc(var(--scroll-y, 0) * 0.5px))" }}>
                 {movie.backdropUrl ? (
                   <img src={movie.backdropUrl} alt="" className="fade-in absolute inset-0 h-full w-full scale-[1.08] object-cover" />
@@ -274,6 +272,7 @@ export function ExternalDetailsPage({
                 />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
+              <div className="pointer-events-none absolute inset-y-0 left-0 w-[70%] bg-[linear-gradient(90deg,var(--details-tint)_4%,color-mix(in_oklab,var(--details-tint)_62%,transparent)_40%,transparent_100%)]" />
               <div
                 className="pointer-events-none absolute inset-x-0 bottom-0 h-[320px]"
                 style={{
@@ -282,20 +281,30 @@ export function ExternalDetailsPage({
                 }}
               />
               {/* The gutter sits outside the width cap: inside it, a wide window's gutter ate the column. */}
-              <div className="relative w-full px-page pt-28 pb-8">
-                <div className="max-w-[768px]">
+              <div className="relative w-full px-page pt-28 pb-10">
+                <div className="max-w-[680px]">
                   {movie.logoUrl ? (
-                    <img src={movie.logoUrl} alt={movie.name} className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]" />
+                    <img src={movie.logoUrl} alt={movie.name} className="enter mb-6 max-h-[110px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]" />
                   ) : (
                     <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
                       {movie.name}
                     </h1>
                   )}
-                  <p className="enter enter-d1 mb-5 flex items-center gap-2 text-[14px] text-muted">
-                    <Globe size={14} />
-                    {t("online")}
-                    {genresLine ? <span>• {genresLine}</span> : null}
-                  </p>
+                  <MetaChips
+                    movie={movie}
+                    seasons={isSeries ? seasons.filter((s) => s !== 0).length : undefined}
+                    className="enter enter-d1 mb-3"
+                  />
+                  {overview ? (
+                    <div className="enter enter-d1 mb-6 max-w-[56ch]">
+                      <p className={cn("text-[15px] leading-[1.6] text-text/74", !expanded && "line-clamp-3")}>{overview}</p>
+                      {overview.length > 240 ? (
+                        <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-semibold text-text hover:underline">
+                          {expanded ? t("less") : t("more")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {/* Play keeps its label; the rest are icons (named by their tooltip), always one row. */}
                   <div className="enter enter-d2 flex items-center gap-3">
                     <Pill
@@ -359,24 +368,7 @@ export function ExternalDetailsPage({
                   "linear-gradient(180deg, var(--details-tint) 0%, color-mix(in oklab, var(--details-tint) 30%, var(--color-base)) 320px, var(--color-base) 720px)",
               }}
             >
-              <MetaChips movie={movie} seasons={isSeries ? seasons.filter((s) => s !== 0).length : undefined} />
               {retryBar}
-              {/* Synopsis on the left, the production details in a column beside it. */}
-              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
-                <div className="max-w-[72ch]">
-                  {overview ? (
-                    <>
-                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>{overview}</p>
-                      {overview.length > 240 ? (
-                        <button type="button" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)} className="mt-1 text-[13px] font-semibold text-text hover:underline">
-                          {expanded ? t("less") : t("more")}
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-                <ProductionInfo movie={movie} aside />
-              </div>
 
               {ext.type === "series" ? (
                 <section>
@@ -439,14 +431,12 @@ export function ExternalDetailsPage({
                                   <CheckCheck size={13} />
                                 </span>
                               ) : isNewlyAired(video.released) ? (
-                                <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+                                <span className="pointer-events-none absolute top-1.5 left-1.5 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-on-accent shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
                                   {t("newBadge")}
                                 </span>
                               ) : null}
                               {pct > 0 ? (
-                                <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
-                                  <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
-                                </div>
+<ProgressTrack percent={pct} size="sm" />
                               ) : null}
                             </div>
                             <div className="min-w-0 flex-1 py-1">
@@ -469,7 +459,12 @@ export function ExternalDetailsPage({
                 </section>
               ) : null}
 
-              <CastRow people={movie.cast} />
+              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
+                <div className="min-w-0">
+                  <CastRow people={movie.cast} />
+                </div>
+                <ProductionInfo movie={movie} aside />
+              </div>
               <div className="-mx-page">
                 <OnlineSimilarRail meta={meta} movie={movie} onOpen={onOpen} onPlay={onPlay} />
               </div>

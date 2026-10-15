@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Compass, Download, SearchX, X } from "lucide-react";
+import { Download, SearchX, X } from "lucide-react";
 import type { AddonCatalog, AddonInfo, BrowseSort, Movie } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -7,9 +7,8 @@ import { useI18n } from "../lib/locale-context";
 import { errorText } from "../lib/errors";
 import { useSettings } from "../lib/settings-context";
 import { PosterCard } from "../components/PosterCard";
-import { Select } from "../components/Select";
+import { SentenceToken, fillSentence } from "../components/SentenceToken";
 import { PosterGridItemsSkeleton } from "../components/Skeletons";
-import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { cn } from "../lib/format";
@@ -332,71 +331,127 @@ export function Discover({
     return list;
   }, [items, sort]);
 
-  const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-2";
+  const grid = "grid grid-cols-[repeat(auto-fill,minmax(var(--poster-min),1fr))] gap-x-4 gap-y-2";
+  /** Which word of the sentence has its options open. */
+  const [openToken, setOpenToken] = useState<string | null>(null);
+  const closeToken = useCallback(() => setOpenToken(null), []);
+  const filtered = genre != null || year != null || sort !== "popular" || minRating != null || person != null;
+  const lower = (text: string) => text.charAt(0).toLocaleLowerCase() + text.slice(1);
+  const token = <T extends string>(
+    id: string,
+    label: string,
+    value: T,
+    options: { value: T; label: string }[],
+    onChange: (value: T) => void,
+    columns = false,
+  ) => (
+    <SentenceToken<T>
+      label={label}
+      value={value}
+      options={options}
+      open={openToken === id}
+      onOpen={() => setOpenToken(id)}
+      onClose={closeToken}
+      onChange={onChange}
+      columns={columns}
+    />
+  );
 
   return (
-    <div className="page-enter px-page pt-24 pb-16">
-      <div className="mb-6 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-[28px] font-semibold tracking-[-0.02em]">
-            <Compass size={26} className="text-accent" />
-            {t("discover")}
-          </h1>
-          <p className="mt-1 text-[13px] text-dim">{t("discoverHint")}</p>
-        </div>
-      </div>
+    <div className="page-enter px-page pt-28 pb-16">
+      <h1 className="sr-only">{t("discover")}</h1>
+      {/* The filters read as one sentence: it always says what is on screen. */}
+      <p className="max-w-[1120px] font-display text-[clamp(24px,2.7vw,34px)] leading-[1.45] font-semibold tracking-[-0.015em] text-dim">
+        {fillSentence(t("discoverS1"), {
+          kind: token<Kind>(
+            "kind",
+            t("filterType"),
+            kind,
+            [
+              { value: "movie", label: t("sentenceMovies") },
+              { value: "series", label: t("sentenceSeries") },
+            ],
+            (next) => {
+              setKind(next);
+              setGenre(null);
+            },
+          ),
+          genre: token(
+            "genre",
+            t("filterGenre"),
+            genre ?? "",
+            genreOptions.map((o) => ({ value: o.value, label: o.value ? lower(o.label) : t("sentenceAnyGenre") })),
+            (v) => setGenre(v || null),
+          ),
+          year: token(
+            "year",
+            t("filterYear"),
+            year == null ? "" : String(year),
+            yearOptions.map((o) => ({ value: o.value, label: o.value ? o.label : t("sentenceAnyYear") })),
+            (v) => setYear(v ? Number(v) : null),
+            true,
+          ),
+        })}
+        {fillSentence(t("discoverS2"), {
+          rating: token(
+            "rating",
+            t("filterRating"),
+            minRating == null ? "" : String(minRating),
+            ratingOptions.map((o) => ({
+              value: o.value,
+              label: o.value ? t("sentenceRating", { n: o.value }) : t("sentenceAnyRating"),
+            })),
+            (v) => setMinRating(v ? Number(v) : null),
+          ),
+        })}
+        {hasServer && hasAddons
+          ? fillSentence(t("discoverS3"), {
+              source: token<Source>(
+                "source",
+                t("filterSource"),
+                source,
+                [
+                  { value: "all", label: t("sentenceSourceAll") },
+                  { value: "server", label: t("sentenceSourceServer") },
+                  { value: "online", label: t("sentenceSourceOnline") },
+                ],
+                (next) => {
+                  setSource(next);
+                  // Without the library there is nothing to sort by date added, nor people to pick.
+                  if (next === "online" && sort === "newest") setSort("popular");
+                  if (next === "online") setPerson(null);
+                },
+              ),
+            })
+          : null}
+        {fillSentence(t("discoverS4"), {
+          sort: token<BrowseSort>(
+            "sort",
+            t("sortBy"),
+            sort,
+            sortOptions.map((o) => ({
+              value: o.value,
+              label: t(
+                o.value === "newest"
+                  ? "sentenceSortNewest"
+                  : o.value === "year"
+                    ? "sentenceSortYear"
+                    : o.value === "name"
+                      ? "sentenceSortName"
+                      : "sentenceSortPopular",
+              ),
+            })),
+            setSort,
+          ),
+        })}
+      </p>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2.5">
-        <SegmentedControl<Kind>
-          label={t("filterType")}
-          value={kind}
-          options={[
-            { value: "movie", label: t("movies") },
-            { value: "series", label: t("series") },
-          ]}
-          onChange={(next) => {
-            setKind(next);
-            setGenre(null);
-          }}
-        />
-        {hasServer && hasAddons ? (
-          <SegmentedControl<Source>
-            label={t("filterSource")}
-            value={source}
-            options={[
-              { value: "all", label: t("sourceAll") },
-              { value: "server", label: t("sourceServer") },
-              { value: "online", label: t("sourceOnline") },
-            ]}
-            onChange={(next) => {
-              setSource(next);
-              // Without the library there is nothing to sort by date added, nor people to pick.
-              if (next === "online" && sort === "newest") setSort("popular");
-              if (next === "online") setPerson(null);
-            }}
-          />
-        ) : null}
-        <Select
-          value={year == null ? "" : String(year)}
-          options={yearOptions}
-          onChange={(v) => setYear(v ? Number(v) : null)}
-          label={t("filterYear")}
-        />
-        <Select value={sort} options={sortOptions} onChange={setSort} label={t("sortBy")} />
-        <Select
-          value={genre ?? ""}
-          options={genreOptions}
-          onChange={(v) => setGenre(v || null)}
-          label={t("filterGenre")}
-        />
-        <Select
-          value={minRating == null ? "" : String(minRating)}
-          options={ratingOptions}
-          onChange={(v) => setMinRating(v ? Number(v) : null)}
-          label={t("filterRating")}
-        />
+      <div className="mt-6 mb-5 flex flex-wrap items-center gap-3 text-[14px] text-muted">
         {personFilter ? <PersonFilter value={person} onChange={setPerson} /> : null}
-        {genre != null || year != null || sort !== "popular" || minRating != null || person != null ? (
+        {!loading && visible.length ? (
+          <span className="tabular">{more ? t("discoverCountMore", { n: visible.length }) : t("discoverCount", { n: visible.length })}</span>
+        ) : null}
+        {filtered ? (
           <button
             type="button"
             onClick={() => {
@@ -406,14 +461,14 @@ export function Discover({
               setMinRating(null);
               setPerson(null);
             }}
-            className="btn-press inline-flex h-10 items-center gap-1.5 rounded-pill px-3 text-[13px] font-medium text-muted hover:bg-white/8 hover:text-text"
+            className="btn-press ml-auto inline-flex h-9 items-center gap-1.5 rounded-pill px-3 text-[14px] font-semibold text-text hover:bg-white/8"
           >
             <X size={14} />
             {t("clearFilters")}
           </button>
         ) : null}
       </div>
-      {person && hasAddons && activeSource === "all" ? <p className="-mt-3 mb-5 text-[12px] text-dim">{t("personServerOnly")}</p> : null}
+      {person && hasAddons && activeSource === "all" ? <p className="-mt-2 mb-5 text-[12px] text-dim">{t("personServerOnly")}</p> : null}
 
       {/* A filter change keeps the previous results, dimmed, until the new ones arrive. */}
       {loading && !visible.length ? (

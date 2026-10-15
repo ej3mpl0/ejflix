@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { LocalProfile } from "../lib/types";
 import {
   ArrowLeft,
@@ -40,7 +40,6 @@ import { ProfileForm } from "../components/ProfileForm";
 import { SettingsRow, SettingsSection } from "../components/settings/SettingsSection";
 import { Toggle } from "../components/settings/Toggle";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
-import { ThemePicker } from "../components/settings/ThemePicker";
 import { LanguagePicker } from "../components/settings/LanguagePicker";
 import { ConfirmButton } from "../components/ConfirmButton";
 import { fieldClass as field } from "../lib/ui";
@@ -334,34 +333,35 @@ export function Settings({
     { value: 15, label: t("countdownSeconds", { n: 15 }) },
   ];
 
-  const sections: { id: Section; label: string; icon: typeof Palette }[] = [
-    { id: "appearance", label: t("general"), icon: Palette },
-    { id: "playback", label: t("playback"), icon: Play },
-    { id: "addons", label: t("addons"), icon: Puzzle },
-    { id: "torrents", label: t("torrentsTitle"), icon: Magnet },
-    { id: "iptv", label: t("iptv"), icon: Tv },
-    { id: "discord", label: t("discord"), icon: MessageCircle },
-    { id: "account", label: t("account"), icon: Users },
-    { id: "parental", label: t("parentalTitle"), icon: ShieldCheck },
-    { id: "trakt", label: t("traktTitle"), icon: Clapperboard },
-    { id: "updates", label: t("updates"), icon: RefreshCw },
-    { id: "about", label: t("about"), icon: Info },
+  // Grouped by what they are for: watching, where the films come from, who you are, the app.
+  const sections: { id: Section; label: string; icon: typeof Palette; group: string }[] = [
+    { id: "appearance", label: t("general"), icon: Palette, group: t("settingsGroupWatch") },
+    { id: "playback", label: t("playback"), icon: Play, group: t("settingsGroupWatch") },
+    { id: "addons", label: t("addons"), icon: Puzzle, group: t("settingsGroupSources") },
+    { id: "torrents", label: t("torrentsTitle"), icon: Magnet, group: t("settingsGroupSources") },
+    { id: "iptv", label: t("iptv"), icon: Tv, group: t("settingsGroupSources") },
+    { id: "account", label: t("account"), icon: Users, group: t("settingsGroupProfile") },
+    { id: "parental", label: t("parentalTitle"), icon: ShieldCheck, group: t("settingsGroupProfile") },
+    { id: "discord", label: t("discord"), icon: MessageCircle, group: t("settingsGroupProfile") },
+    { id: "trakt", label: t("traktTitle"), icon: Clapperboard, group: t("settingsGroupProfile") },
+    { id: "updates", label: t("updates"), icon: RefreshCw, group: "ejFlix" },
+    { id: "about", label: t("about"), icon: Info, group: "ejFlix" },
   ];
 
   return (
-    <div className="page-enter mx-auto max-w-[1100px] px-page pt-24 pb-16">
+    <div className="page-enter mx-auto max-w-[1180px] px-page pt-28 pb-16">
       <div className="mb-8 flex items-center gap-3">
         <button
           type="button"
           onClick={onBack}
           aria-label={t("back")}
-          className="icon-hit grid h-10 w-10 place-items-center rounded-full text-white hover:bg-white/10"
+          className="icon-hit grid h-10 w-10 place-items-center rounded-full bg-surface text-white hover:bg-panel"
         >
-          <ArrowLeft size={22} />
+          <ArrowLeft size={19} />
         </button>
-        <h1 className="text-[28px] font-semibold tracking-[-0.02em]">{t("settings")}</h1>
+        <h1 className="text-[40px] leading-none font-extrabold tracking-[-0.025em]">{t("settings")}</h1>
       </div>
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[240px_minmax(0,1fr)] md:gap-10">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[250px_minmax(0,1fr)] md:gap-12">
         {/* A scrolling strip of sections on narrow windows, a column beside the content otherwise. */}
         <div className="min-w-0 space-y-3">
         <label className="relative flex items-center">
@@ -404,28 +404,34 @@ export function Settings({
         ) : (
         <nav
           aria-label={t("settings")}
-          className="no-scrollbar -mx-page flex gap-1 overflow-x-auto px-page md:mx-0 md:block md:space-y-1 md:overflow-visible md:px-0"
+          className="no-scrollbar -mx-page flex gap-1 overflow-x-auto px-page md:mx-0 md:block md:overflow-visible md:px-0"
         >
-          {sections.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              aria-current={section === id ? "page" : undefined}
-              onClick={() => setSection(id)}
-              className={cn(
-                "flex h-11 shrink-0 items-center gap-3 rounded-btn px-3 text-left text-[14px] whitespace-nowrap transition-colors duration-150 md:w-full",
-                section === id ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-white/6 hover:text-text",
-              )}
-            >
-              <Icon size={18} />
-              {label}
-            </button>
+          {sections.map(({ id, label, icon: Icon, group }, i) => (
+            <Fragment key={id}>
+              {i === 0 || sections[i - 1].group !== group ? (
+                <p className={cn("hidden px-3 pb-1.5 text-[12.5px] font-semibold text-dim md:block", i > 0 && "pt-4")}>{group}</p>
+              ) : null}
+              <button
+                type="button"
+                aria-current={section === id ? "page" : undefined}
+                onClick={() => setSection(id)}
+                className={cn(
+                  "flex h-10 shrink-0 items-center gap-3 rounded-[10px] px-3 text-left text-[14.5px] whitespace-nowrap transition-colors duration-150 md:w-full",
+                  section === id ? "bg-surface font-semibold text-text" : "font-medium text-muted hover:bg-white/5 hover:text-text",
+                )}
+              >
+                <Icon size={17} />
+                {label}
+                {/* The section you are in carries the dot. */}
+                {section === id ? <span aria-hidden className="ml-auto h-1.5 w-1.5 rounded-full bg-live" /> : null}
+              </button>
+            </Fragment>
           ))}
         </nav>
         )}
         </div>
 
-        <div className="space-y-6" data-settings-content>
+        <div className="space-y-10" data-settings-content>
           {section === "appearance" ? (
             <>
               <SettingsSection title={t("language")}>
@@ -445,15 +451,7 @@ export function Settings({
                   />
                 </SettingsRow>
               </SettingsSection>
-              <SettingsSection title={t("theme")} description={t("themeHint")}>
-                <SettingsRow label={t("theme")} stacked>
-                  <ThemePicker
-                    value={appearance.theme}
-                    onChange={(theme) => void update({ appearance: { theme, autoAccent: false } })}
-                    auto={appearance.autoAccent}
-                    onAuto={() => void update({ appearance: { autoAccent: true } })}
-                  />
-                </SettingsRow>
+              <SettingsSection title={t("appearanceScreen")}>
                 <SettingsRow label={t("amoled")} hint={t("amoledHint")}>
                   <Toggle
                     checked={appearance.amoled}

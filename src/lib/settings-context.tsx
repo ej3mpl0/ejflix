@@ -138,11 +138,10 @@ export function SettingsProvider({
 
   useEffect(() => {
     applyTheme({
-      theme: settings.appearance.theme,
       amoled: settings.appearance.amoled,
       posterSize: settings.appearance.posterSize,
     });
-  }, [settings.appearance.theme, settings.appearance.amoled, settings.appearance.posterSize]);
+  }, [settings.appearance.amoled, settings.appearance.posterSize]);
 
   const value = useMemo<SettingsContextValue>(
     () => ({ settings, ready, update, reload }),

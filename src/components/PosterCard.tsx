@@ -10,6 +10,7 @@ import { useItemFlags } from "../lib/userdata-context";
 import { PosterPreview } from "./PosterPreview";
 import { KebabMenu, type MenuAction } from "./KebabMenu";
 import { listKeyOf, useCustomLists } from "../lib/lists-context";
+import { ProgressTrack } from "./ProgressTrack";
 
 const PREVIEW_DELAY_MS = 500;
 /** Only a real mouse gets the hover card (touch screens and pens would trip it on tap). */
@@ -133,7 +134,7 @@ export function PosterCard({
           </div>
         </button>
         {isRecentlyAdded(movie.dateCreated) ? (
-          <span className="pointer-events-none absolute top-2 left-2 rounded-[4px] bg-accent px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-on-accent uppercase shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
+          <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-accent px-2 py-0.5 text-[11px] font-semibold text-on-accent shadow-[0_2px_8px_rgb(0_0_0_/_0.5)]">
             {t("newBadge")}
           </span>
         ) : null}
@@ -173,9 +174,7 @@ export function PosterCard({
           ) : null}
         </div>
         {flags.playedPercentage > 0 ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20">
-            <div className="h-full bg-accent" style={{ width: `${Math.min(100, flags.playedPercentage)}%` }} />
-          </div>
+<ProgressTrack percent={flags.playedPercentage} size="sm" />
         ) : null}
         {onPlay ? (
           <button

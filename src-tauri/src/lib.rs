@@ -257,7 +257,7 @@ async fn refresh_presence(app: &tauri::AppHandle) {
     let large_image = if prefs.show_poster {
         info.poster_url
             .clone()
-            .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+            .filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && discord::image_fits(u))
     } else {
         None
     };
@@ -444,7 +444,14 @@ fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
         episode,
         year: None,
         kind: if entry.kind == "series" { "series".into() } else { "movie".into() },
-        poster_url: entry.poster.clone(),
+        // Addon posters are often long proxy URLs (RPDB, AIOStreams...), and Discord rejects
+        // the whole activity when the image passes 256 characters: fall back to the
+        // Cinemeta poster of the IMDb id, which is short and public.
+        poster_url: entry
+            .poster
+            .clone()
+            .filter(|url| discord::image_fits(url))
+            .or_else(|| entry.imdb.as_ref().map(|imdb| format!("https://images.metahub.space/poster/medium/{imdb}/img"))),
         source: "Online".into(),
         live_window: None,
     }

@@ -46,7 +46,7 @@ export function PosterPreview({
     movie.officialRating ?? null,
     runtime || null,
   ].filter((chip): chip is string => Boolean(chip));
-  const genres = movie.genres.slice(0, 3).join(" · ");
+  const genres = movie.genres.slice(0, 3).join(", ");
   const image = movie.backdropUrl ?? movie.posterUrl;
   const resume = movie.playbackPositionTicks > 10_000_000 * 30;
   // Channels have no watched state.

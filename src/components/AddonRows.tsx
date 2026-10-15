@@ -37,7 +37,7 @@ function CatalogRow({
 
   if (items == null) return <RowSkeleton />;
   if (!items.length) return null;
-  const title = `${catalog.name} · ${catalog.addonName}`;
+  const title = `${catalog.addonName}: ${catalog.name}`;
   const loadMore = (loaded: number) =>
     api
       .addonCatalog({ addonUrl: catalog.addonUrl, type: catalog.type, id: catalog.id, skip: loaded })

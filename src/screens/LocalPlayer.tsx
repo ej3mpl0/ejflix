@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FileVideo, Play, X } from "lucide-react";
+import { FileVideo, FolderOpen, Play, X } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { api } from "../lib/api";
 import { useDownloads } from "../lib/downloads-context";
 import { errorText } from "../lib/errors";
-import { cn } from "../lib/format";
+import { cn, formatBytes } from "../lib/format";
 import { fileName, isMediaPath, localMovie, parentDir } from "../lib/media-file";
 import { useI18n } from "../lib/locale-context";
 import type { Movie } from "../lib/types";
@@ -54,7 +54,7 @@ export function LocalPlayer({
   onError: (message: string) => void;
   onPlay: (movie: Movie) => void;
 }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { items } = useDownloads();
   const [recent, setRecent] = useState<RecentFile[]>(() => loadRecent(userId));
   const [over, setOver] = useState(false);
@@ -154,81 +154,181 @@ export function LocalPlayer({
   const downloads = items.filter((item) => item.status === "done" && isMediaPath(item.path));
   const downloadPaths = new Set(downloads.map((item) => item.path.toLowerCase()));
   const opened = recent.filter((item) => !downloadPaths.has(item.path.toLowerCase()));
+  const last = recent[0] ?? null;
 
   return (
-    <div className="page-enter px-page pt-24 pb-16">
-      <div className="mb-6">
-        <h1 className="flex items-center gap-2.5 text-[28px] font-semibold tracking-[-0.02em]">
-          <FileVideo size={26} className="text-accent" />
-          {t("playerTab")}
-        </h1>
-        <p className="mt-1 max-w-[62ch] text-[13px] text-dim">{t("localPlayerHint")}</p>
+    <div className="page-enter px-page pt-28 pb-16">
+      <div className="mb-8">
+        <h1 className="text-[40px] leading-none font-extrabold tracking-[-0.025em]">{t("playerTab")}</h1>
+        <p className="mt-3 max-w-[60ch] text-[15px] leading-[1.55] text-muted">{t("localPlayerHint")}</p>
       </div>
 
-      <button
-        type="button"
-        onClick={() => void choose()}
-        disabled={busy}
-        className={cn(
-          "flex w-full flex-col items-center rounded-card border border-dashed px-8 py-16 text-center transition-colors duration-150",
-          over ? "border-accent bg-accent-soft" : "border-white/15 bg-surface hover:border-white/30",
-        )}
-      >
-        <span className="mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent-soft text-accent">
-          <FileVideo size={26} />
-        </span>
-        <p className="text-[16px] font-medium [text-wrap:balance]">{over ? t("localPlayerDrop") : t("localPlayerChoose")}</p>
-      </button>
-
-      {downloads.length ? (
-        <section className="mt-10">
-          <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">{t("localPlayerDownloads")}</h2>
-          <div>
-            {downloads.map((item) => {
-              const label = item.title || item.name;
-              const hint = item.title && item.name && item.title !== item.name ? item.name : item.source;
-              return (
-                <FileRow
-                  key={item.id}
-                  label={label}
-                  hint={hint}
-                  title={item.path}
-                  onPlay={() => void playPaths([item.path], label)}
-                />
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      {opened.length ? (
-        <section className="mt-10">
-          <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">{t("localPlayerRecent")}</h2>
-          <div>
-            {opened.map((item) => (
-              <FileRow
-                key={item.path}
-                label={item.name}
-                hint={parentDir(item.path)}
-                title={item.path}
-                onPlay={() => void playPaths([item.path])}
-                onRemove={() => forget(item.path)}
+      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,1fr)_380px]">
+        {/* The screen waiting for a film: drop a file on it, or pick one. The dot of the j
+            lights up while something is held over it, because that is what will play. */}
+        <button
+          type="button"
+          onClick={() => void choose()}
+          disabled={busy}
+          className={cn(
+            "group relative grid aspect-video w-full place-items-center overflow-hidden rounded-card text-center transition-[background-color,box-shadow] duration-200 ease-std",
+            over
+              ? "bg-panel shadow-[inset_0_0_0_2px_var(--color-text)]"
+              : "bg-surface shadow-[inset_0_0_0_1px_var(--color-line)] hover:bg-panel",
+          )}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "pointer-events-none absolute inset-0 bg-[radial-gradient(60%_55%_at_50%_45%,rgb(242_35_47_/_0.14),transparent_70%)] transition-opacity duration-300",
+              over ? "opacity-100" : "opacity-0",
+            )}
+          />
+          <span className="relative flex flex-col items-center px-8">
+            <svg viewBox="0 0 120 120" width={92} height={92} aria-hidden className="mb-6 overflow-visible">
+              <path d="M66 50v34c0 11-7 17-18 17h-4" fill="none" stroke="var(--color-text)" strokeWidth="17" strokeLinecap="round" />
+              <circle
+                cx="66"
+                cy="27"
+                r="11"
+                className={cn(
+                  "transition-[fill,filter] duration-300",
+                  over ? "fill-live drop-shadow-[0_0_14px_rgb(242_35_47_/_0.75)]" : "fill-line group-hover:fill-dim",
+                )}
               />
-            ))}
-          </div>
-        </section>
-      ) : null}
+            </svg>
+            <span className="text-[26px] leading-tight font-bold tracking-[-0.015em] [text-wrap:balance]">
+              {over ? t("localPlayerDrop") : t("localPlayerDropHere")}
+            </span>
+            <span className="mt-2 text-[14px] text-muted">{t("localPlayerFormats")}</span>
+            <span
+              className={cn(
+                "mt-7 inline-flex h-12 items-center gap-2.5 rounded-pill bg-accent px-6 text-[15px] font-semibold text-on-accent transition-opacity duration-150 group-hover:bg-accent-hover",
+                over && "opacity-0",
+              )}
+            >
+              <FolderOpen size={18} />
+              {t("localPlayerChoose")}
+            </span>
+          </span>
+        </button>
+
+        <aside className="min-w-0 space-y-9">
+          {last ? (
+            <section>
+              <h2 className="mb-3 text-[19px] font-semibold">{t("localPlayerContinue")}</h2>
+              <div className="rounded-card bg-surface p-5">
+                <div className="flex items-start gap-3">
+                  <TypeBadge name={last.name} large />
+                  <div className="min-w-0 flex-1">
+                    <p className="line-clamp-2 text-[15px] leading-snug font-semibold break-words" title={last.path}>
+                      {last.name}
+                    </p>
+                    <p className="mt-1 truncate text-[13px] text-muted">{parentDir(last.path)}</p>
+                    <p className="mt-0.5 text-[13px] text-dim">{relativeTime(last.at, locale)}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void playPaths([last.path])}
+                  className="btn-press btn-play mt-4 inline-flex h-11 w-full items-center justify-center gap-2 rounded-pill bg-accent text-[14.5px] font-semibold text-on-accent hover:bg-accent-hover"
+                >
+                  <Play size={16} fill="currentColor" />
+                  {t("play")}
+                </button>
+              </div>
+            </section>
+          ) : null}
+
+          {downloads.length ? (
+            <section>
+              <h2 className="mb-2 flex items-baseline gap-2.5 text-[19px] font-semibold">
+                {t("localPlayerDownloads")}
+                <span className="font-sans text-[13px] font-medium text-dim tabular">{downloads.length}</span>
+              </h2>
+              <div className="-mx-2">
+                {downloads.map((item) => {
+                  const label = item.title || item.name;
+                  return (
+                    <FileRow
+                      key={item.id}
+                      name={item.name || label}
+                      label={label}
+                      hint={[item.source, item.total > 0 ? formatBytes(item.total) : null].filter(Boolean).join(", ")}
+                      title={item.path}
+                      onPlay={() => void playPaths([item.path], label)}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
+
+          {opened.length > (last && !downloadPaths.has(last.path.toLowerCase()) ? 1 : 0) ? (
+            <section>
+              <h2 className="mb-2 text-[19px] font-semibold">{t("localPlayerRecent")}</h2>
+              <div className="-mx-2">
+                {opened
+                  .filter((item) => item !== last)
+                  .map((item) => (
+                    <FileRow
+                      key={item.path}
+                      name={item.name}
+                      label={item.name}
+                      hint={relativeTime(item.at, locale)}
+                      title={item.path}
+                      onPlay={() => void playPaths([item.path])}
+                      onRemove={() => forget(item.path)}
+                    />
+                  ))}
+              </div>
+            </section>
+          ) : null}
+
+          {!last && !downloads.length ? (
+            <p className="rounded-card bg-surface p-5 text-[14px] leading-[1.55] text-muted">{t("localPlayerEmpty")}</p>
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }
 
+/** "hace 2 días" / "2 days ago". */
+function relativeTime(at: number, locale: string): string {
+  const minutes = Math.round((at - Date.now()) / 60_000);
+  const format = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
+  if (Math.abs(minutes) < 60) return format.format(minutes, "minute");
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 24) return format.format(hours, "hour");
+  return format.format(Math.round(hours / 24), "day");
+}
+
+/** The file's container (MKV, MP4…) on a small tile, standing in for a cover. */
+function TypeBadge({ name, large = false }: { name: string; large?: boolean }) {
+  const ext = /\.([a-z0-9]{2,4})$/i.exec(name)?.[1]?.toUpperCase() ?? "";
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "grid shrink-0 place-items-center rounded-[10px] bg-panel font-display font-bold text-muted",
+        large ? "h-12 w-12 text-[12px]" : "h-10 w-10 text-[11px]",
+      )}
+    >
+      {ext || <FileVideo size={18} />}
+    </span>
+  );
+}
+
 function FileRow({
+  name,
   label,
   hint,
   title,
   onPlay,
   onRemove,
 }: {
+  name: string;
   label: string;
   hint?: string;
   title: string;
@@ -237,18 +337,16 @@ function FileRow({
 }) {
   const { t } = useI18n();
   return (
-    <div className="group/file flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-white/5">
-      <button
-        type="button"
-        onClick={onPlay}
-        aria-label={`${t("play")} ${label}`}
-        className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white/90 text-black"
-      >
-        <Play size={16} fill="currentColor" className="translate-x-px" />
+    <div className="group/file flex items-center gap-3 rounded-xl px-2 py-2 transition-colors duration-150 hover:bg-surface">
+      <button type="button" onClick={onPlay} aria-label={`${t("play")} ${label}`} className="relative shrink-0">
+        <TypeBadge name={name} />
+        <span className="absolute inset-0 grid place-items-center rounded-[10px] bg-accent text-on-accent opacity-0 transition-opacity duration-150 group-hover/file:opacity-100">
+          <Play size={15} fill="currentColor" className="translate-x-px" />
+        </span>
       </button>
       <button type="button" onClick={onPlay} className="min-w-0 flex-1 text-left" title={title}>
-        <p className="truncate text-[14px] font-medium text-text">{label}</p>
-        {hint ? <p className="truncate text-[12px] text-dim">{hint}</p> : null}
+        <p className="truncate text-[14.5px] font-semibold text-text">{label}</p>
+        {hint ? <p className="truncate text-[13px] text-muted">{hint}</p> : null}
       </button>
       {onRemove ? (
         <button
@@ -256,7 +354,7 @@ function FileRow({
           onClick={onRemove}
           aria-label={t("localPlayerRemove")}
           title={t("localPlayerRemove")}
-          className="grid h-8 w-8 place-items-center rounded-full text-dim opacity-0 hover:bg-white/10 hover:text-text group-hover/file:opacity-100 focus-visible:opacity-100"
+          className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-dim opacity-0 hover:bg-white/10 hover:text-text group-hover/file:opacity-100 focus-visible:opacity-100"
         >
           <X size={15} />
         </button>

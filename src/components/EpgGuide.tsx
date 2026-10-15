@@ -94,16 +94,16 @@ export function EpgGuide({
 
   return (
     <>
-      <div ref={scroller} className="overflow-x-auto rounded-card bg-surface">
+      <div ref={scroller} className="overflow-x-auto">
         <div className="relative" style={{ width: NAME_W + ((end - origin) / 3600) * HOUR_PX }}>
           {/* Time ruler */}
-          <div className="sticky top-0 z-20 flex h-9 border-b border-white/8 bg-surface">
-            <div className="sticky left-0 z-10 shrink-0 bg-surface" style={{ width: NAME_W }} />
+          <div className="sticky top-0 z-20 flex h-9 bg-base">
+            <div className="sticky left-0 z-10 shrink-0 bg-base" style={{ width: NAME_W }} />
             <div className="relative flex-1">
               {hours.map((h) => (
                 <span
                   key={h}
-                  className="absolute top-0 flex h-full items-center border-l border-white/8 pl-2 text-[11px] text-dim tabular"
+                  className="absolute top-0 flex h-full items-center pl-1 text-[13px] text-muted tabular"
                   style={{ left: x(h) }}
                 >
                   {formatTime(h, locale)}
@@ -114,7 +114,7 @@ export function EpgGuide({
           {/* "Now" line */}
           {now > origin && now < end ? (
             <div
-              className="pointer-events-none absolute top-0 bottom-0 z-10 w-0.5 bg-accent"
+              className="pointer-events-none absolute top-7 bottom-0 z-10 w-0.5 bg-live before:absolute before:-top-1 before:-left-[4px] before:h-2.5 before:w-2.5 before:rounded-full before:bg-live"
               style={{ left: NAME_W + x(now) }}
               aria-hidden
             />
@@ -122,11 +122,11 @@ export function EpgGuide({
           {withGuide.map((channel) => {
             const programmes = (guide[channel.id] ?? []).filter((p) => p.stop > origin && p.start < end);
             return (
-              <div key={channel.id} className="flex border-b border-white/5" style={{ height: ROW_H }}>
+              <div key={channel.id} className="flex" style={{ height: ROW_H }}>
                 <button
                   type="button"
                   onClick={() => onPlay(channel)}
-                  className="sticky left-0 z-10 flex shrink-0 items-center gap-2.5 border-r border-white/8 bg-surface px-3 text-left hover:bg-panel"
+                  className="sticky left-0 z-10 flex shrink-0 items-center gap-3 bg-base px-3 text-left hover:bg-surface"
                   style={{ width: NAME_W }}
                   title={
                     (channel.catchupDays ?? 0) > 0
@@ -134,14 +134,14 @@ export function EpgGuide({
                       : channel.name
                   }
                 >
-                  <span className="grid h-9 w-12 shrink-0 place-items-center overflow-hidden rounded-md bg-white/6 p-1">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-[10px] bg-panel p-1">
                     {channel.logo ? (
                       <img src={channel.logo} alt="" loading="lazy" className="max-h-full max-w-full object-contain" />
                     ) : (
                       <span className="text-[11px] font-bold text-white/70">{channelInitials(channel.name)}</span>
                     )}
                   </span>
-                  <span className="min-w-0 truncate text-[13px] font-medium">{channel.name}</span>
+                  <span className="min-w-0 truncate text-[14px] font-semibold">{channel.name}</span>
                   {(channel.catchupDays ?? 0) > 0 ? <History size={13} className="ml-auto shrink-0 text-dim" aria-hidden /> : null}
                 </button>
                 <div className="relative flex-1">
@@ -170,17 +170,17 @@ export function EpgGuide({
                         className={cn(
                           "absolute top-1.5 bottom-1.5 overflow-hidden rounded-lg px-2.5 text-left transition-colors",
                           live
-                            ? "bg-accent-soft ring-1 ring-accent/40 hover:bg-accent/25"
+                            ? "bg-panel hover:bg-line"
                             : past && !archived
-                              ? "bg-white/4 opacity-60 hover:bg-white/8"
-                              : "bg-white/6 hover:bg-white/12",
+                              ? "bg-surface opacity-50 hover:opacity-80"
+                              : "bg-surface hover:bg-panel",
                         )}
                         style={{ left: left + 1, width }}
                       >
                         <span className="flex items-center gap-1.5">
                           {archived ? <History size={12} className="shrink-0 text-accent" aria-hidden /> : null}
                           {reminded ? <Bell size={12} className="shrink-0 fill-current text-accent" aria-hidden /> : null}
-                          <span className="block truncate text-[12.5px] font-medium text-text">{p.title}</span>
+                          <span className="block truncate text-[13px] font-semibold text-text">{p.title}</span>
                         </span>
                         <span className="block truncate text-[11px] text-dim tabular">
                           {formatTime(p.start, locale)} – {formatTime(p.stop, locale)}

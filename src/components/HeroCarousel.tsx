@@ -9,7 +9,6 @@ import { QualityBadges } from "./QualityBadge";
 import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "./TrailerBackdrop";
 import { useTrailerGate, useTrailerUrl } from "../lib/trailer-autoplay";
 import { useSettings } from "../lib/settings-context";
-import { useArtworkAccent } from "../lib/auto-accent";
 import { useReducedMotion } from "../lib/motion";
 import { useLocalizedInfo } from "../lib/localized";
 
@@ -70,7 +69,6 @@ export function HeroCarousel({
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
   const [muted, setMuted] = useState(true);
   const trailerBusy = trailerPhase === "loading" || trailerPhase === "playing";
-  useArtworkAccent("hero", gate.hero ? current?.backdropUrl ?? null : null);
 
   const goTo = (target: number, delta: 1 | -1 = target > safeIndex ? 1 : -1) => {
     if (target === safeIndex || count < 2) return;
@@ -220,7 +218,7 @@ export function HeroCarousel({
       </div>
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--color-base)_2%,transparent)_0%,color-mix(in_oklab,var(--color-base)_12%,transparent)_40%,color-mix(in_oklab,var(--color-base)_34%,transparent)_70%,color-mix(in_oklab,var(--color-base)_78%,transparent)_100%)]" />
       <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[220px] bg-gradient-to-t from-base to-transparent" />
-      <div className="pointer-events-none absolute inset-y-0 left-0 w-[55%] bg-gradient-to-r from-base/80 via-base/30 to-transparent" />
+      <div className="pointer-events-none absolute inset-y-0 left-0 w-[66%] bg-[linear-gradient(90deg,var(--color-base)_4%,color-mix(in_oklab,var(--color-base)_80%,transparent)_45%,transparent_100%)]" />
 
       <div key={current.id} className="absolute bottom-16 left-page max-w-[min(640px,60%)]">
         {current.logoUrl ? (
@@ -230,33 +228,23 @@ export function HeroCarousel({
             className="enter mb-5 max-h-[112px] max-w-[62%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]"
           />
         ) : (
-          <h1 className="enter mb-4 text-[clamp(40px,6vw,72px)] leading-[1] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
+          <h1 className="enter mb-5 text-[clamp(40px,6vw,72px)] leading-[0.98] font-extrabold tracking-[-0.03em] [text-wrap:balance]">
             {current.name}
           </h1>
         )}
-        <div className="enter enter-d1 mb-3 flex flex-wrap items-center gap-2 text-[14px] text-text/80">
+        {/* Spacing, not separator dots: the dot belongs to what is live. */}
+        <div className="enter enter-d1 mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[14px] font-medium text-text/80">
           {meta.map((part, i) => (
-            <span key={`${part}-${i}`} className="flex items-center gap-2">
-              {i > 0 ? <span aria-hidden className="h-1 w-1 rounded-full bg-text/50" /> : null}
-              <span>{part}</span>
-            </span>
+            <span key={`${part}-${i}`}>{part}</span>
           ))}
-          {runtime ? (
-            <span className="flex items-center gap-2">
-              <span aria-hidden className="h-1 w-1 rounded-full bg-text/50" />
-              <span className="tabular">{runtime}</span>
-            </span>
-          ) : null}
+          {runtime ? <span className="tabular">{runtime}</span> : null}
           {current.communityRating ? (
-            <span className="flex items-center gap-2">
-              <span aria-hidden className="h-1 w-1 rounded-full bg-text/50" />
-              <span className="text-star tabular">★ {current.communityRating.toFixed(1)}</span>
-            </span>
+            <span className="text-star tabular">★ {current.communityRating.toFixed(1)}</span>
           ) : null}
           <QualityBadges badges={current.badges.slice(0, 3)} className="ml-1" />
         </div>
         {overview ? (
-          <p className="enter enter-d2 mb-6 line-clamp-3 max-w-[560px] text-[15px] leading-[1.6] text-muted">
+          <p className="enter enter-d2 mb-6 line-clamp-3 max-w-[46ch] text-[15px] leading-[1.6] text-text/74">
             {overview}
           </p>
         ) : null}
@@ -264,7 +252,7 @@ export function HeroCarousel({
           <Pill variant="primary" pill size="lg" className="btn-play" icon={<Play size={18} fill="currentColor" />} onClick={() => onPlay(current)}>
             {resume ? t("resume") : t("play")}
           </Pill>
-          <Pill variant="tonal" pill size="lg" icon={<Info size={18} />} onClick={() => onDetails(current)}>
+          <Pill variant="tonal" pill size="lg" className="backdrop-blur-md" icon={<Info size={18} />} onClick={() => onDetails(current)}>
             {t("viewDetails")}
           </Pill>
           {current.external ? null : <FavoriteButton movie={current} pill className="h-12" />}
@@ -296,16 +284,19 @@ export function HeroCarousel({
               aria-current={i === safeIndex ? "true" : undefined}
               aria-label={t("slide", { n: i + 1 })}
               onClick={() => goTo(i)}
-              className="grid h-6 place-items-center px-0.5"
+              className="grid h-6 w-4 place-items-center"
             >
               <span
                 className={cn(
-                  "block h-2 rounded-full transition-[width,background-color] duration-[var(--duration-normal)] ease-std",
-                  i === safeIndex ? "w-8 bg-accent" : "w-2 bg-white/40 hover:bg-white/70",
+                  "block h-1.5 w-1.5 rounded-full transition-[background-color,box-shadow] duration-[var(--duration-normal)] ease-std",
+                  i === safeIndex ? "bg-live shadow-[0_0_12px_rgb(242_35_47_/_0.7)]" : "bg-white/30 hover:bg-white/70",
                 )}
               />
             </button>
           ))}
+          {count < 2 ? null : (
+            <span className="ml-2 text-[12px] text-muted tabular">{t("slideOf", { n: safeIndex + 1, total: count })}</span>
+          )}
         </div>
       ) : null}
     </section>

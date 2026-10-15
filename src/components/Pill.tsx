@@ -6,11 +6,11 @@ type Variant = "primary" | "tonal" | "ghost" | "danger";
 /**
  * Button primitive: accent-filled `primary`, translucent `tonal`, borderless `ghost`, and
  * `danger` for destructive actions (never the accent: a white or green accent reads as "ok").
- * `pill` rounds it fully (hero / details actions); otherwise the button radius applies.
+ * Primary is white like the letters of the wordmark; red is never a button colour.
  */
 export function Pill({
   variant = "tonal",
-  pill = false,
+  pill: _pill = false,
   size = "md",
   icon,
   className,
@@ -31,7 +31,7 @@ export function Pill({
         size === "sm" && "h-9 px-4 text-[13px]",
         size === "md" && "h-11 px-5 text-[14px]",
         size === "lg" && "h-12 px-7 text-[15px]",
-        pill ? "rounded-pill" : "rounded-btn",
+        "rounded-pill",
         variant === "primary" && "bg-accent text-on-accent hover:bg-accent-hover",
         variant === "tonal" && "bg-white/12 text-text hover:bg-white/18",
         variant === "ghost" && "bg-transparent text-text hover:bg-white/8",

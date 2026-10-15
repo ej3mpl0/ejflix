@@ -31,7 +31,6 @@ import { cn } from "../lib/format";
 import { useI18n } from "../lib/locale-context";
 import { isParentalBlocked, useParental } from "../lib/parental";
 import { useSettings } from "../lib/settings-context";
-import { THEMES } from "../lib/theme";
 import type { MessageKey } from "../lib/i18n";
 import type { NavView } from "./GlassHeader";
 import type { SettingsSectionId } from "../screens/Settings";
@@ -276,8 +275,6 @@ export function CommandPalette({
       keywords,
       run: () => onView(view),
     });
-    const themeIndex = THEMES.findIndex((theme) => theme.id === settings.appearance.theme);
-    const nextTheme = THEMES[(themeIndex + 1) % THEMES.length];
     return [
       go("home", t("home"), <HomeIcon size={16} />, "inicio home"),
       go("discover", t("discover"), <Compass size={16} />, "descubrir discover explore"),
@@ -313,22 +310,6 @@ export function CommandPalette({
         icon: <Moon size={16} />,
         keywords: "tema theme amoled negro black oscuro dark",
         run: () => void update({ appearance: { amoled: !settings.appearance.amoled } }),
-      },
-      {
-        id: "action:next-theme",
-        group: "actions",
-        label: t("paletteNextTheme", { name: t(nextTheme.labelKey) }),
-        icon: <Palette size={16} />,
-        keywords: "tema theme color colour acento accent",
-        run: () => void update({ appearance: { theme: nextTheme.id, autoAccent: false } }),
-      },
-      {
-        id: "action:auto-accent",
-        group: "actions",
-        label: settings.appearance.autoAccent ? t("paletteAutoAccentOff") : t("paletteAutoAccentOn"),
-        icon: <Sparkles size={16} />,
-        keywords: "tema theme color colour acento accent auto",
-        run: () => void update({ appearance: { autoAccent: !settings.appearance.autoAccent } }),
       },
       {
         id: "action:trailers",
@@ -471,7 +452,7 @@ export function CommandPalette({
         {entries.map((entry, i) => (
           <div key={`${entry.group}:${entry.id}`}>
             {i === 0 || entries[i - 1].group !== entry.group ? (
-              <p className="px-3 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">
+              <p className="px-3 pt-2.5 pb-1 text-[13px] font-semibold text-muted">
                 {entry.group === "recent" ? (
                   <span className="inline-flex items-center gap-1.5">
                     <Clock size={11} />

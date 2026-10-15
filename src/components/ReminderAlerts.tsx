@@ -91,13 +91,13 @@ export function ReminderAlerts({ enabled, onWatch }: { enabled: boolean; onWatch
             )}
           </span>
           <div className="min-w-0 flex-1">
-            <p className="flex items-center gap-1.5 text-[11px] font-semibold tracking-[0.06em] text-accent uppercase">
+            <p className="flex items-center gap-1.5 text-[13px] font-semibold text-accent">
               <BellRing size={12} aria-hidden />
               {reminder.start * 1000 > now ? t("reminderSoon") : t("reminderNow")}
             </p>
             <p className="truncate text-[14px] font-semibold">{reminder.title}</p>
             <p className="truncate text-[12px] text-dim">
-              {reminder.channelName} · <span className="tabular">{formatTime(reminder.start, locale)}</span>
+              {reminder.channelName}, <span className="tabular">{formatTime(reminder.start, locale)}</span>
             </p>
           </div>
           <button

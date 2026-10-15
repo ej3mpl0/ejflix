@@ -99,7 +99,7 @@ export function ListPickerDialog({ movie, onClose }: { movie: Movie; onClose: ()
           <h2 id="list-picker-title" className="text-[18px] font-semibold">
             {t("addToLists")}
           </h2>
-          <p className="truncate text-[13px] text-dim">{movie.kind === "Episode" && movie.seriesName ? `${movie.seriesName} · ${movie.name}` : movie.name}</p>
+          <p className="truncate text-[13px] text-dim">{movie.kind === "Episode" && movie.seriesName ? `${movie.seriesName}: ${movie.name}` : movie.name}</p>
         </div>
         <button
           type="button"

@@ -179,7 +179,7 @@ export function Profiles({
   if (locked) {
     return (
       <div className="grain relative flex h-full flex-col bg-base">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_55%,rgb(242_35_47_/_0.07),transparent_70%)]" />
         {topBar}
         <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-6 pb-16">
           <Avatar src={locked.avatar} name={locked.name} size={96} />
@@ -206,7 +206,7 @@ export function Profiles({
     const initial = editor === "new" ? null : editor;
     return (
       <div className="grain relative flex h-full flex-col bg-base">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_55%,rgb(242_35_47_/_0.07),transparent_70%)]" />
         {topBar}
         <div className="relative z-10 flex flex-1 items-start justify-center overflow-y-auto px-6 py-8">
           <div className="modal-enter w-[460px] max-w-full rounded-card bg-surface p-8 shadow-[0_24px_64px_rgb(0_0_0_/_0.45),0_0_0_1px_rgb(255_255_255_/_0.06)]">
@@ -239,10 +239,10 @@ export function Profiles({
 
   return (
     <div className="grain relative flex h-full flex-col bg-base">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_circle_at_50%_0%,color-mix(in_oklab,var(--color-accent)_12%,transparent),transparent_55%)]" />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_55%,rgb(242_35_47_/_0.07),transparent_70%)]" />
       {topBar}
       <div className="relative z-10 flex flex-1 flex-col items-center overflow-y-auto px-6 pt-6 pb-16">
-        <h1 className="mb-10 text-center text-[36px] font-semibold tracking-tight [text-wrap:balance]">
+        <h1 className="mt-6 mb-12 text-center text-[44px] font-extrabold tracking-[-0.025em] [text-wrap:balance]">
           {selected ? t("helloName", { name: selected.name }) : t("whoIsWatching")}
         </h1>
         {loading ? (
@@ -263,8 +263,10 @@ export function Profiles({
                   <span className="relative transition-transform duration-200 group-hover:scale-105">
                     <span
                       className={cn(
-                        "block rounded-full border-2 transition-colors",
-                        editing ? "border-white/60" : "border-transparent group-hover:border-white",
+                        "block rounded-full ring-offset-4 ring-offset-base transition-[box-shadow,filter] duration-200",
+                        editing
+                          ? "ring-2 ring-white/60"
+                          : "brightness-[0.78] group-hover:ring-[3px] group-hover:ring-text group-hover:brightness-100 group-focus-visible:ring-[3px] group-focus-visible:ring-text group-focus-visible:brightness-100",
                       )}
                     >
                       <Avatar src={profile.avatar} name={profile.name} size={116} />
@@ -274,12 +276,16 @@ export function Profiles({
                         <Pencil size={26} />
                       </span>
                     ) : profile.hasPin ? (
-                      <span className="absolute right-1 bottom-1 grid h-7 w-7 place-items-center rounded-full bg-black/70 text-white">
-                        <Lock size={12} />
+                      <span className="absolute right-0 bottom-0 grid h-8 w-8 place-items-center rounded-full bg-panel text-white shadow-[0_0_0_4px_var(--color-base)]">
+                        <Lock size={13} />
                       </span>
                     ) : null}
                   </span>
-                  <span className="text-[15px] text-muted group-hover:text-white">{profile.name}</span>
+                  <span className="text-[17px] font-semibold text-muted group-hover:text-white group-focus-visible:text-white">
+                    {profile.name}
+                  </span>
+                  {/* The dot of the j marks whose turn it is. */}
+                  <span className="-mt-1 h-[7px] w-[7px] rounded-full bg-live opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100" />
                 </button>
               ))}
               {canAddLocal ? (
@@ -301,7 +307,7 @@ export function Profiles({
             {/* Jellyfin users */}
             {server ? (
               <>
-                <p className="mt-12 mb-6 flex items-center gap-2 text-[11px] font-semibold tracking-[0.14em] text-dim uppercase">
+                <p className="mt-14 mb-6 flex items-center gap-2 text-[14px] font-semibold text-muted">
                   <Server size={13} />
                   {t("jellyfinUsers", { server: server.serverName })}
                 </p>
@@ -382,7 +388,7 @@ export function Profiles({
           >
             {manual || !selected ? (
               <>
-                <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
+                <label className="mb-2 block text-[13px] font-semibold text-muted">
                   {t("username")}
                 </label>
                 <input
@@ -394,7 +400,7 @@ export function Profiles({
                 />
               </>
             ) : null}
-            <label className="mb-2 block text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">
+            <label className="mb-2 block text-[13px] font-semibold text-muted">
               {t("password")}
             </label>
             <input

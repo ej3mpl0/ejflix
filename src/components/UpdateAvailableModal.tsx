@@ -55,7 +55,7 @@ export function UpdateAvailableModal() {
       <div className="mb-4 text-center md:mb-6">
         <Logo size="login" />
       </div>
-      <p className="mb-1 text-center text-[11px] font-semibold uppercase tracking-[0.08em] text-dim">{t("update")}</p>
+      <p className="mb-1 text-center text-[13px] font-semibold text-muted">{t("update")}</p>
       <h2 id="update-title" className="mb-2 text-center text-[22px] font-semibold">
         {t("updateAvailable")}
       </h2>
@@ -67,7 +67,7 @@ export function UpdateAvailableModal() {
         <div className="mb-6 max-h-[min(220px,30vh)] overflow-y-auto rounded-btn bg-black/25 px-4 py-3 text-[14px] leading-[1.55] text-muted">
           {blocks.map((block, i) =>
             block.kind === "heading" ? (
-              <p key={i} className={cn("text-[12px] font-semibold uppercase tracking-wide text-dim", i > 0 && "mt-3")}>
+              <p key={i} className={cn("text-[13px] font-semibold text-muted", i > 0 && "mt-3")}>
                 {block.text}
               </p>
             ) : block.kind === "bullet" ? (

@@ -50,8 +50,8 @@ function Tab({
       data-tab={active ? "active" : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "inline-flex h-[60px] items-center px-1 text-[14px] transition-colors duration-150 hover:text-text",
-        active ? "font-semibold text-text" : "text-text/70",
+        "inline-flex h-[64px] items-center px-1 text-[15px] transition-colors duration-150 hover:text-text",
+        active ? "font-semibold text-text" : "font-medium text-text/62",
         className,
       )}
       onClick={() => onView(id)}
@@ -176,8 +176,9 @@ export function GlassHeader({
     const bar = barRef.current;
     const ruler = measureRef.current;
     if (!bar || !ruler) return;
-    const GAP = 20;
-    const MORE = 88;
+    // Must match the nav's gap-6 and the bar's gap-9 below, or the last tab runs into the actions.
+    const GAP = 24;
+    const MORE = 92;
     const compute = () => {
       const widths = [...ruler.children].map((child) => (child as HTMLElement).offsetWidth);
       const style = getComputedStyle(bar);
@@ -186,7 +187,8 @@ export function GlassHeader({
         parseFloat(style.paddingLeft) -
         parseFloat(style.paddingRight) -
         (logoRef.current?.offsetWidth ?? 0) -
-        32;
+        36 -
+        8;
       const total = widths.reduce((sum, w, i) => sum + w + (i ? GAP : 0), 0);
       if (total <= room) {
         setFit(Number.POSITIVE_INFINITY);
@@ -259,7 +261,9 @@ export function GlassHeader({
         setIndicator(null);
         return;
       }
-      setIndicator({ left: active.offsetLeft, width: active.offsetWidth });
+      // Measured against the nav itself: the folded "More" tab sits in its own positioned box.
+      const box = active.getBoundingClientRect();
+      setIndicator({ left: box.left - nav.getBoundingClientRect().left, width: box.width });
     };
     measure();
     const observer = new ResizeObserver(measure);
@@ -271,7 +275,7 @@ export function GlassHeader({
   useEffect(() => {
     const el = indicatorRef.current;
     if (!el || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    el.animate([{ transform: "scale(1, 1)" }, { transform: "scale(1.18, 0.8)", offset: 0.45 }, { transform: "scale(1, 1)" }], {
+    el.animate([{ transform: "scale(1)" }, { transform: "scale(1.6)", offset: 0.45 }, { transform: "scale(1)" }], {
       duration: 400,
       easing: "cubic-bezier(0.2, 0, 0, 1)",
     });
@@ -282,14 +286,15 @@ export function GlassHeader({
   return (
     <header
       className={cn(
-        "glass-header fixed inset-x-0 top-0 z-40 flex h-[60px] items-center transition-transform duration-[var(--duration-sheet)] ease-std",
+        "glass-header fixed inset-x-0 top-0 z-40 flex h-[64px] items-center transition-transform duration-[var(--duration-sheet)] ease-std",
         hidden && "-translate-y-full",
       )}
-      style={{ ["--glass-line" as string]: scrolled ? 0.9 : 0.35 }}
+      data-scrolled={scrolled ? "" : undefined}
+      style={{ ["--glass-line" as string]: scrolled ? 0.9 : 0 }}
     >
       <div
         ref={barRef}
-        className="relative flex h-full min-w-0 flex-1 items-center gap-8 px-6"
+        className="relative flex h-full min-w-0 flex-1 items-center gap-9 px-[var(--spacing-page)]"
         data-tauri-drag-region
         onDoubleClick={() => getCurrentWindow().toggleMaximize().catch(() => undefined)}
       >
@@ -302,7 +307,7 @@ export function GlassHeader({
             <span
               key={entry.id}
               className={cn(
-                "shrink-0 px-1 text-[14px] font-semibold whitespace-nowrap",
+                "shrink-0 px-1 text-[15px] font-semibold whitespace-nowrap",
                 entry.library && "max-w-[180px] truncate",
               )}
             >
@@ -311,7 +316,7 @@ export function GlassHeader({
             </span>
           ))}
         </div>
-        <nav ref={navRef} className="relative flex h-full min-w-0 items-center gap-5">
+        <nav ref={navRef} className="relative flex h-full min-w-0 items-center gap-6">
           {shown.map((entry) =>
             entry.library ? (
               <div key={entry.id} className="group/tab relative flex h-full min-w-0 items-center">
@@ -339,8 +344,8 @@ export function GlassHeader({
                 aria-expanded={moreOpen}
                 onClick={() => setMoreOpen((v) => !v)}
                 className={cn(
-                  "inline-flex h-[60px] items-center gap-1 px-1 text-[14px] transition-colors duration-150 hover:text-text",
-                  foldedActive ? "font-semibold text-text" : "text-text/70",
+                  "inline-flex h-[64px] items-center gap-1 px-1 text-[15px] transition-colors duration-150 hover:text-text",
+                  foldedActive ? "font-semibold text-text" : "font-medium text-text/62",
                 )}
               >
                 {foldedActive ? folded.find((entry) => entry.id === view)?.label : t("moreTabs")}
@@ -377,8 +382,9 @@ export function GlassHeader({
             <span
               ref={indicatorRef}
               aria-hidden
-              className="pointer-events-none absolute bottom-0 h-[3px] rounded-full bg-accent transition-[left,width] duration-[var(--duration-slow)] ease-std"
-              style={{ left: indicator.left, width: indicator.width }}
+              // The dot over the j of the wordmark, over the tab you are on.
+              className="pointer-events-none absolute top-[13px] h-1.5 w-1.5 rounded-full bg-live transition-[left] duration-[var(--duration-slow)] ease-std"
+              style={{ left: indicator.left + indicator.width / 2 - 3 }}
             />
           ) : null}
         </nav>
@@ -395,8 +401,8 @@ export function GlassHeader({
           // (typing opens it through onSearch).
           onPointerDown={onSearchFocus}
           className={cn(
-            "flex h-9 cursor-text items-center overflow-hidden gap-2 rounded-pill border bg-white/6 pl-3 transition-[border-color,background-color,width] duration-200 ease-std",
-            search ? "w-[188px]" : "w-9 lg:w-[188px]",
+            "flex h-9 cursor-text items-center overflow-hidden gap-2 rounded-pill border bg-white/8 pl-3.5 transition-[border-color,background-color,width] duration-200 ease-std",
+            search ? "w-[220px]" : "w-9 lg:w-[220px]",
             "focus-within:w-[min(260px,40vw)] focus-within:bg-white/10",
             view === "search" && search ? "border-accent/60" : "border-white/10 focus-within:border-accent/60",
           )}
@@ -411,7 +417,7 @@ export function GlassHeader({
             title={`${t("search")} ( / )`}
             aria-label={t("search")}
             // The app-wide focus ring is a hard outline: on a pill field the border does the job.
-            className="field-own-focus h-full min-w-0 flex-1 bg-transparent text-[13px] text-text outline-none placeholder:text-dim"
+            className="field-own-focus h-full min-w-0 flex-1 bg-transparent text-[14px] text-text outline-none placeholder:text-dim"
           />
           <button
             type="button"

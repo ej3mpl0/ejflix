@@ -211,7 +211,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
         : null,
       info.trial ? t("iptvAccountTrial") : null,
     ];
-    return parts.filter(Boolean).join(" · ");
+    return parts.filter(Boolean).join(", ");
   };
 
   const statusLine = (source: IptvSource) => {
@@ -238,7 +238,7 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
       source.epgChannels ? t("iptvEpgChannels", { n: source.epgChannels }) : source.epgError ? t("iptvEpgError") : t("iptvEpgNone"),
       source.updatedMs ? t("iptvUpdated", { time: formatAgo(source.updatedMs, locale) }) : null,
     ];
-    return parts.filter(Boolean).join(" · ");
+    return parts.filter(Boolean).join(", ");
   };
 
   const editing = form != null;
@@ -257,11 +257,11 @@ export function IptvSection({ onToast }: { onToast: (message: string, action?: {
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-2 text-[14px] font-medium text-text">
                   <span className="truncate">{source.name}</span>
-                  <span className="shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+                  <span className="shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[11.5px] font-semibold text-muted">
                     {kindLabel(source.kind)}
                   </span>
                   {!source.enabled ? (
-                    <span className="shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+                    <span className="shrink-0 rounded-full bg-white/8 px-2 py-0.5 text-[11.5px] font-semibold text-muted">
                       {t("iptvDisabled")}
                     </span>
                   ) : null}

@@ -152,7 +152,7 @@ export function ProfileForm({
           </button>
         </div>
 
-        <p className="mt-6 mb-2 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("avatarLabel")}</p>
+        <p className="mt-6 mb-2 text-[13px] font-semibold text-muted">{t("avatarLabel")}</p>
         <div className="grid grid-cols-6 gap-2.5" role="radiogroup" aria-label={t("avatarLabel")}>
           {AVATAR_PRESETS.map((_, i) => {
             const id = presetId(i);
@@ -177,7 +177,7 @@ export function ProfileForm({
           })}
         </div>
 
-        <label className="mt-6 mb-2 block text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">
+        <label className="mt-6 mb-2 block text-[13px] font-semibold text-muted">
           {t("profileName")}
         </label>
         <input

@@ -17,7 +17,7 @@ export function SpeedMenu({ speed, onSelect }: { speed: number; onSelect: (speed
   return (
     <div
       ref={root}
-      className="modal-enter absolute bottom-[calc(100%+14px)] left-1/2 w-[min(440px,90vw)] -translate-x-1/2 rounded-2xl bg-panel/95 px-6 pt-4 pb-6 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
+      className="modal-enter absolute right-0 bottom-[calc(100%+14px)] w-[min(440px,90vw)] rounded-card bg-surface/95 px-6 pt-4 pb-6 shadow-[0_16px_40px_rgb(0_0_0_/_0.5),0_0_0_1px_rgb(255_255_255_/_0.08)] backdrop-blur-md"
     >
       <p className="mb-6 text-[16px] font-semibold text-white">{t("playbackSpeed")}</p>
       <div className="relative mx-3">

@@ -31,7 +31,6 @@ import { PersonDialog } from "../components/PersonDialog";
 import { TrailerBackdrop, TrailerMuteButton, type TrailerPhase } from "../components/TrailerBackdrop";
 import { useTrailerGate } from "../lib/trailer-autoplay";
 import { useLocalizedInfo } from "../lib/localized";
-import { useArtworkAccent } from "../lib/auto-accent";
 import { useCustomLists } from "../lib/lists-context";
 import { startShuffle } from "../lib/play-queue";
 import { WatchTogetherButton } from "../components/PartyButton";
@@ -88,7 +87,6 @@ export function DetailsPage({
   const trailerGate = useTrailerGate();
   const [trailerMuted, setTrailerMuted] = useState(true);
   const [trailerPhase, setTrailerPhase] = useState<TrailerPhase>("idle");
-  useArtworkAccent(`details:${route.key}`, route.leaving ? null : detail?.backdropUrl);
   const localized = useLocalizedInfo(detail);
 
   useBackNavigation(top && !route.leaving ? onBack : null);
@@ -171,7 +169,6 @@ export function DetailsPage({
   const overview = localized?.overview ?? movie?.overview ?? null;
   const currentSeason = seasons.find((season) => season.id === seasonId) ?? null;
   const chapters = movie && !isSeries && hasChapterImages(movie.chapters) ? movie.chapters : [];
-  const genresLine = movie?.genres.slice(0, 3).join(" • ") ?? "";
   const tintValue = settings.appearance.amoled ? null : tint;
   const seriesImdb = movie?.providerIds.Imdb ?? null;
   const hasAddons = settings.addons.urls.length > 0 || settings.addons.peerflix;
@@ -250,7 +247,7 @@ export function DetailsPage({
         ) : (
           <>
             {/* Grows with its content instead of clipping it on a short window. */}
-            <section className="relative flex min-h-[max(58vh,420px)] w-full items-end overflow-hidden">
+            <section className="relative flex min-h-[max(72vh,520px)] w-full items-end overflow-hidden">
               <div
                 className="absolute inset-0 will-change-transform"
                 style={{ transform: "translateY(calc(var(--scroll-y, 0) * 0.5px))" }}
@@ -273,6 +270,7 @@ export function DetailsPage({
                 />
               </div>
               <div className="pointer-events-none absolute inset-x-0 top-0 h-[120px] bg-gradient-to-b from-black/50 to-transparent" />
+              <div className="pointer-events-none absolute inset-y-0 left-0 w-[70%] bg-[linear-gradient(90deg,var(--details-tint)_4%,color-mix(in_oklab,var(--details-tint)_62%,transparent)_40%,transparent_100%)]" />
               <div
                 className="pointer-events-none absolute inset-x-0 bottom-0 h-[320px]"
                 style={{
@@ -281,21 +279,35 @@ export function DetailsPage({
                 }}
               />
               {/* The gutter sits outside the width cap: inside it, a wide window's gutter ate the column. */}
-              <div className="relative w-full px-page pt-28 pb-8">
-                <div className="max-w-[768px]">
+              <div className="relative w-full px-page pt-28 pb-10">
+                <div className="max-w-[680px]">
                   {movie.logoUrl ? (
                     <img
                       src={movie.logoUrl}
                       alt={movie.name}
-                      className="enter mb-4 max-h-[80px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]"
+                      className="enter mb-6 max-h-[110px] max-w-[60%] object-contain object-left drop-shadow-[0_4px_16px_rgb(0_0_0_/_0.5)]"
                     />
                   ) : (
                     <h1 className="enter mb-3 text-[clamp(36px,5vw,64px)] leading-[1.02] font-extrabold tracking-[-0.02em] [text-wrap:balance]">
                       {movie.name}
                     </h1>
                   )}
-                  {movie.tagline ? <p className="enter enter-d1 mb-2 text-[15px] text-text/80 italic">{movie.tagline}</p> : null}
-                  {genresLine ? <p className="enter enter-d1 mb-5 text-[14px] text-muted">{genresLine}</p> : null}
+                  <MetaChips movie={movie} seasons={isSeries ? seasons.length : undefined} className="enter enter-d1 mb-3" />
+                  {overview ? (
+                    <div className="enter enter-d1 mb-6 max-w-[56ch]">
+                      <p className={cn("text-[15px] leading-[1.6] text-text/74", !expanded && "line-clamp-3")}>{overview}</p>
+                      {overview.length > 240 ? (
+                        <button
+                          type="button"
+                          aria-expanded={expanded}
+                          onClick={() => setExpanded((v) => !v)}
+                          className="mt-1 text-[13px] font-semibold text-text hover:underline"
+                        >
+                          {expanded ? t("less") : t("more")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {/* Play keeps its label; the rest are icons (named by their tooltip), always one row. */}
                   <div className="enter enter-d2 flex items-center gap-3">
                     <Pill
@@ -364,31 +376,6 @@ export function DetailsPage({
                   "linear-gradient(180deg, var(--details-tint) 0%, color-mix(in oklab, var(--details-tint) 30%, var(--color-base)) 320px, var(--color-base) 720px)",
               }}
             >
-              <MetaChips movie={movie} seasons={isSeries ? seasons.length : undefined} />
-
-              {/* Synopsis on the left, the production details in a column beside it. */}
-              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
-                <div className="max-w-[72ch]">
-                  {overview ? (
-                    <>
-                      <p className={cn("text-[15px] leading-[1.65] text-muted", !expanded && "line-clamp-3")}>
-                        {overview}
-                      </p>
-                      {overview.length > 240 ? (
-                        <button
-                          type="button"
-                          aria-expanded={expanded}
-                          onClick={() => setExpanded((v) => !v)}
-                          className="mt-1 text-[13px] font-semibold text-text hover:underline"
-                        >
-                          {expanded ? t("less") : t("more")}
-                        </button>
-                      ) : null}
-                    </>
-                  ) : null}
-                </div>
-                <ProductionInfo movie={movie} aside />
-              </div>
 
               {isSeries ? (
                 <section>
@@ -431,7 +418,13 @@ export function DetailsPage({
                 </section>
               ) : null}
 
-              <CastRow people={movie.cast} onPerson={setPerson} />
+              <div className="grid gap-x-12 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
+                <div className="min-w-0">
+                  <CastRow people={movie.cast} onPerson={setPerson} />
+                  {movie.tagline ? <p className="mt-6 text-[15px] text-text/80 italic">{movie.tagline}</p> : null}
+                </div>
+                <ProductionInfo movie={movie} aside />
+              </div>
 
               {chapters.length ? (
                 <section>

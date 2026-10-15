@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Bell, Clock, Grid2x2, Play, Plus, RefreshCw, Search, Settings as SettingsIcon, Star, Tv, X } from "lucide-react";
 import type { Channel, ChannelGroup, IptvSource, Movie, Programme, Reminder } from "../lib/types";
 import { api } from "../lib/api";
@@ -22,6 +22,7 @@ import { EmptyState } from "../components/EmptyState";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { Select } from "../components/Select";
 import { useEpgNow } from "../hooks/useEpgNow";
+import { LiveSpotlight } from "../components/LiveSpotlight";
 import { EpgGuide } from "../components/EpgGuide";
 import { SegmentedControl } from "../components/settings/SegmentedControl";
 import { Pill } from "../components/Pill";
@@ -67,7 +68,9 @@ export function LiveTv({
   const [groupFilter, setGroupFilter] = useState("");
   const [selection, setSelection] = useState<Selection>({ type: "all" });
   /** Channel tiles or the programme guide. */
-  const [layout, setLayout] = useState<"grid" | "guide">("grid");
+  const [layout, setLayout] = useState<"grid" | "guide">("guide");
+  /** The channel at the top: the one last pointed at, else the first on screen. */
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<Channel[]>([]);
@@ -157,6 +160,8 @@ export function LiveTv({
 
   // Programme guide for the channels on screen, refreshed every minute.
   const epg = useEpgNow(items);
+
+  const spotlight = items.find((c) => c.id === spotlightId) ?? items[0] ?? null;
 
   const play = (channel: Channel) => {
     onPlay(channelToMovie(channel, names.get(channel.sourceId) ?? ""));
@@ -256,13 +261,13 @@ export function LiveTv({
       aria-current={active ? "true" : undefined}
       onClick={onClick}
       className={cn(
-        "flex min-h-10 w-full items-center gap-2.5 rounded-btn px-3 text-left text-[13px] transition-colors duration-150",
-        active ? "bg-accent-soft font-semibold text-accent" : "text-muted hover:bg-white/6 hover:text-text",
+        "inline-flex h-9 max-w-[240px] shrink-0 items-center gap-2 rounded-pill px-4 text-[14px] whitespace-nowrap transition-colors duration-150",
+        active ? "bg-accent font-semibold text-on-accent" : "bg-surface font-medium text-muted hover:bg-panel hover:text-text",
       )}
     >
       {icon}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {extra ? <span className="shrink-0 text-[11px] text-dim tabular">{extra}</span> : null}
+      <span className="min-w-0 truncate">{label}</span>
+      {extra ? <span className="shrink-0 text-[12px] opacity-70 tabular">{extra}</span> : null}
     </button>
   );
 
@@ -286,14 +291,11 @@ export function LiveTv({
     <div className="page-enter px-page pt-24 pb-16">
       <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="flex items-center gap-2.5 text-[28px] font-semibold tracking-[-0.02em]">
-            <Tv size={26} className="text-accent" />
-            {t("liveTv")}
-          </h1>
-          <p className="mt-1 text-[13px] text-dim">
+          <h1 className="text-[40px] leading-none font-extrabold tracking-[-0.025em]">{t("liveTv")}</h1>
+          <p className="mt-2 text-[14px] text-muted">
             {anyLoading && !ready
               ? t("iptvLoading")
-              : `${channelTotal === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: channelTotal })} · ${groupTotal === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: groupTotal })}`}
+              : `${channelTotal === 1 ? t("iptvChannelsOne") : t("iptvChannels", { n: channelTotal })}, ${groupTotal === 1 ? t("iptvGroupsOne") : t("iptvGroups", { n: groupTotal })}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -365,17 +367,24 @@ export function LiveTv({
           {enabled
             .filter((s) => s.error)
             .map((s) => `${s.name}: ${s.error}`)
-            .join(" · ")}
+            .join(", ")}
         </div>
       ) : null}
 
-      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 md:grid-cols-[250px_minmax(0,1fr)] md:gap-8">
-        <nav
-          aria-label={t("iptvGroupsLabel")}
-          // Narrow windows stack the list above the channels: cap it so the channels stay in reach.
-          className="max-md:max-h-[40vh] max-md:overflow-y-auto max-md:rounded-card max-md:bg-surface max-md:p-2 md:sticky md:top-24 md:max-h-[calc(100vh-140px)] md:overflow-y-auto md:pr-1"
-        >
-          <div className="space-y-0.5">
+      {spotlight ? (
+        <LiveSpotlight
+          channel={spotlight}
+          epg={epg[spotlight.id]}
+          sourceName={multiSource ? names.get(spotlight.sourceId) : undefined}
+          onPlay={play}
+          onFavorite={(c, on) => void favorite(c, on)}
+          multiview={{ active: mosaic.some((c) => c.id === spotlight.id), onToggle: toggleMosaic }}
+        />
+      ) : null}
+
+      <div>
+        <nav aria-label={t("iptvGroupsLabel")} className="mb-6 flex items-center gap-2">
+          <div className="flex shrink-0 gap-2">
             {sideButton(t("allChannels"), selection.type === "all", () => setSelection({ type: "all" }), String(channelTotal), <Tv size={15} />)}
             {sideButton(t("favorites"), selection.type === "favorites", () => setSelection({ type: "favorites" }), undefined, <Star size={15} />)}
             {sideButton(t("recent"), selection.type === "recent", () => setSelection({ type: "recent" }), undefined, <Clock size={15} />)}
@@ -388,34 +397,33 @@ export function LiveTv({
             )}
           </div>
           {!groups.length && (loading || (anyLoading && !ready)) ? (
-            <div className="mt-5 space-y-1.5 px-3" aria-hidden>
-              <Shimmer className="mb-3 h-3 w-20 rounded" />
-              {Array.from({ length: 8 }).map((_, i) => (
-                <Shimmer key={i} className="h-7 rounded-btn" delay={i * 60} />
+            <div className="flex gap-2" aria-hidden>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Shimmer key={i} className="h-9 w-24 rounded-pill" delay={i * 60} />
               ))}
             </div>
           ) : groups.length ? (
             <>
-              <p className="mt-5 mb-2 px-3 text-[11px] font-semibold tracking-[0.08em] text-dim uppercase">{t("iptvGroupsLabel")}</p>
+              <span aria-hidden className="mx-1 h-6 w-px shrink-0 bg-line" />
               {groups.length > 20 ? (
                 <input
                   value={groupFilter}
                   onChange={(e) => setGroupFilter(e.target.value)}
                   placeholder={t("filterGroups")}
                   aria-label={t("filterGroups")}
-                  className="field-own-focus mb-2 h-9 w-full rounded-btn bg-white/6 px-3 text-[13px] text-text outline-none placeholder:text-dim focus:bg-white/10 focus-visible:ring-2 focus-visible:ring-accent/50"
+                  className="field-own-focus h-9 w-[150px] shrink-0 rounded-pill bg-surface px-4 text-[13px] text-text outline-none placeholder:text-dim focus:bg-panel focus-visible:ring-2 focus-visible:ring-accent/50"
                 />
               ) : null}
-              <div className="space-y-0.5">
+              <div className="no-scrollbar row-mask flex min-w-0 gap-2 overflow-x-auto">
                 {visibleGroups.map((g) => {
                   const active = selection.type === "group" && selection.name === g.name && selection.sourceId === g.sourceId;
                   const label = g.name || t("noGroup");
-                  return sideButton(
-                    multiSource ? `${label} · ${names.get(g.sourceId) ?? ""}` : label,
+                  return <Fragment key={`${g.sourceId}:${g.name}`}>{sideButton(
+                    multiSource ? `${label}, ${names.get(g.sourceId) ?? ""}` : label,
                     active,
                     () => setSelection({ type: "group", name: g.name, sourceId: g.sourceId }),
                     String(g.count),
-                  );
+                  )}</Fragment>;
                 })}
               </div>
             </>
@@ -441,7 +449,7 @@ export function LiveTv({
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[14px] font-medium">{reminder.title}</p>
                       <p className="truncate text-[12px] text-dim">
-                        <span className="tabular">{formatWhen(reminder.start, locale)}</span> · {reminder.channelName}
+                        <span className="tabular">{formatWhen(reminder.start, locale)}</span>, {reminder.channelName}
                       </p>
                     </div>
                     <button
@@ -498,6 +506,7 @@ export function LiveTv({
             <>
               <div className={grid}>
                 {items.map((channel, i) => (
+                  <div key={channel.id} onMouseEnter={() => setSpotlightId(channel.id)} onFocus={() => setSpotlightId(channel.id)}>
                   <ChannelCard
                     key={channel.id}
                     channel={channel}
@@ -507,6 +516,7 @@ export function LiveTv({
                     multiview={{ active: mosaic.some((c) => c.id === channel.id), onToggle: toggleMosaic }}
                     delay={Math.min(i, 24) * 15}
                   />
+                  </div>
                 ))}
               </div>
               {items.length < total ? (

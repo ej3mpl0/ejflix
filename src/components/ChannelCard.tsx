@@ -4,6 +4,7 @@ import type { Channel, EpgNow } from "../lib/types";
 import { cn } from "../lib/format";
 import { channelInitials, formatRange, formatTime, programmeProgress } from "../lib/iptv";
 import { useI18n } from "../lib/locale-context";
+import { ProgressTrack } from "./ProgressTrack";
 
 /**
  * Channel tile: logo on a dark 16:9 plate, name, programme on air with its progress
@@ -64,12 +65,12 @@ export function ChannelCard({
             </span>
           ) : null}
           {channel.kind === "movie" ? (
-            <span className="absolute bottom-2 left-2 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white/70 uppercase">
+            <span className="absolute bottom-2 left-2 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[11.5px] font-bold text-white/70">
               VOD
             </span>
           ) : (channel.catchupDays ?? 0) > 0 ? (
             <span
-              className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-white/70 uppercase"
+              className="absolute bottom-2 left-2 inline-flex items-center gap-1 rounded-[4px] bg-white/10 px-1.5 py-0.5 text-[11.5px] font-bold text-white/70"
               title={t("catchupDays", { n: channel.catchupDays ?? 0 })}
             >
               <History size={10} aria-hidden />
@@ -80,9 +81,7 @@ export function ChannelCard({
             <Play size={18} fill="currentColor" className="translate-x-px" />
           </span>
           {now ? (
-            <div className="absolute inset-x-0 bottom-0 h-[3px] bg-white/15">
-              <div className="h-full bg-accent transition-[width] duration-700" style={{ width: `${progress}%` }} />
-            </div>
+<ProgressTrack percent={progress} size="sm" />
           ) : null}
         </div>
         <div className="h-[72px] px-3 py-2.5">
@@ -92,7 +91,7 @@ export function ChannelCard({
           {now ? (
             <span className={cn(line, "text-[11px] leading-[16px] text-dim")} title={now.title}>
               <span className="tabular">{formatRange(now, locale)}</span>
-              <span> · </span>
+              <span>, </span>
               <span className="text-muted">{now.title}</span>
             </span>
           ) : (
@@ -100,7 +99,7 @@ export function ChannelCard({
           )}
           {next ? (
             <span className={cn(line, "text-[11px] leading-[16px] text-dim")} title={next.title}>
-              {t("upNext")} <span className="tabular">{formatTime(next.start, locale)}</span> · {next.title}
+              {t("upNext")} <span className="tabular">{formatTime(next.start, locale)}</span> {next.title}
             </span>
           ) : null}
         </div>

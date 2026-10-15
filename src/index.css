@@ -1,47 +1,50 @@
 @import "tailwindcss";
-@import "@fontsource-variable/inter";
-@import "@fontsource/bebas-neue";
+@import "@fontsource-variable/figtree";
+@import "@fontsource-variable/rubik";
 
 /*
- * Design tokens (Nuvio-style dark theme). The accent and the surface tint are
- * overridden per palette on `:root[data-theme="…"]` further down; every utility
- * (bg-accent, text-on-accent, rounded-poster, px-page…) follows automatically.
+ * Design tokens. The palette comes from the wordmark: white letters on a dark room, and the
+ * red dot over the j. White is for actions; red (`live`) only marks what is alive right now:
+ * the active tab, playback progress, live TV, a running watch party, a switch that is on.
  */
 @theme static {
-  --color-base: #0d0d0d;
-  --color-surface: #1a1a1a;
-  --color-panel: #242424;
-  --color-line: #252a2a;
-  --color-text: #f5f7f8;
-  --color-muted: #b8bec5;
-  --color-dim: #9ea4ab;
+  --color-base: #100d0e; /* Sala */
+  --color-surface: #1b1718; /* Butaca */
+  --color-panel: #262122; /* Telón */
+  --color-line: #2f292b; /* Línea */
+  --color-text: #f6f3f2; /* Pantalla */
+  --color-muted: #a8a0a1; /* Gris */
+  --color-dim: #8d8486;
 
-  --color-accent: #e50914;
-  --color-on-accent: #ffffff;
-  --color-accent-hover: color-mix(in oklab, var(--color-accent) 88%, white);
-  --color-accent-press: color-mix(in oklab, var(--color-accent) 80%, black);
-  --color-accent-soft: color-mix(in oklab, var(--color-accent) 15%, transparent);
-  --color-star: #ffd45c;
+  --color-accent: #f6f3f2;
+  --color-on-accent: #100d0e;
+  --color-accent-hover: #ffffff;
+  --color-accent-press: #dcd6d4;
+  --color-accent-soft: rgb(246 243 242 / 0.12);
+  --color-live: #f2232f; /* Piloto */
+  --color-live-soft: rgb(242 35 47 / 0.22);
+  --color-star: #ffc24b; /* Ámbar */
+  --color-amber: #ffc24b;
   --color-success: #66bb6a;
-  --color-warning: #ffc857;
-  /* Errors keep one colour whatever the accent: a white or green accent must not read as "ok". */
+  --color-warning: #ffc24b;
   --color-danger: #ff6b6b;
 
-  --radius-poster: 12px;
-  --radius-card: 24px;
-  --radius-btn: 16px;
-  --radius-pill: 40px;
-  --radius-hero: 28px;
+  --radius-poster: 8px;
+  --radius-card: 14px;
+  --radius-btn: 14px;
+  --radius-pill: 999px;
+  --radius-hero: 14px;
 
-  --spacing-page: 48px;
+  --spacing-page: 40px;
   --spacing-section: 24px;
   --spacing-rail: 14px;
 
   --ease-std: cubic-bezier(0.2, 0, 0, 1);
   --ease-out-soft: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --font-sans: "Inter Variable", Inter, system-ui, sans-serif;
-  --font-brand: "Bebas Neue", sans-serif;
+  --font-sans: "Figtree Variable", Figtree, system-ui, sans-serif;
+  --font-display: "Rubik Variable", Rubik, system-ui, sans-serif;
+  --font-brand: "Rubik Variable", Rubik, system-ui, sans-serif;
 }
 
 :root {
@@ -55,7 +58,7 @@
   --opacity-muted: 0.6;
   --opacity-selected: 0.15;
   --opacity-scrim: 0.56;
-  --poster-w: clamp(150px, 16vw, 210px);
+  --poster-w: clamp(150px, 15vw, 196px);
   --poster-min: 150px;
   --details-tint: var(--color-base);
 }
@@ -69,88 +72,10 @@
 }
 @media (min-width: 2200px) {
   :root {
-    --spacing-page: max(48px, calc((100vw - 2100px) / 2));
+    --spacing-page: max(40px, calc((100vw - 2100px) / 2));
   }
 }
 
-/* Accent palettes. Unlayered so they beat the @theme defaults. */
-:root[data-theme="crimson"] {
-  --color-accent: #e50914;
-  --color-on-accent: #ffffff;
-  --color-accent-hover: #f6121d;
-  --color-accent-press: #b00710;
-}
-:root[data-theme="white"] {
-  --color-accent: #f5f5f5;
-  --color-on-accent: #0d0d0d;
-}
-:root[data-theme="gold"] {
-  --color-accent: #e8a91c;
-  --color-on-accent: #0d0d0d;
-  --color-base: #0f0e0b;
-  --color-surface: #1b1913;
-  --color-panel: #252217;
-}
-:root[data-theme="jade"] {
-  --color-accent: #22d37c;
-  --color-on-accent: #0d0d0d;
-  --color-base: #0b100d;
-  --color-surface: #151c17;
-  --color-panel: #1e2620;
-}
-:root[data-theme="rose_gold"] {
-  --color-accent: #e8b4a0;
-  --color-on-accent: #0d0d0d;
-  --color-base: #100d0c;
-  --color-surface: #1c1715;
-  --color-panel: #26201d;
-}
-:root[data-theme="arctic"] {
-  --color-accent: #3185f5;
-  --color-on-accent: #ffffff;
-  --color-base: #0b0e14;
-  --color-surface: #151a22;
-  --color-panel: #1e242e;
-}
-:root[data-theme="graphite"] {
-  --color-accent: #9aa3ad;
-  --color-on-accent: #0d0d0d;
-}
-:root[data-theme="ocean"] {
-  --color-accent: #1e88e5;
-  --color-on-accent: #ffffff;
-  --color-base: #0b0f14;
-  --color-surface: #151b22;
-  --color-panel: #1e262e;
-}
-:root[data-theme="violet"] {
-  --color-accent: #a044c4;
-  --color-on-accent: #ffffff;
-  --color-base: #0f0b12;
-  --color-surface: #1a151e;
-  --color-panel: #241d29;
-}
-:root[data-theme="emerald"] {
-  --color-accent: #34c759;
-  --color-on-accent: #0d0d0d;
-  --color-base: #0b100c;
-  --color-surface: #151c16;
-  --color-panel: #1e261f;
-}
-:root[data-theme="amber"] {
-  --color-accent: #ffb300;
-  --color-on-accent: #0d0d0d;
-  --color-base: #100e0a;
-  --color-surface: #1c1913;
-  --color-panel: #262218;
-}
-:root[data-theme="rose"] {
-  --color-accent: #ec407a;
-  --color-on-accent: #ffffff;
-  --color-base: #120c0f;
-  --color-surface: #1e1519;
-  --color-panel: #281d22;
-}
 /* AMOLED: pure black surfaces, after the palettes so it wins the tint. */
 :root[data-amoled] {
   --color-base: #000000;
@@ -247,6 +172,8 @@ h1,
 h2,
 h3 {
   text-wrap: balance;
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
 }
 
 p {
@@ -434,8 +361,12 @@ p {
 /* Glass surfaces. In the main window the blur is real; the player overlay is a separate
    transparent window, so there it only softens the overlay's own gradients. */
 .glass-header {
-  /* Follows the palette's surface tint, like every other panel. */
-  background: color-mix(in oklab, var(--color-surface) 58%, transparent);
+  /* Over the hero the bar is just a shade from the top; once the page scrolls it turns to glass. */
+  background: linear-gradient(rgb(16 13 14 / 0.85), rgb(16 13 14 / 0));
+  transition: background-color var(--duration-normal) var(--ease-std);
+}
+.glass-header[data-scrolled] {
+  background: color-mix(in oklab, var(--color-base) 72%, transparent);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
 }
@@ -744,7 +675,7 @@ p {
 button,
 a[href],
 [tabindex] {
-  scroll-margin-block: 84px 24px;
+  scroll-margin-block: 88px 24px;
 }
 
 /* Reduced motion, app-wide: whatever a component forgot is cut short too (spinners and
@@ -787,6 +718,46 @@ a[href],
 }
 @media (prefers-reduced-motion: reduce) {
   .party-float {
+    animation: none;
+  }
+}
+
+/* Search: the caret of the big query blinks; it is the one live thing on that page. */
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.search-caret {
+  animation: caret-blink 1.1s steps(1) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .search-caret {
+    animation: none;
+  }
+}
+
+/* Start-up: the dot of the j switches on like a projector lamp. */
+@keyframes mark-lamp {
+  0%,
+  30% {
+    fill: #3a3133;
+    filter: none;
+  }
+  45% {
+    fill: var(--color-live);
+  }
+  60%,
+  100% {
+    fill: var(--color-live);
+    filter: drop-shadow(0 0 12px rgb(242 35 47 / 0.7));
+  }
+}
+.mark-lamp {
+  animation: mark-lamp 1.4s var(--ease-out-soft) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark-lamp {
     animation: none;
   }
 }

@@ -178,20 +178,20 @@ export function AddonsSection({
                   <span className="truncate">{addon.name}</span>
                   {addon.version ? <span className="text-[11px] text-dim tabular">v{addon.version}</span> : null}
                   {addon.builtin ? (
-                    <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+                    <span className="rounded-full bg-white/8 px-2 py-0.5 text-[11.5px] font-semibold text-muted">
                       {t("builtinAddon")}
                     </span>
                   ) : null}
                   {!addon.enabled ? (
-                    <span className="rounded-full bg-white/8 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+                    <span className="rounded-full bg-white/8 px-2 py-0.5 text-[11.5px] font-semibold text-muted">
                       {t("addonOff")}
                     </span>
                   ) : null}
                 </p>
                 <p className="truncate text-[12px] text-dim">
                   {addon.description || addon.url}
-                  {addon.catalogs.length ? ` · ${addon.catalogs.length} ${t("catalogs")}` : ""}
-                  {addon.resources.includes("stream") ? ` · ${t("streams")}` : ""}
+                  {addon.catalogs.length ? `, ${addon.catalogs.length} ${t("catalogs")}` : ""}
+                  {addon.resources.includes("stream") ? `, ${t("streams")}` : ""}
                 </p>
               </div>
               {!addon.builtin ? (

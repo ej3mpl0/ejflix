@@ -43,11 +43,11 @@ export function NextEpisodeCard({
           {image ? <img src={image} alt="" className="h-full w-full object-cover" /> : null}
         </span>
         <span className="min-w-0 flex-1 pr-6">
-          <span className="block text-[11px] font-semibold tracking-[0.08em] text-white/60 uppercase">
+          <span className="block text-[13px] font-semibold text-white/60">
             {episode.kind === "Episode" ? t("nextEpisode") : t("upNextQueue")}
           </span>
           <span className="block truncate text-[13px] font-medium">
-            {[code, episode.name].filter(Boolean).join(" · ")}
+            {[code, episode.name].filter(Boolean).join(" ")}
           </span>
           <span className="block truncate text-[12px] text-white/70 tabular">
             {countdown != null ? t("playingIn", { n: countdown }) : t("play")}
