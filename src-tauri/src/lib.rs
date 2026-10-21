@@ -234,6 +234,11 @@ async fn refresh_presence(app: &tauri::AppHandle) {
     let info = &info;
     let details = discord::clamp_text(discord::fill_template(&prefs.details, info, &locale));
     let mut state_text = discord::fill_template(&prefs.state, info, &locale);
+    let episode_in_state = prefs.state.contains("{episode}");
+    if state_text.trim().is_empty() && episode_in_state {
+        // A film has no episode: say what it is rather than leave the card with one line.
+        state_text = discord::fill_template("{type} · {year}", info, &locale);
+    }
     if snap.paused {
         let paused = if locale == "en" { "Paused" } else { "Pausado" };
         state_text = if state_text.trim().is_empty() {
@@ -254,25 +259,35 @@ async fn refresh_presence(app: &tauri::AppHandle) {
     } else {
         None
     };
-    let large_image = if prefs.show_poster {
+    // Discord only fetches https pictures. The ejFlix "j" sits on the poster's corner, or
+    // takes its place when there is no poster to show.
+    let poster = if prefs.show_poster {
         info.poster_url
             .clone()
-            .filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && discord::image_fits(u))
+            .filter(|u| u.starts_with("https://") && discord::image_fits(u))
     } else {
         None
+    };
+    let (large_image, large_text, small_image) = match poster {
+        Some(poster) => (poster, info.title.chars().take(128).collect(), Some(discord::LOGO_URL.to_string())),
+        None => (discord::LOGO_URL.to_string(), "ejFlix".to_string(), None),
     };
     let activity = discord::Activity {
         name: info.title.clone(),
         details,
         state: state_text,
         timestamps,
-        large_image,
-        large_text: info.title.chars().take(128).collect(),
+        large_image: Some(large_image),
+        large_text,
+        small_image,
+        small_text: "ejFlix".to_string(),
         status_display: match prefs.header.as_str() {
             "name" => 0,
             "state" => 1,
             _ => 2,
         },
+        // "(3 of 12)" belongs next to the episode, so only when the state line carries it.
+        party: if episode_in_state { info.party_size() } else { None },
     };
     state.discord.set(&prefs.client_id, true, Some(activity)).await;
 }
@@ -290,23 +305,18 @@ fn presence_for_item(session: &Session, movie: &Movie, server_name: Option<Strin
     } else {
         movie.id.clone()
     };
-    let episode = if is_episode {
-        let code = match (movie.season_number, movie.episode_number) {
-            (Some(s), Some(e)) => format!("S{s}:E{e}"),
-            (_, Some(e)) => format!("E{e}"),
-            _ => String::new(),
-        };
-        Some([code, movie.name.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
-    } else {
-        None
-    };
     discord::PresenceInfo {
         title: if is_episode {
             movie.series_name.clone().unwrap_or_else(|| movie.name.clone())
         } else {
             movie.name.clone()
         },
-        episode,
+        // An episode without numbers still shows its own name.
+        episode: (is_episode && movie.episode_number.is_none()).then(|| movie.name.clone()),
+        season: movie.season_number.filter(|_| is_episode),
+        episode_number: movie.episode_number.filter(|_| is_episode),
+        episode_title: is_episode.then(|| movie.name.clone()),
+        episode_count: None,
         year: movie.year,
         kind: if is_episode || movie.kind == "Series" { "series".into() } else { "movie".into() },
         poster_url: Some(format!(
@@ -325,13 +335,11 @@ fn presence_for_file(file_name: &str, path: &str, fallback: &str) -> discord::Pr
         .map(|guess| guess.title.clone())
         .filter(|title| title.chars().count() >= 2)
         .unwrap_or_else(|| fallback.to_string());
-    let episode = guess.as_ref().and_then(|guess| match (guess.season, guess.episode) {
-        (Some(season), Some(episode)) => Some(format!("S{season}:E{episode}")),
-        _ => None,
-    });
+    let numbers = guess.as_ref().and_then(|guess| guess.season.zip(guess.episode));
     discord::PresenceInfo {
         title,
-        episode,
+        season: numbers.map(|(season, _)| season),
+        episode_number: numbers.map(|(_, episode)| episode),
         year: guess.as_ref().and_then(|guess| guess.year),
         kind: if guess.as_ref().is_some_and(|guess| guess.season.is_some()) {
             "series".into()
@@ -340,7 +348,7 @@ fn presence_for_file(file_name: &str, path: &str, fallback: &str) -> discord::Pr
         },
         poster_url: None,
         source: "Local".into(),
-        live_window: None,
+        ..Default::default()
     }
 }
 
@@ -408,31 +416,29 @@ async fn presence_for_release(state: &AppState, guess: &local_media::ReleaseGues
     let poster = metahub_poster(imdb.as_deref())
         .or_else(|| public_poster(full.as_ref().and_then(|item| item.meta.poster.clone()).or(meta.poster)))
         .filter(|url| discord::image_fits(url));
-    let episode_line = match (guess.season, guess.episode) {
-        (Some(season), Some(episode_n)) => {
-            let video_title = full.as_ref().and_then(|item| {
-                item.videos
-                    .iter()
-                    .find(|video| video.season == Some(season) && video.episode == Some(episode_n))
-                    .map(|video| clean_presence(video.title.clone()))
-            });
-            let code = format!("S{season}:E{episode_n}");
-            let name = video_title.filter(|text| text.len() > 1 && !text.eq_ignore_ascii_case(&code));
-            Some(match name {
-                Some(name) => format!("{code} · {name}"),
-                None => code,
-            })
+    let (episode_title, episode_count) = match (guess.season, guess.episode, full.as_ref()) {
+        (Some(season), Some(episode_n), Some(item)) => {
+            let in_season = item.videos.iter().filter(|video| video.season == Some(season));
+            let title = in_season
+                .clone()
+                .find(|video| video.episode == Some(episode_n))
+                .map(|video| clean_presence(video.title.clone()));
+            let count = u32::try_from(in_season.count()).ok().filter(|n| *n > 0);
+            (title, count)
         }
-        _ => None,
+        _ => (None, None),
     };
     Some(discord::PresenceInfo {
         title,
-        episode: episode_line,
+        season: guess.season.filter(|_| episode),
+        episode_number: guess.episode.filter(|_| episode),
+        episode_title,
+        episode_count,
         year,
         kind: if episode { "series".into() } else { "movie".into() },
         poster_url: poster,
         source: "Local".into(),
-        live_window: None,
+        ..Default::default()
     })
 }
 
@@ -462,25 +468,20 @@ fn public_poster(url: Option<String>) -> Option<String> {
     })
 }
 
-fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
+fn presence_for_entry(entry: &ResumeEntry, year: Option<i32>, episode_count: Option<u32>) -> discord::PresenceInfo {
     let is_episode = entry.kind == "series" && entry.season.is_some();
-    let episode = if is_episode {
-        let code = match (entry.season, entry.episode) {
-            (Some(s), Some(e)) => format!("S{s}:E{e}"),
-            _ => String::new(),
-        };
-        Some([code, entry.name.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
-    } else {
-        None
-    };
     discord::PresenceInfo {
         title: if is_episode {
             entry.series_name.clone().unwrap_or_else(|| entry.name.clone())
         } else {
             entry.name.clone()
         },
-        episode,
-        year: None,
+        episode: (is_episode && entry.episode.is_none()).then(|| entry.name.clone()),
+        season: entry.season.filter(|_| is_episode),
+        episode_number: entry.episode.filter(|_| is_episode),
+        episode_title: is_episode.then(|| entry.name.clone()),
+        episode_count: episode_count.filter(|_| is_episode),
+        year,
         kind: if entry.kind == "series" { "series".into() } else { "movie".into() },
         // Addon posters are often long proxy URLs (RPDB, AIOStreams...), and Discord rejects
         // the whole activity when the image passes 256 characters: fall back to the
@@ -491,7 +492,7 @@ fn presence_for_entry(entry: &ResumeEntry) -> discord::PresenceInfo {
             .filter(|url| discord::image_fits(url))
             .or_else(|| entry.imdb.as_ref().map(|imdb| format!("https://images.metahub.space/poster/medium/{imdb}/img"))),
         source: "Online".into(),
-        live_window: None,
+        ..Default::default()
     }
 }
 
@@ -1153,7 +1154,35 @@ async fn player_start(
         .await;
     show_player_overlay(&app);
     refresh_presence(&app).await;
+    if let (Some(season_id), true) = (movie.season_id.clone(), movie.kind == "Episode") {
+        count_season_for_presence(app.clone(), movie.id.clone(), season_id);
+    }
     Ok(state.player.snapshot().await)
+}
+
+/// Asks the server how many episodes the season has, for Discord's "(3 of 12)".
+/// Playback does not wait for it.
+fn count_season_for_presence(app: tauri::AppHandle, item_id: String, season_id: String) {
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<AppState>();
+        let Ok(season) = state.jellyfin.get_item(&season_id).await else {
+            return;
+        };
+        let Some(count) = season.child_count.and_then(|n| u32::try_from(n).ok()).filter(|n| *n > 0) else {
+            return;
+        };
+        {
+            let mut guard = state.player.context.write().await;
+            let Some(ctx) = guard.as_mut() else { return };
+            match &ctx.source {
+                PlaybackSource::Jellyfin { item_id: playing, .. } if playing == &item_id => {
+                    ctx.presence.episode_count = Some(count);
+                }
+                _ => return,
+            }
+        }
+        refresh_presence(&app).await;
+    });
 }
 
 /// Stops playback. With `switching` (next episode) the window stays as it is:
@@ -2288,6 +2317,11 @@ struct ExternalPlayArgs {
     start_seconds: Option<f64>,
     /// Identity of what is playing, kept with the local progress.
     entry: ResumeEntry,
+    /// For Discord: the release year, and how many episodes the season has.
+    #[serde(default)]
+    year: Option<i32>,
+    #[serde(default)]
+    episode_count: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -2399,7 +2433,7 @@ async fn player_start_url(
         source: PlaybackSource::Addon {
             entry: args.entry.clone(),
         },
-        presence: presence_for_entry(&args.entry),
+        presence: presence_for_entry(&args.entry, args.year, args.episode_count),
     };
     state
         .player
@@ -2624,11 +2658,11 @@ async fn iptv_play(app: tauri::AppHandle, state: State<'_, AppState>, id: String
         presence: discord::PresenceInfo {
             title: channel.name.clone(),
             episode: programme.as_ref().map(|p| p.title.clone()),
-            year: None,
             kind: "live".into(),
             poster_url: channel.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
             source: source.name.clone(),
             live_window: programme.as_ref().map(|p| (p.start, p.stop)),
+            ..Default::default()
         },
     };
     state
@@ -2763,11 +2797,10 @@ async fn iptv_play_catchup(
         presence: discord::PresenceInfo {
             title: channel.name.clone(),
             episode: Some(title.clone()),
-            year: None,
             kind: "live".into(),
             poster_url: channel.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
             source: source.name.clone(),
-            live_window: None,
+            ..Default::default()
         },
     };
     state
@@ -2837,12 +2870,9 @@ async fn iptv_multiview(app: tauri::AppHandle, state: State<'_, AppState>, ids: 
         source: PlaybackSource::Live { channel_id: first_id.clone() },
         presence: discord::PresenceInfo {
             title: title.clone(),
-            episode: None,
-            year: None,
             kind: "live".into(),
             poster_url: first.logo.clone().filter(|u| u.starts_with("https://") || u.starts_with("http://")),
-            source: String::new(),
-            live_window: None,
+            ..Default::default()
         },
     };
     state

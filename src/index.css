@@ -473,6 +473,21 @@ p {
 .skip-progress {
   animation: skip-progress 10s linear forwards;
 }
+/* Next-episode button: a shade sweeps across it for the length of the countdown. */
+@keyframes next-fill {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.next-fill {
+  transform: scaleX(0);
+  transform-origin: left;
+  background: rgb(0 0 0 / 0.13);
+  animation: next-fill 10s linear forwards;
+}
 /* Accent ring around the skip icon that empties while the prompt is visible. */
 @property --skip-p {
   syntax: "<number>";
@@ -558,6 +573,7 @@ p {
   .skip-in,
   .skip-progress,
   .skip-ring,
+  .next-fill,
   .pin-shake,
   .slide-in-right,
   .panel-in {

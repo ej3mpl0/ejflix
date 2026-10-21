@@ -158,6 +158,9 @@ export const api = {
     headers: [string, string][];
     startSeconds?: number;
     entry: Omit<ResumeEntry, "positionSeconds" | "durationSeconds" | "updatedMs">;
+    /** For Discord: release year and the number of episodes in the season. */
+    year?: number | null;
+    episodeCount?: number | null;
   }) => invoke<PlayerState>("player_start_url", { args }),
   /** Plays a file from disk in mpv. `title` is optional; the file name is used otherwise. */
   playerStartFile: (args: { path: string; title?: string }) => invoke<PlayerState>("player_start_file", { args }),

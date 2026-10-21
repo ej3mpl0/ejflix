@@ -9,6 +9,7 @@ import { useSettings } from "../../lib/settings-context";
 import { SettingsRow, SettingsSection } from "./SettingsSection";
 import { Toggle } from "./Toggle";
 import { fieldClass as field } from "../../lib/ui";
+import { Mark } from "../Mark";
 
 const VARIABLES = ["{title}", "{episode}", "{year}", "{type}", "{source}"];
 
@@ -62,14 +63,16 @@ export function DiscordSection() {
     () => ({
       title: t("discordSampleTitle"),
       episode: t("discordSampleEpisode"),
-      year: "1999",
-      type: t("movie"),
+      year: "2008",
+      type: t("discordSampleType"),
       source: "Jellyfin",
     }),
     [t, locale],
   );
   const previewDetails = sample(details, vars) || t("discordSampleTitle");
   const previewState = sample(state, vars);
+  // Discord adds "(1 of 7)" after the state line; the app only sends it when that line has the episode.
+  const previewParty = state.includes("{episode}") ? t("discordPartyCount", { n: 1, max: 7 }) : "";
   const previewHeader =
     prefs.header === "name" ? "ejFlix" : prefs.header === "state" ? previewState || previewDetails : previewDetails;
 
@@ -204,33 +207,38 @@ export function DiscordSection() {
             </div>
           </div>
 
-          {/* Discord-style card */}
+          {/* Discord-style card: poster with the ejFlix j in its corner (the j alone without a poster). */}
           <div className="self-start rounded-2xl bg-[#111214] p-4 text-white shadow-[0_0_0_1px_rgb(255_255_255_/_0.08)]">
-            <p className="mb-3 truncate text-[13px] font-bold text-white/60">
+            <p className="mb-3 truncate text-[13px] font-bold text-white/90">
               {t("discordWatching", { what: previewHeader })}
             </p>
-            <div className="flex gap-3">
-              <div className="relative h-[72px] w-[72px] shrink-0 overflow-hidden rounded-xl bg-[#2b2d31]">
+            <div className="flex items-center gap-3">
+              <div className="relative h-[72px] w-[72px] shrink-0">
                 {prefs.showPoster ? (
-                  <div className="grid h-full w-full place-items-center bg-[linear-gradient(135deg,#1e88e5,#0d47a1)] text-white/90">
-                    <Film size={28} />
-                  </div>
+                  <>
+                    <div className="grid h-full w-full place-items-center overflow-hidden rounded-lg bg-[linear-gradient(160deg,#3d5a2a,#16210f)] text-white/80">
+                      <Film size={26} />
+                    </div>
+                    <span className="absolute -right-1.5 -bottom-1.5 grid h-[26px] w-[26px] place-items-center rounded-full bg-base ring-4 ring-[#111214]">
+                      <Mark size={20} />
+                    </span>
+                  </>
                 ) : (
-                  <div className="grid h-full w-full place-items-center text-[20px] font-bold text-white/80">ej</div>
+                  <Mark size={72} tile />
                 )}
               </div>
-              <div className="min-w-0 flex-1 text-[13px] leading-[1.35]">
-                <p className="truncate font-semibold">ejFlix</p>
-                <p className="truncate text-white/85">{previewDetails}</p>
-                {previewState ? <p className="truncate text-white/85">{previewState}</p> : null}
+              <div className="min-w-0 flex-1 text-[13px] leading-[1.4]">
+                <p className="truncate text-[14px] font-semibold">{previewDetails}</p>
+                {previewState || previewParty ? (
+                  <p className="truncate text-white/80">{[previewState, previewParty].filter(Boolean).join(" ")}</p>
+                ) : null}
                 {prefs.showTime ? (
-                  <div className="mt-1.5">
-                    <div className="h-1 w-full overflow-hidden rounded-full bg-white/15">
-                      <div className="h-full w-[38%] rounded-full bg-white/80" />
-                    </div>
-                    <p className="mt-1 text-[11px] text-white/60 tabular">
-                      {t("discordRemaining", { time: "1:24:10" })}
-                    </p>
+                  <div className="mt-1.5 flex items-center gap-2 text-[11px] text-white/70 tabular">
+                    <span>00:10</span>
+                    <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-white/20">
+                      <span className="block h-full w-[8%] rounded-full bg-white" />
+                    </span>
+                    <span>47:12</span>
                   </div>
                 ) : null}
               </div>

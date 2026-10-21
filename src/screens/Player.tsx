@@ -317,9 +317,13 @@ export function Player({
             if (!stream || !url) throw new Error(tRef.current("noStreams"));
             const prefer = { addonUrl: stream.addonUrl, bingeGroup: stream.bingeGroup };
             let nextMovie: Movie | null = null;
+            // Discord shows "(3 of 12)" next to the episode when the season's size is known.
+            let episodeCount: number | null = null;
             if (ext.type === "series") {
               try {
                 const meta = await api.addonMeta("series", ext.metaId);
+                const season = movie.seasonNumber;
+                if (season != null) episodeCount = meta.videos.filter((v) => v.season === season).length || null;
                 const nextVideo = nextVideoOf(meta, ext.videoId);
                 if (nextVideo) {
                   const candidate = videoToMovie(meta, nextVideo);
@@ -339,6 +343,8 @@ export function Player({
               headers: stream.headers,
               startSeconds: start > 5 ? start : 0,
               entry,
+              year: movie.year,
+              episodeCount,
             });
             starting = request;
             const next = await request;
@@ -1146,6 +1152,7 @@ export function Player({
         <NextEpisodeCard
           episode={chainNext}
           countdown={nextCard.countdown}
+          total={settings.playback.nextEpisodeCountdown}
           onPlay={playNext}
           onDismiss={nextCard.dismiss}
           shifted={panel}

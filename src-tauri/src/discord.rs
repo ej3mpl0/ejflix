@@ -5,7 +5,7 @@
 //! opens as soon as presence is on and stays open between titles, because Discord can
 //! take most of a minute to accept the handshake.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +28,9 @@ const MAX_FRAME: usize = 64 * 1024;
 const MAX_TEXT: usize = 128;
 /// Longest `large_image` Discord accepts; a longer one makes it reject the whole activity.
 const MAX_IMAGE: usize = 256;
+/// The ejFlix "j", fetched by Discord itself: the small badge over a poster, or the
+/// picture when there is no poster to show.
+pub const LOGO_URL: &str = "https://raw.githubusercontent.com/ej3mpl0/ejflix/main/src-tauri/icons/Square284x284Logo.png";
 
 /// Whether Discord will take this image URL (it refuses the activity otherwise).
 pub fn image_fits(url: &str) -> bool {
@@ -40,8 +43,14 @@ pub fn image_fits(url: &str) -> bool {
 pub struct PresenceInfo {
     /// Movie title or series name.
     pub title: String,
-    /// "S1:E3 · Episode title" for episodes.
+    /// Live TV: the programme on air. Episodes use the fields below instead, so the line
+    /// is written in the app's language when it is shown.
     pub episode: Option<String>,
+    pub season: Option<i32>,
+    pub episode_number: Option<i32>,
+    pub episode_title: Option<String>,
+    /// Episodes in that season, for Discord's own "(3 of 12)" after the state line.
+    pub episode_count: Option<u32>,
     pub year: Option<i32>,
     /// "movie" | "series" | "live"
     pub kind: String,
@@ -52,6 +61,52 @@ pub struct PresenceInfo {
     /// Live TV: programme boundaries (unix seconds) shown as the activity time.
     #[serde(default)]
     pub live_window: Option<(u64, u64)>,
+}
+
+impl PresenceInfo {
+    /// "T1 E3 · Episode title" ("S1 E3" in English), the way Crunchyroll writes it; the
+    /// programme for live TV.
+    pub fn episode_line(&self, locale: &str) -> Option<String> {
+        let season = if locale == "en" { "S" } else { "T" };
+        let (code, number) = match (self.season, self.episode_number) {
+            (Some(s), Some(e)) => (format!("{season}{s} E{e}"), e),
+            (None, Some(e)) => (format!("E{e}"), e),
+            _ => return self.episode.clone().filter(|line| !line.trim().is_empty()),
+        };
+        let title = self
+            .episode_title
+            .as_deref()
+            .map(str::trim)
+            .filter(|title| title.chars().count() > 1 && !generic_title(title, self.season, number));
+        Some(match title {
+            Some(title) => format!("{code} · {title}"),
+            None => code,
+        })
+    }
+
+    /// (episode, episodes in the season) when both are known and make sense.
+    pub fn party_size(&self) -> Option<(u32, u32)> {
+        let current = u32::try_from(self.episode_number?).ok()?;
+        let max = self.episode_count?;
+        (current >= 1 && current <= max).then_some((current, max))
+    }
+}
+
+/// A title that only repeats the number ("Episode 3", "E03", "S01E03"): the code already says it.
+fn generic_title(title: &str, season: Option<i32>, episode: i32) -> bool {
+    let flat: String = title.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect();
+    let word = flat.trim_end_matches(|c: char| c.is_ascii_digit());
+    let same_number = flat[word.len()..].parse::<i32>().ok() == Some(episode);
+    if same_number && ["", "e", "ep", "episode", "episodio", "capitulo", "capítulo", "chapter"].contains(&word) {
+        return true;
+    }
+    let Some(season) = season else { return false };
+    let mut codes = Vec::new();
+    for letter in ["s", "t"] {
+        codes.push(format!("{letter}{season}e{episode}"));
+        codes.push(format!("{letter}{season:02}e{episode:02}"));
+    }
+    codes.contains(&flat)
 }
 
 /// Activity as sent to Discord.
@@ -65,8 +120,13 @@ pub struct Activity {
     pub timestamps: Option<(u64, Option<u64>)>,
     pub large_image: Option<String>,
     pub large_text: String,
+    /// Badge in the corner of the large image (only sent next to one).
+    pub small_image: Option<String>,
+    pub small_text: String,
     /// Discord `status_display_type`: 0 = application name, 1 = state, 2 = details.
     pub status_display: u8,
+    /// (current, max): Discord prints "(current of max)" after the state line.
+    pub party: Option<(u32, u32)>,
 }
 
 /// Which optional fields this Discord client accepted. A rejected image or an
@@ -74,6 +134,8 @@ pub struct Activity {
 /// so the pipe remembers the shape that actually stuck.
 #[derive(Clone, Copy)]
 struct Shape {
+    small: bool,
+    party: bool,
     assets: bool,
     status_display: bool,
     watching: bool,
@@ -81,7 +143,7 @@ struct Shape {
 
 impl Shape {
     fn full() -> Self {
-        Self { assets: true, status_display: true, watching: true }
+        Self { small: true, party: true, assets: true, status_display: true, watching: true }
     }
 }
 
@@ -105,7 +167,10 @@ impl Activity {
             && self.state == other.state
             && self.large_image == other.large_image
             && self.large_text == other.large_text
+            && self.small_image == other.small_image
+            && self.small_text == other.small_text
             && self.status_display == other.status_display
+            && self.party == other.party
     }
 
     /// `SET_ACTIVITY` body. Assets are omitted unless the image itself is usable:
@@ -150,8 +215,17 @@ impl Activity {
                 if let Some(text) = clamp_text(self.large_text.clone()) {
                     assets["large_text"] = Value::String(text);
                 }
+                if let Some(small) = usable_image(self.small_image.as_deref()).filter(|_| shape.small) {
+                    assets["small_image"] = json!(small);
+                    if let Some(text) = clamp_text(self.small_text.clone()) {
+                        assets["small_text"] = Value::String(text);
+                    }
+                }
                 activity["assets"] = assets;
             }
+        }
+        if let Some((current, max)) = self.party.filter(|&(current, max)| shape.party && current >= 1 && current <= max) {
+            activity["party"] = json!({ "id": party_id(), "size": [current, max] });
         }
         json!({
             "cmd": "SET_ACTIVITY",
@@ -291,10 +365,13 @@ impl Discord {
                 if sent.as_ref().is_some_and(|s| s.same_as(&desired)) {
                     continue;
                 }
-                // A new poster gets one more try. The same rejected picture is not sent again
-                // on every progress tick, or Discord would clear the presence each time.
+                // A new poster gets one more try, and so do the badge and the episode counter
+                // that a rejection may have dropped along with it. The same rejected picture is
+                // not sent again on every progress tick, or Discord would clear the presence each time.
                 let image_changed = sent.as_ref().map(|prev| prev.large_image != desired.large_image).unwrap_or(true);
                 if image_changed {
+                    shape.small = true;
+                    shape.party = true;
                     shape.assets = true;
                 }
                 let Some(client) = conn.as_mut() else { continue };
@@ -392,6 +469,14 @@ async fn push_activity(client: &mut NamedPipeClient, activity: &Activity, mut sh
 }
 
 fn degrade(shape: &mut Shape) -> bool {
+    if shape.small {
+        shape.small = false;
+        return true;
+    }
+    if shape.party {
+        shape.party = false;
+        return true;
+    }
     if shape.assets {
         shape.assets = false;
         return true;
@@ -447,6 +532,12 @@ fn activity_name(text: &str) -> String {
     } else {
         text.to_string()
     }
+}
+
+/// One id per run of the app: a shared id would put every ejFlix viewer in one "party".
+fn party_id() -> &'static str {
+    static ID: OnceLock<String> = OnceLock::new();
+    ID.get_or_init(|| format!("ejflix-{}-{}", std::process::id(), now_secs()))
 }
 
 fn usable_image(url: Option<&str>) -> Option<&str> {
@@ -511,7 +602,7 @@ pub fn fill_template(template: &str, info: &PresenceInfo, locale: &str) -> Strin
     let year = info.year.map(|y| y.to_string()).unwrap_or_default();
     let mut out = template
         .replace("{title}", &info.title)
-        .replace("{episode}", info.episode.as_deref().unwrap_or(""))
+        .replace("{episode}", info.episode_line(locale).as_deref().unwrap_or(""))
         .replace("{year}", &year)
         .replace("{type}", kind)
         .replace("{source}", &info.source);
@@ -553,7 +644,10 @@ mod tests {
             timestamps: Some((1_700_000_000, Some(1_700_003_600))),
             large_image: None,
             large_text: "The Matrix".to_string(),
+            small_image: None,
+            small_text: "ejFlix".to_string(),
             status_display: 2,
+            party: None,
         }
     }
 
@@ -602,14 +696,14 @@ mod tests {
     #[test]
     fn a_picky_client_can_drop_the_fields_that_get_the_activity_rejected() {
         let activity = sample();
-        let bare = activity.command(Shape { assets: false, status_display: false, watching: true });
+        let bare = activity.command(Shape { small: false, party: false, assets: false, status_display: false, watching: true });
         let bare = activity_of(&bare);
         assert_eq!(bare["type"], json!(3));
         assert_eq!(bare["name"], json!("The Matrix"));
         assert!(bare.get("status_display_type").is_none());
         assert!(bare.get("assets").is_none());
 
-        let playing = activity.command(Shape { assets: false, status_display: false, watching: false });
+        let playing = activity.command(Shape { small: false, party: false, assets: false, status_display: false, watching: false });
         let playing = activity_of(&playing);
         assert_eq!(playing["type"], json!(0));
         assert_eq!(playing["name"], json!("The Matrix"));
@@ -625,6 +719,77 @@ mod tests {
         let value = activity_of(&value);
         assert_eq!(value["name"], json!("ejFlix"));
         assert_eq!(value["status_display_type"], json!(0));
+    }
+
+    #[test]
+    fn the_logo_rides_on_the_poster_and_never_alone() {
+        let mut activity = sample();
+        activity.small_image = Some(LOGO_URL.to_string());
+        let alone = activity.command(Shape::full());
+        assert!(activity_of(&alone).get("assets").is_none());
+
+        activity.large_image = Some("https://images.metahub.space/poster/medium/tt0133093/img".to_string());
+        let both = activity.command(Shape::full());
+        let assets = &activity_of(&both)["assets"];
+        assert_eq!(assets["small_image"], json!(LOGO_URL));
+        assert_eq!(assets["small_text"], json!("ejFlix"));
+
+        let mut shape = Shape::full();
+        assert!(degrade(&mut shape));
+        let poster_only = activity.command(shape);
+        let assets = &activity_of(&poster_only)["assets"];
+        assert!(assets.get("small_image").is_none());
+        assert!(assets.get("large_image").is_some());
+    }
+
+    #[test]
+    fn the_episode_counter_needs_a_sensible_size() {
+        let mut activity = sample();
+        activity.party = Some((3, 12));
+        let value = activity.command(Shape::full());
+        assert_eq!(activity_of(&value)["party"]["size"], json!([3, 12]));
+        assert!(activity_of(&value)["party"]["id"].as_str().is_some_and(|id| id.starts_with("ejflix-")));
+
+        activity.party = Some((13, 12));
+        assert!(activity_of(&activity.command(Shape::full())).get("party").is_none());
+        activity.party = Some((0, 12));
+        assert!(activity_of(&activity.command(Shape::full())).get("party").is_none());
+    }
+
+    #[test]
+    fn episode_lines_follow_the_language() {
+        let info = PresenceInfo {
+            title: "Chainsmoker Cat".into(),
+            season: Some(1),
+            episode_number: Some(3),
+            episode_title: Some("La Gata Fumadora".into()),
+            episode_count: Some(12),
+            kind: "series".into(),
+            ..Default::default()
+        };
+        assert_eq!(info.episode_line("es").as_deref(), Some("T1 E3 · La Gata Fumadora"));
+        assert_eq!(info.episode_line("en").as_deref(), Some("S1 E3 · La Gata Fumadora"));
+        assert_eq!(info.party_size(), Some((3, 12)));
+        assert_eq!(fill_template("{episode}", &info, "es"), "T1 E3 · La Gata Fumadora");
+
+        let untitled = PresenceInfo { episode_title: Some("E3".into()), episode_count: Some(2), ..info.clone() };
+        assert_eq!(untitled.episode_line("es").as_deref(), Some("T1 E3"));
+        assert_eq!(untitled.party_size(), None);
+        for generic in ["Episodio 3", "Episode 03", "S01E03", "t1:e3"] {
+            let info = PresenceInfo { episode_title: Some(generic.into()), ..info.clone() };
+            assert_eq!(info.episode_line("es").as_deref(), Some("T1 E3"), "{generic}");
+        }
+        let numbered = PresenceInfo { episode_title: Some("Episodio 30".into()), ..info.clone() };
+        assert_eq!(numbered.episode_line("es").as_deref(), Some("T1 E3 · Episodio 30"));
+
+        let live = PresenceInfo { title: "La 1".into(), episode: Some("Telediario".into()), kind: "live".into(), ..Default::default() };
+        assert_eq!(live.episode_line("es").as_deref(), Some("Telediario"));
+
+        let film = PresenceInfo { title: "F1".into(), year: Some(2025), kind: "movie".into(), ..Default::default() };
+        assert_eq!(film.episode_line("es"), None);
+        assert_eq!(fill_template("{type} · {year}", &film, "es"), "Película · 2025");
+        let undated = PresenceInfo { year: None, ..film };
+        assert_eq!(fill_template("{type} · {year}", &undated, "en"), "Movie");
     }
 
     #[test]

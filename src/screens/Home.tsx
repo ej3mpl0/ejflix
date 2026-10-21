@@ -565,7 +565,8 @@ export function Home({
       <SeeAllContext.Provider value={setSeeAll}>
       <div
         ref={scroller}
-        className="h-full overflow-y-auto"
+        // Settings keeps the scrollbar's room: sections of different heights would shift the page.
+        className={view === "settings" ? "h-full overflow-y-auto [scrollbar-gutter:stable]" : "h-full overflow-y-auto"}
         inert={hasStack || seeAll != null}
         onKeyDown={(e) => handlePosterArrows(e, scroller.current)}
         onScroll={(e) => {

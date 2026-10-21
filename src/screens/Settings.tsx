@@ -59,6 +59,7 @@ type Section =
   | "discord"
   | "language"
   | "account"
+  | "jellyfin"
   | "updates"
   | "about"
   | "parental"
@@ -72,7 +73,8 @@ const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled", "iptvWheelZap", "iptvIncludeVod"],
   discord: ["discord", "discordEnable", "discordHeader", "discordShowPoster", "discordShowTime", "discordShowPaused"],
-  account: ["account", "accountEjflix", "accountCredentials", "accountSignOutAccount", "accountDelete", "jellyfinServer", "switchProfile", "signOut"],
+  account: ["account", "profileTitle", "editProfile", "switchProfile", "accountEjflix", "accountCredentials", "accountSignOutAccount", "accountDelete"],
+  jellyfin: ["jellyfinTitle", "jellyfinServer", "disconnectServer", "signOut"],
   updates: ["updates", "updateAuto"],
   about: ["about", "version", "sourceCode"],
   parental: ["parentalTitle", "parentalMaxRating", "parentalHideUnrated", "parentalChangePin"],
@@ -83,26 +85,149 @@ export type SettingsSectionId = Section;
 const tonal =
   "btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-white/12 px-5 text-[14px] font-semibold hover:bg-white/18 disabled:opacity-60";
 
-/** Settings › Account for a local profile: edit it, link or unlink a Jellyfin account. */
-function LocalAccount({
+/** Settings › Account, top: who is using the app, with edit (local profiles) and switch. */
+function ProfileCard({
   session,
+  server,
   onSessionChange,
   onSwitchProfile,
-  onToast,
 }: {
   session: Session;
+  server: SavedServer | null;
   onSessionChange: (session: Session) => void;
   onSwitchProfile: () => void;
-  onToast: (message: string, action?: { label: string; run: () => void }) => void;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = useState<LocalProfile | null>(null);
+  const local = session.mode === "local";
+
+  const startEditing = async () => {
+    const fallback: LocalProfile = {
+      id: session.userId,
+      name: session.userName,
+      avatar: session.avatarUrl ?? "preset:0",
+      hasPin: false,
+      linked: sessionHasServer(session),
+    };
+    try {
+      const list = await api.localProfilesList();
+      setEditing(list.find((p) => p.id === session.userId) ?? fallback);
+    } catch {
+      setEditing(fallback);
+    }
+  };
+
+  return (
+    <SettingsSection title={t("profileTitle")}>
+      {editing ? (
+        <div className="py-4">
+          <ProfileForm
+            initial={editing}
+            onCancel={() => setEditing(null)}
+            onSaved={(profile) => {
+              setEditing(null);
+              onSessionChange({ ...session, userName: profile.name, avatarUrl: profile.avatar });
+            }}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-4 py-3">
+            <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[16px] font-semibold">{session.userName}</p>
+              <p className="flex items-center gap-1.5 truncate text-[13px] text-dim">
+                {local ? (
+                  t("localProfile")
+                ) : (
+                  <>
+                    <Server size={13} />
+                    {server?.serverName ?? session.serverName ?? "Jellyfin"}
+                  </>
+                )}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-3 py-4">
+            {local ? (
+              <button type="button" onClick={() => void startEditing()} className={tonal}>
+                <Pencil size={16} />
+                {t("editProfile")}
+              </button>
+            ) : null}
+            <button type="button" onClick={onSwitchProfile} className={tonal}>
+              <Users size={16} />
+              {t("switchProfile")}
+            </button>
+          </div>
+        </>
+      )}
+    </SettingsSection>
+  );
+}
+
+/** The server behind the profile: what it is and how to leave it. */
+function ServerRow({ name, detail }: { name: string; detail: string }) {
+  return (
+    <div className="flex items-center gap-4 py-3">
+      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
+        <Server size={18} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[14px] font-medium">{name}</p>
+        <p className="truncate text-[12px] text-dim">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Settings › Jellyfin. A local profile links or unlinks a server here; a Jellyfin user
+ * sees the server they signed in to and can sign out.
+ */
+function JellyfinSection({
+  session,
+  server,
+  onSessionChange,
+  onLogout,
+  onToast,
+}: {
+  session: Session;
+  server: SavedServer | null;
+  onSessionChange: (session: Session) => void;
+  onLogout: () => void;
+  onToast: (message: string, action?: { label: string; run: () => void }) => void;
+}) {
+  const { t } = useI18n();
   const [url, setUrl] = useState("http://localhost:8096");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const linked = sessionHasServer(session);
+
+  if (session.mode !== "local") {
+    return (
+      <SettingsSection title={t("jellyfinServer")} description={t("jellyfinSignedInHint")}>
+        <ServerRow
+          name={server?.serverName ?? session.serverName ?? "Jellyfin"}
+          detail={[server?.serverUrl ?? session.serverUrl, session.userName].filter(Boolean).join(" · ")}
+        />
+        <div className="py-4">
+          <ConfirmButton
+            confirmLabel={t("signOut")}
+            onConfirm={onLogout}
+            trigger={(ask) => (
+              <button type="button" onClick={ask} className={tonal}>
+                <LogOut size={16} />
+                {t("signOut")}
+              </button>
+            )}
+          />
+        </div>
+      </SettingsSection>
+    );
+  }
 
   const link = async () => {
     setBusy(true);
@@ -118,22 +243,6 @@ function LocalAccount({
     }
   };
 
-  const startEditing = async () => {
-    const fallback: LocalProfile = {
-      id: session.userId,
-      name: session.userName,
-      avatar: session.avatarUrl ?? "preset:0",
-      hasPin: false,
-      linked,
-    };
-    try {
-      const list = await api.localProfilesList();
-      setEditing(list.find((p) => p.id === session.userId) ?? fallback);
-    } catch {
-      setEditing(fallback);
-    }
-  };
-
   const unlink = async () => {
     setBusy(true);
     try {
@@ -146,117 +255,70 @@ function LocalAccount({
   };
 
   return (
-    <>
-      <SettingsSection title={t("account")}>
-        {editing ? (
+    <SettingsSection title={t("jellyfinServer")} description={linked ? t("serverLinkedHint") : t("linkServerHint")}>
+      {linked ? (
+        <>
+          <ServerRow
+            name={session.serverName ?? "Jellyfin"}
+            detail={[session.serverUrl, session.jellyfinUserName].filter(Boolean).join(" · ")}
+          />
           <div className="py-4">
-            <ProfileForm
-              initial={editing}
-              onCancel={() => setEditing(null)}
-              onSaved={(profile) => {
-                setEditing(null);
-                onSessionChange({ ...session, userName: profile.name, avatarUrl: profile.avatar });
-              }}
+            <ConfirmButton
+              confirmLabel={t("disconnectServer")}
+              onConfirm={() => unlink()}
+              trigger={(ask) => (
+                <button type="button" disabled={busy} onClick={ask} className={tonal}>
+                  {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Unlink size={16} />}
+                  {t("disconnectServer")}
+                </button>
+              )}
             />
           </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-4 py-3">
-              <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[16px] font-semibold">{session.userName}</p>
-                <p className="truncate text-[13px] text-dim">{t("localProfile")}</p>
-              </div>
-            </div>
-            <div className="flex flex-wrap gap-3 py-4">
-              <button type="button" onClick={() => void startEditing()} className={tonal}>
-                <Pencil size={16} />
-                {t("editProfile")}
-              </button>
-              <button type="button" onClick={onSwitchProfile} className={tonal}>
-                <Users size={16} />
-                {t("switchProfile")}
-              </button>
-            </div>
-          </>
-        )}
-      </SettingsSection>
-      <SettingsSection
-        title={t("jellyfinServer")}
-        description={linked ? t("serverLinkedHint") : t("linkServerHint")}
-      >
-        {linked ? (
-          <>
-            <div className="flex items-center gap-4 py-3">
-              <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-accent-soft text-accent">
-                <Server size={18} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-[14px] font-medium">{session.serverName ?? "Jellyfin"}</p>
-                <p className="truncate text-[12px] text-dim">
-                  {session.serverUrl}
-                  {session.jellyfinUserName ? ` · ${session.jellyfinUserName}` : ""}
-                </p>
-              </div>
-            </div>
-            <div className="py-4">
-              <ConfirmButton
-                confirmLabel={t("disconnectServer")}
-                onConfirm={() => unlink()}
-                trigger={(ask) => (
-                  <button type="button" disabled={busy} onClick={ask} className={tonal}>
-                    {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Unlink size={16} />}
-                    {t("disconnectServer")}
-                  </button>
-                )}
-              />
-            </div>
-          </>
-        ) : (
-          <form
-            className="space-y-3 py-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              void link();
-            }}
+        </>
+      ) : (
+        <form
+          className="space-y-3 py-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void link();
+          }}
+        >
+          <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_1fr]">
+            <input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="http://192.168.1.10:8096"
+              aria-label={t("jellyfinServer")}
+              className={field}
+            />
+            <input
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder={t("username")}
+              aria-label={t("username")}
+              className={field}
+            />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={t("password")}
+              aria-label={t("password")}
+              className={field}
+            />
+          </div>
+          {error ? <p className="text-[13px] text-danger">{error}</p> : null}
+          <button
+            type="submit"
+            disabled={busy || !url.trim() || !username.trim()}
+            className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
           >
-            <div className="grid gap-3 md:grid-cols-[1.4fr_1fr_1fr]">
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="http://192.168.1.10:8096"
-                aria-label={t("jellyfinServer")}
-                className={field}
-              />
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder={t("username")}
-                aria-label={t("username")}
-                className={field}
-              />
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={t("password")}
-                aria-label={t("password")}
-                className={field}
-              />
-            </div>
-            {error ? <p className="text-[13px] text-danger">{error}</p> : null}
-            <button
-              type="submit"
-              disabled={busy || !url.trim() || !username.trim()}
-              className="btn-press inline-flex h-11 items-center gap-2 rounded-btn bg-accent px-5 text-[14px] font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-60"
-            >
-              {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Link2 size={16} />}
-              {t("connect")}
-            </button>
-          </form>
-        )}
-      </SettingsSection>
-    </>
+            {busy ? <LoaderCircle size={16} className="animate-spin" /> : <Link2 size={16} />}
+            {t("connect")}
+          </button>
+        </form>
+      )}
+    </SettingsSection>
   );
 }
 
@@ -340,6 +402,7 @@ export function Settings({
     { id: "addons", label: t("addons"), icon: Puzzle, group: t("settingsGroupSources") },
     { id: "torrents", label: t("torrentsTitle"), icon: Magnet, group: t("settingsGroupSources") },
     { id: "iptv", label: t("iptv"), icon: Tv, group: t("settingsGroupSources") },
+    { id: "jellyfin", label: t("jellyfinTitle"), icon: Server, group: t("settingsGroupSources") },
     { id: "account", label: t("account"), icon: Users, group: t("settingsGroupProfile") },
     { id: "parental", label: t("parentalTitle"), icon: ShieldCheck, group: t("settingsGroupProfile") },
     { id: "discord", label: t("discord"), icon: MessageCircle, group: t("settingsGroupProfile") },
@@ -582,48 +645,26 @@ export function Settings({
 
           {section === "discord" ? <DiscordSection /> : null}
 
-
           {section === "account" ? (
             <>
+              <ProfileCard
+                session={session}
+                server={server}
+                onSessionChange={onSessionChange}
+                onSwitchProfile={onSwitchProfile}
+              />
               <AccountSettings onToast={onToast} />
-              {session.mode === "local" ? (
-                <LocalAccount
-                  session={session}
-                  onSessionChange={onSessionChange}
-                  onSwitchProfile={onSwitchProfile}
-                  onToast={onToast}
-                />
-              ) : (
-                <SettingsSection title={t("account")}>
-                  <div className="flex items-center gap-4 py-3">
-                    <Avatar src={sessionAvatar(session)} name={session.userName} size={56} />
-                    <div className="min-w-0">
-                      <p className="truncate text-[16px] font-semibold">{session.userName}</p>
-                      <p className="flex items-center gap-1.5 truncate text-[13px] text-dim">
-                        <Server size={13} />
-                        {server?.serverName ?? session.serverName ?? "Jellyfin"} · {server?.serverUrl ?? session.serverUrl}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap gap-3 py-4">
-                    <button type="button" onClick={onSwitchProfile} className={tonal}>
-                      <Users size={16} />
-                      {t("switchProfile")}
-                    </button>
-                    <ConfirmButton
-                      confirmLabel={t("signOut")}
-                      onConfirm={onLogout}
-                      trigger={(ask) => (
-                        <button type="button" onClick={ask} className={tonal}>
-                          <LogOut size={16} />
-                          {t("signOut")}
-                        </button>
-                      )}
-                    />
-                  </div>
-                </SettingsSection>
-              )}
             </>
+          ) : null}
+
+          {section === "jellyfin" ? (
+            <JellyfinSection
+              session={session}
+              server={server}
+              onSessionChange={onSessionChange}
+              onLogout={onLogout}
+              onToast={onToast}
+            />
           ) : null}
 
           {section === "about" ? <AboutSection version={version} withUpdates={false} /> : null}
