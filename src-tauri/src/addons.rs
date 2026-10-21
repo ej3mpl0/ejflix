@@ -274,6 +274,10 @@ pub struct AddonClient {
     manifests: Mutex<HashMap<String, (Instant, AddonInfo)>>,
     /// Catalog pages by URL: Home, the hero and Discover ask for the same ones.
     catalogs: Mutex<HashMap<String, (Instant, Vec<AddonMeta>)>>,
+    /// Search pages by URL, kept apart so typing does not push Home's catalogs out. Some
+    /// catalogs take seconds to search: going back to the results, or deleting the last
+    /// letter, answers at once instead of asking them again.
+    searches: Mutex<HashMap<String, (Instant, Vec<AddonMeta>)>>,
     /// `"movie/tmdb:610253"` -> the IMDb id of that title, `None` when it has none.
     imdb_ids: Mutex<HashMap<String, Option<String>>>,
     /// `"es-ES|movie/tt1375666"` -> that title in that language, `None` when TMDB does not
@@ -282,6 +286,7 @@ pub struct AddonClient {
 }
 
 const CATALOG_TTL: Duration = Duration::from_secs(5 * 60);
+const SEARCH_TTL: Duration = Duration::from_secs(10 * 60);
 
 impl AddonClient {
     pub fn new() -> Self {
@@ -294,6 +299,7 @@ impl AddonClient {
             http,
             manifests: Mutex::new(HashMap::new()),
             catalogs: Mutex::new(HashMap::new()),
+            searches: Mutex::new(HashMap::new()),
             imdb_ids: Mutex::new(HashMap::new()),
             localized: Mutex::new(HashMap::new()),
         }
@@ -410,6 +416,7 @@ impl AddonClient {
             self.manifests.lock().unwrap().remove(&url);
             let base = base_of(&url);
             self.catalogs.lock().unwrap().retain(|k, _| !k.starts_with(&base));
+            self.searches.lock().unwrap().retain(|k, _| !k.starts_with(&base));
         }
     }
 
@@ -432,12 +439,14 @@ impl AddonClient {
             path.push_str(&query.join("&"));
         }
         path.push_str(".json");
-        let cacheable = !extra.iter().any(|(k, _)| k == "search");
-        if cacheable {
-            if let Some((at, metas)) = self.catalogs.lock().unwrap().get(&path) {
-                if at.elapsed() < CATALOG_TTL {
-                    return Ok(allowed_only(metas.clone()));
-                }
+        let (cache, ttl) = if extra.iter().any(|(k, _)| k == "search") {
+            (&self.searches, SEARCH_TTL)
+        } else {
+            (&self.catalogs, CATALOG_TTL)
+        };
+        if let Some((at, metas)) = cache.lock().unwrap().get(&path) {
+            if at.elapsed() < ttl {
+                return Ok(allowed_only(metas.clone()));
             }
         }
         let value = self.get_json(&path).await?;
@@ -448,8 +457,8 @@ impl AddonClient {
             .flatten()
             .filter_map(parse_meta)
             .collect();
-        if cacheable {
-            let mut cache = self.catalogs.lock().unwrap();
+        {
+            let mut cache = cache.lock().unwrap();
             if cache.len() > 200 {
                 cache.clear();
             }

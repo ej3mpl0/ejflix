@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { Globe, History, Search, Server, X } from "lucide-react-native";
-import type { AddonCatalog, AddonInfo, Movie } from "../lib/types";
+import type { AddonCatalog, AddonInfo, AddonMeta, Movie } from "../lib/types";
 import { hasServer as sessionHasServer } from "../lib/types";
 import { api } from "../lib/api";
 import { metaToMovie } from "../lib/addons";
@@ -28,6 +28,12 @@ import { SearchX } from "lucide-react-native";
 
 const MAX_SEARCH_CATALOGS = 4;
 const DEBOUNCE_MS = 300;
+/**
+ * How long a search waits for all its sources before painting what it has. Sources that
+ * answer at once still paint together; one that takes seconds to search (some addon
+ * catalogs take ten or more) no longer holds the others back.
+ */
+const FIRST_PAINT_MS = 500;
 const GENRE_LIMIT = 30;
 
 function sameGenre(a: string, b: string): boolean {
@@ -53,8 +59,8 @@ function WrapGrid({ items, onOpen, onPlay }: { items: Movie[]; onOpen: (m: Movie
 
 /**
  * Search across the server and the addon catalogs that support it. Results stay on
- * screen while the next query loads; the history only remembers what was actually
- * opened or submitted with the search key.
+ * screen while the next query loads and fill in as each source answers; the history
+ * only remembers what was actually opened or submitted with the search key.
  */
 export function SearchScreen() {
   const s = useStyles();
@@ -160,32 +166,75 @@ export function SearchScreen() {
     }
     const id = ++request.current;
     setLoading(true);
-    const handle = setTimeout(async () => {
-      const serverJob = hasServer
-        ? api.searchItems(trimmed).catch((err) => {
-            toastRef.current(err instanceof Error ? err.message : String(err));
-            return [] as Movie[];
-          })
-        : Promise.resolve([] as Movie[]);
-      const onlineJob = Promise.all(
-        catalogs.map((c) => api.addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, search: trimmed }).catch(() => [])),
-      );
-      const [server, lists] = await Promise.all([serverJob, onlineJob]);
-      if (id !== request.current) return;
-      const known = new Set(server.map((m) => m.providerIds.Imdb).filter(Boolean));
-      const seen = new Set<string>();
-      const merged: Movie[] = [];
-      for (const meta of lists.flat()) {
-        if (seen.has(meta.id) || (meta.imdb && known.has(meta.imdb))) continue;
-        seen.add(meta.id);
-        merged.push(metaToMovie(meta));
-      }
-      setResults(server);
-      setOnline(merged.slice(0, 40));
-      setSearched(trimmed);
-      setLoading(false);
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(handle);
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    timers.push(
+      setTimeout(() => {
+        let server: Movie[] | null = hasServer ? null : [];
+        const lists: (AddonMeta[] | null)[] = catalogs.map(() => null);
+        let pending = catalogs.length + (hasServer ? 1 : 0);
+        let eager = false;
+        const paint = () => {
+          if (id !== request.current) return;
+          const known = new Set((server ?? []).map((m) => m.providerIds.Imdb).filter(Boolean));
+          const seen = new Set<string>();
+          const merged: Movie[] = [];
+          for (const meta of lists.flatMap((list) => list ?? [])) {
+            if (seen.has(meta.id) || (meta.imdb && known.has(meta.imdb))) continue;
+            seen.add(meta.id);
+            merged.push(metaToMovie(meta));
+          }
+          setResults(server ?? []);
+          setOnline(merged.slice(0, 40));
+          setSearched(trimmed);
+          setLoading(pending > 0);
+        };
+        const found = () => Boolean(server?.length || lists.some((list) => list?.length));
+        // Every source in paints at once. Past the first moment, each one that finds
+        // something paints as it answers; the previous results stay until then.
+        const answered = () => {
+          pending--;
+          if (pending === 0 || (eager && found())) paint();
+        };
+        if (pending === 0) {
+          paint();
+          return;
+        }
+        timers.push(
+          setTimeout(() => {
+            eager = true;
+            if (found()) paint();
+          }, FIRST_PAINT_MS),
+        );
+        if (hasServer) {
+          api
+            .searchItems(trimmed)
+            .then(
+              (list) => {
+                server = list;
+              },
+              (err) => {
+                toastRef.current(err instanceof Error ? err.message : String(err));
+                server = [];
+              },
+            )
+            .finally(answered);
+        }
+        catalogs.forEach((c, i) => {
+          api
+            .addonCatalog({ addonUrl: c.addonUrl, type: c.type, id: c.id, search: trimmed })
+            .then(
+              (metas) => {
+                lists[i] = metas;
+              },
+              () => {
+                lists[i] = [];
+              },
+            )
+            .finally(answered);
+        });
+      }, DEBOUNCE_MS),
+    );
+    return () => timers.forEach((timer) => clearTimeout(timer));
   }, [query, hasServer, catalogs]);
 
   // Genre browsing while idle: the server (movies + series) and one catalog per type.
@@ -253,6 +302,8 @@ export function SearchScreen() {
 
   const showDiscover = query.trim().length < 2;
   const nothing = !!searched && !loading && !results.length && !online.length;
+  // Results of an earlier query, waiting for this one (not this one's still filling in).
+  const stale = !!searched && searched !== query.trim();
   const ofKind = (list: Movie[]) => (kind === "all" ? list : list.filter((movie) => movie.kind === kind));
   const shownResults = ofKind(results);
   const shownOnline = ofKind(online);
@@ -359,7 +410,7 @@ export function SearchScreen() {
             ) : null}
           </>
         ) : (
-          <View style={[s.section, loading && searched ? { opacity: 0.7 } : null]}>
+          <View style={[s.section, stale ? { opacity: 0.7 } : null]}>
             {!searched && loading ? (
               <View style={{ marginHorizontal: -pagePad }}>
                 <GridSkeleton rows={2} />

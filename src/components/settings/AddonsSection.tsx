@@ -83,6 +83,11 @@ export function AddonsSection({
 
   /** Switches one addon off (kept in the list) or back on. */
   const setEnabled = (addon: AddonInfo, enabled: boolean) => {
+    // The built-ins are not in the URL list: each has a switch of its own.
+    if (addon.builtin) {
+      void update({ addons: isPeerflixUrl(addon.url) ? { peerflix: enabled } : { cinemeta: enabled } });
+      return;
+    }
     const current = settings.addons.disabled;
     const disabled = enabled ? current.filter((u) => u !== addon.url) : [...current.filter((u) => u !== addon.url), addon.url];
     void update({ addons: { disabled } });
@@ -188,28 +193,37 @@ export function AddonsSection({
                     </span>
                   ) : null}
                 </p>
-                <p className="truncate text-[12px] text-dim">
-                  {addon.description || addon.url}
-                  {addon.catalogs.length ? `, ${addon.catalogs.length} ${t("catalogs")}` : ""}
-                  {addon.resources.includes("stream") ? `, ${t("streams")}` : ""}
-                </p>
+                {addon.builtin ? (
+                  <p className="text-[12px] leading-[1.45] text-dim">
+                    {isPeerflixUrl(addon.url) ? t("peerflixHint") : t("cinemetaHint")}
+                  </p>
+                ) : (
+                  <p className="truncate text-[12px] text-dim">
+                    {addon.description || addon.url}
+                    {addon.catalogs.length ? `, ${addon.catalogs.length} ${t("catalogs")}` : ""}
+                    {addon.resources.includes("stream") ? `, ${t("streams")}` : ""}
+                  </p>
+                )}
               </div>
-              {!addon.builtin ? (
-                <Toggle checked={addon.enabled} onChange={(on) => setEnabled(addon, on)} label={addon.name} />
-              ) : null}
+              <Toggle checked={addon.enabled} onChange={(on) => setEnabled(addon, on)} label={addon.name} />
               {addon.configureUrl ? (
                 <button
                   type="button"
-                  onClick={() => void api.openExternal(addon.configureUrl ?? "").catch(() => undefined)}
+                  onClick={() => void api.openExternal(addon.configureUrl ?? "").catch((err) => onToast(errorText(t, err)))}
                   aria-label={t("configureAddon")}
                   title={t("configureAddon")}
                   className="icon-hit grid h-9 w-9 shrink-0 place-items-center rounded-full text-dim hover:bg-white/8 hover:text-text"
                 >
                   <Settings2 size={16} />
                 </button>
-              ) : null}
-              {/* Built-ins (Cinemeta) are switched in their own section, never removed. */}
-              {!addon.builtin ? (
+              ) : (
+                // Empty slots keep every switch in one column.
+                <span aria-hidden className="w-9 shrink-0" />
+              )}
+              {/* Built-ins (Peerflix, Cinemeta) are switched off, never removed. */}
+              {addon.builtin ? (
+                <span aria-hidden className="w-9 shrink-0" />
+              ) : (
                 <button
                   type="button"
                   onClick={() => void remove(addon)}
@@ -219,7 +233,7 @@ export function AddonsSection({
                 >
                   <Trash2 size={16} />
                 </button>
-              ) : null}
+              )}
             </div>
           ))
         ) : (
@@ -230,28 +244,6 @@ export function AddonsSection({
         <div ref={importRef} className="max-w-[520px] py-4">
           <AddonImport />
         </div>
-      </SettingsSection>
-      <SettingsSection title="Peerflix">
-        <SettingsRow
-          label={t("peerflixRow")}
-          hint={settings.addons.urls.some(isPeerflixUrl) ? t("peerflixCustom") : t("peerflixHint")}
-        >
-          <Toggle
-            checked={settings.addons.peerflix && !settings.addons.urls.some(isPeerflixUrl)}
-            disabled={settings.addons.urls.some(isPeerflixUrl)}
-            onChange={(peerflix) => void update({ addons: { peerflix } })}
-            label={t("peerflixRow")}
-          />
-        </SettingsRow>
-      </SettingsSection>
-      <SettingsSection title="Cinemeta">
-        <SettingsRow label={t("cinemetaRow")} hint={t("cinemetaHint")}>
-          <Toggle
-            checked={settings.addons.cinemeta}
-            onChange={(cinemeta) => void update({ addons: { cinemeta } })}
-            label={t("cinemetaRow")}
-          />
-        </SettingsRow>
       </SettingsSection>
     </>
   ) : (

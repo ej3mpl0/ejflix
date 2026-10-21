@@ -201,17 +201,17 @@ async fn refresh_presence(app: &tauri::AppHandle) {
         None => Settings::default().discord,
     };
     if !prefs.enabled {
-        state.discord.set(&prefs.client_id, None).await;
+        state.discord.set(&prefs.client_id, false, None).await;
         return;
     }
     let ctx = state.player.context.read().await.clone();
     let Some(ctx) = ctx else {
-        state.discord.set(&prefs.client_id, None).await;
+        state.discord.set(&prefs.client_id, true, None).await;
         return;
     };
     let snap = state.player.snapshot().await;
     if snap.paused && !prefs.show_paused {
-        state.discord.set(&prefs.client_id, None).await;
+        state.discord.set(&prefs.client_id, true, None).await;
         return;
     }
     let locale = load_locale(app).unwrap_or_default();
@@ -274,7 +274,7 @@ async fn refresh_presence(app: &tauri::AppHandle) {
             _ => 2,
         },
     };
-    state.discord.set(&prefs.client_id, Some(activity)).await;
+    state.discord.set(&prefs.client_id, true, Some(activity)).await;
 }
 
 #[tauri::command]
@@ -1589,17 +1589,14 @@ async fn update_install(
 /// the ones the UI links to.
 #[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
-    const ALLOWED: [&str; 4] = [
-        "https://github.com/",
-        "https://discord.com/developers/",
-        "https://introdb.app/",
-        "https://x.com/",
-    ];
-    if !ALLOWED.iter().any(|p| url.starts_with(p)) || url.chars().any(|c| c.is_control() || c == '"') {
+    // Web pages only, on any host: an addon's configuration page lives wherever the addon
+    // does. Any other scheme would reach a file or a protocol handler instead of the browser.
+    let parsed = reqwest::Url::parse(url.trim()).map_err(|_| "Enlace no permitido".to_string())?;
+    if !matches!(parsed.scheme(), "https" | "http") || parsed.host_str().is_none() {
         return Err("Enlace no permitido".into());
     }
     std::process::Command::new("rundll32.exe")
-        .args(["url.dll,FileProtocolHandler", &url])
+        .args(["url.dll,FileProtocolHandler", parsed.as_str()])
         .spawn()
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -1934,7 +1931,12 @@ fn start_progress_loop(app: tauri::AppHandle, state: Arc<Player>, jellyfin: Jell
         loop {
             interval.tick().await;
             let ctx = state.context.read().await.clone();
-            let Some(ctx) = ctx else { continue };
+            let Some(ctx) = ctx else {
+                // Idle too: Discord connects ahead of the first title (its handshake can take
+                // a minute) and follows the open profile's switch.
+                refresh_presence(&app).await;
+                continue;
+            };
             let snap = state.snapshot().await;
             match ctx.source {
                 PlaybackSource::Jellyfin {
@@ -2017,13 +2019,17 @@ async fn addons_all(app: tauri::AppHandle, state: State<'_, AppState>) -> Result
             out.push(addons::polish_addon(info));
         }
     }
-    if addons::wants_free_peerflix(&prefs.urls, prefs.peerflix) {
-        if let Ok(info) = state.addons.manifest(addons::PEERFLIX_URL, true).await {
+    // The built-ins stay listed while switched off, so they can be switched back on. The
+    // free Peerflix only steps aside for a Peerflix manifest of the user's own.
+    if !prefs.urls.iter().any(|u| addons::is_peerflix_url(u)) {
+        if let Ok(mut info) = state.addons.manifest(addons::PEERFLIX_URL, true).await {
+            info.enabled = prefs.peerflix;
             out.push(addons::polish_addon(info));
         }
     }
-    if prefs.cinemeta && !prefs.urls.iter().any(|u| u == addons::CINEMETA_URL) {
-        if let Ok(info) = state.addons.manifest(addons::CINEMETA_URL, true).await {
+    if !prefs.urls.iter().any(|u| u == addons::CINEMETA_URL) {
+        if let Ok(mut info) = state.addons.manifest(addons::CINEMETA_URL, true).await {
+            info.enabled = prefs.cinemeta;
             out.push(info);
         }
     }

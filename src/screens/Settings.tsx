@@ -68,7 +68,7 @@ type Section =
 const SEARCH_INDEX: Record<Exclude<Section, "language">, MessageKey[]> = {
   appearance: ["language", "appLanguage", "contentLanguage", "theme", "themeAuto", "amoled", "posterSize", "autoplayTrailers"],
   playback: ["seekStep", "skipSectionTitle", "skipIntro", "skipRecap", "skipOutro", "nextEpisodeCountdown", "tracks", "preferredAudio", "preferredSubtitles", "subStyleTitle", "subSize", "subColor", "subBackground", "subOutline", "subPosition", "subAssOverride", "playbackSpeed", "rememberSpeed", "showTimeRemaining", "whilePlayingTitle", "watchedThreshold", "nightModeDefault", "opensubtitlesTitle", "opensubtitlesApiKey"],
-  addons: ["addons", "importAddons", "cinemetaRow"],
+  addons: ["addons", "importAddons", "peerflixRow", "cinemetaRow"],
   torrents: ["torrentsTitle", "torrentsEnabled", "torrentsShare", "torrentsUpload", "torrentsDownload", "torrentsCache"],
   iptv: ["iptv", "iptvPrefs", "iptvAutoRefresh", "iptvEpgEnabled", "iptvWheelZap", "iptvIncludeVod"],
   discord: ["discord", "discordEnable", "discordHeader", "discordShowPoster", "discordShowTime", "discordShowPaused"],

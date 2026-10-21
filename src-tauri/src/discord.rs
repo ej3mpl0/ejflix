@@ -1,7 +1,9 @@
 //! Discord Rich Presence over Discord's local IPC pipe (`\\.\pipe\discord-ipc-N`), with
 //! no SDK: a handshake frame, then `SET_ACTIVITY` commands. A background task owns the
 //! connection; the rest of the app only describes the desired activity and the task
-//! reconciles it (reconnecting with a backoff when Discord is not running).
+//! reconciles it (reconnecting with a backoff when Discord is not running). The pipe
+//! opens as soon as presence is on and stays open between titles, because Discord can
+//! take most of a minute to accept the handshake.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -18,6 +20,9 @@ pub const DEFAULT_CLIENT_ID: &str = "1280587438863028236";
 const TICK: Duration = Duration::from_secs(15);
 const RETRY: Duration = Duration::from_secs(30);
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
+/// Discord answers the handshake of some applications only after 50-60 s (ejFlix's own
+/// among them; others answer at once), so it gets far longer than a command.
+const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(90);
 const MAX_FRAME: usize = 64 * 1024;
 /// Discord requires 2..=128 characters for `details` / `state`.
 const MAX_TEXT: usize = 128;
@@ -164,6 +169,8 @@ pub struct Status {
 }
 
 pub struct Discord {
+    /// Presence switched on: the pipe is opened ahead of time and kept open.
+    enabled: RwLock<bool>,
     desired: RwLock<Option<Activity>>,
     client_id: RwLock<String>,
     notify: Notify,
@@ -173,6 +180,7 @@ pub struct Discord {
 impl Discord {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
+            enabled: RwLock::new(false),
             desired: RwLock::new(None),
             client_id: RwLock::new(DEFAULT_CLIENT_ID.to_string()),
             notify: Notify::new(),
@@ -180,14 +188,17 @@ impl Discord {
         })
     }
 
-    /// Describe what Discord should show (`None` clears it). Cheap to call often.
-    pub async fn set(&self, client_id: &str, activity: Option<Activity>) {
+    /// Describe what Discord should show: `enabled` keeps the pipe open (connecting before
+    /// anything plays), `activity` is what to show (`None` clears it). Cheap to call often.
+    pub async fn set(&self, client_id: &str, enabled: bool, activity: Option<Activity>) {
         let client_id = if client_id.trim().is_empty() {
             DEFAULT_CLIENT_ID.to_string()
         } else {
             client_id.trim().to_string()
         };
+        let activity = activity.filter(|_| enabled);
         let changed = {
+            let mut on = self.enabled.write().await;
             let mut current = self.desired.write().await;
             let mut id = self.client_id.write().await;
             let same = match (&*current, &activity) {
@@ -195,8 +206,9 @@ impl Discord {
                 (Some(a), Some(b)) => a.same_as(b),
                 _ => false,
             };
-            let changed = !same || *id != client_id;
+            let changed = !same || *id != client_id || *on != enabled;
             if changed {
+                *on = enabled;
                 *current = activity;
                 *id = client_id;
             }
@@ -225,16 +237,17 @@ impl Discord {
                     _ = me.notify.notified() => {}
                     _ = tokio::time::sleep(TICK) => {}
                 }
+                let enabled = *me.enabled.read().await;
                 let desired = me.desired.read().await.clone();
                 let client_id = me.client_id.read().await.clone();
-                let Some(desired) = desired else {
-                    // Closing the pipe is how presence goes away.
-                    if conn.take().is_some() {
-                        sent = None;
-                        me.set_status(false, None).await;
-                    }
+                if !enabled {
+                    // Switched off: closing the pipe takes the presence away.
+                    conn = None;
+                    sent = None;
+                    retry_after = None;
+                    me.set_status(false, None).await;
                     continue;
-                };
+                }
                 if conn.is_some() && connected_id != client_id {
                     conn = None;
                     sent = None;
@@ -244,20 +257,37 @@ impl Discord {
                     if retry_after.is_some_and(|at| at > Instant::now()) {
                         continue;
                     }
+                    me.set_status(false, None).await;
                     match connect(&client_id).await {
                         Ok(client) => {
                             conn = Some(client);
                             connected_id = client_id.clone();
                             retry_after = None;
                             me.set_status(true, None).await;
+                            // The handshake may have taken a minute: act on what is wanted now.
+                            me.notify.notify_one();
                         }
                         Err(err) => {
                             retry_after = Some(Instant::now() + RETRY);
                             me.set_status(false, Some(err)).await;
-                            continue;
                         }
                     }
+                    continue;
                 }
+                let Some(desired) = desired else {
+                    // Nothing playing: clear what is shown and keep the pipe for the next title.
+                    if sent.is_some() {
+                        let Some(client) = conn.as_mut() else { continue };
+                        sent = None;
+                        if let Err(err) = clear_activity(client).await {
+                            conn = None;
+                            shape = Shape::full();
+                            retry_after = Some(Instant::now() + Duration::from_secs(5));
+                            me.set_status(false, Some(err)).await;
+                        }
+                    }
+                    continue;
+                };
                 if sent.as_ref().is_some_and(|s| s.same_as(&desired)) {
                     continue;
                 }
@@ -309,7 +339,7 @@ async fn connect(client_id: &str) -> Result<NamedPipeClient, String> {
 
 async fn handshake(client: &mut NamedPipeClient, hello: &Value) -> Result<(), String> {
     write_frame(client, 0, hello).await?;
-    let (op, value) = read_frame(client).await?;
+    let (op, value) = read_frame(client, HANDSHAKE_TIMEOUT).await?;
     if op == 2 {
         let message = value
             .get("message")
@@ -377,10 +407,23 @@ fn degrade(shape: &mut Shape) -> bool {
     false
 }
 
+/// `SET_ACTIVITY` with no activity: Discord stops showing one, the pipe stays usable.
+async fn clear_activity(client: &mut NamedPipeClient) -> Result<(), String> {
+    let payload = json!({
+        "cmd": "SET_ACTIVITY",
+        "args": { "pid": std::process::id() },
+        "nonce": format!("{}", now_secs()),
+    });
+    match send_payload(client, &payload).await {
+        Ok(()) | Err(SendFail::Rejected(_)) => Ok(()),
+        Err(SendFail::Io(err)) => Err(err),
+    }
+}
+
 async fn send_payload(client: &mut NamedPipeClient, payload: &Value) -> Result<(), SendFail> {
     write_frame(client, 1, payload).await.map_err(SendFail::Io)?;
     // Discord answers every command; draining the reply keeps the pipe healthy.
-    let (_, value) = read_frame(client).await.map_err(SendFail::Io)?;
+    let (_, value) = read_frame(client, IO_TIMEOUT).await.map_err(SendFail::Io)?;
     if value.get("evt").and_then(|v| v.as_str()) == Some("ERROR") {
         let message = value
             .pointer("/data/message")
@@ -427,7 +470,7 @@ async fn write_frame(client: &mut NamedPipeClient, op: u32, payload: &Value) -> 
         .map_err(|e| format!("Discord: {e}"))
 }
 
-async fn read_frame(client: &mut NamedPipeClient) -> Result<(u32, Value), String> {
+async fn read_frame(client: &mut NamedPipeClient, timeout: Duration) -> Result<(u32, Value), String> {
     let read = async {
         let mut head = [0u8; 8];
         client.read_exact(&mut head).await?;
@@ -440,7 +483,7 @@ async fn read_frame(client: &mut NamedPipeClient) -> Result<(u32, Value), String
         client.read_exact(&mut body).await?;
         Ok::<(u32, Vec<u8>), std::io::Error>((op, body))
     };
-    let (op, body) = tokio::time::timeout(IO_TIMEOUT, read)
+    let (op, body) = tokio::time::timeout(timeout, read)
         .await
         .map_err(|_| "Discord no responde".to_string())?
         .map_err(|e| format!("Discord: {e}"))?;

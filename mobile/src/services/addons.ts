@@ -1,7 +1,8 @@
 /**
  * Stremio addon client (port of `src-tauri/src/addons.rs` and the `addon_*` commands).
- * Manifests are cached 60 min, catalog pages 5 min (never when searching); streams are
- * fetched concurrently from every addon that serves them.
+ * Manifests are cached 60 min, catalog pages 5 min, search pages 10 min (apart, so
+ * typing does not push Home's catalogs out); streams are fetched concurrently from every
+ * addon that serves them.
  */
 import type { AddonInfo, AddonMeta, AddonMetaFull, AddonStream, ImportedAddon, LibraryEntry, ResumeEntry, SettingsPatch } from "../lib/types";
 import { emit } from "./events";
@@ -35,12 +36,17 @@ import { BLOCKED, allows as allowsParental, currentRule } from "./parental";
 const HTTP_TIMEOUT_MS = 25_000;
 const STREAM_TIMEOUT_MS = 20_000;
 
+const SEARCH_TTL_MS = 10 * 60_000;
+
 const manifests = new Map<string, { at: number; addon: LoadedAddon }>();
 const catalogs = new Map<string, { at: number; metas: AddonMeta[] }>();
+/** Some catalogs take seconds to search: going back to a query answers at once. */
+const searches = new Map<string, { at: number; metas: AddonMeta[] }>();
 
 export function clearAddonCaches(): void {
   manifests.clear();
   catalogs.clear();
+  searches.clear();
 }
 
 registerSessionCleanup(clearAddonCaches);
@@ -80,8 +86,10 @@ function forget(rawUrl: string): void {
   }
   manifests.delete(url);
   const base = url.endsWith("/manifest.json") ? url.slice(0, -"/manifest.json".length) : url;
-  for (const key of Array.from(catalogs.keys())) {
-    if (key.startsWith(base)) catalogs.delete(key);
+  for (const cache of [catalogs, searches]) {
+    for (const key of Array.from(cache.keys())) {
+      if (key.startsWith(base)) cache.delete(key);
+    }
   }
 }
 
@@ -169,21 +177,18 @@ export async function addonCatalog(args: {
   const addon = await manifest(url, known[1]);
   const extra = catalogExtras(args);
   const path = catalogPath(addon.info.url, args.type, args.id, extra);
-  const cacheable = !extra.some(([k]) => k === "search");
-  if (cacheable) {
-    const cached = catalogs.get(path);
-    if (cached && nowMs() - cached.at < CATALOG_TTL_MS) return allowedOnly(cached.metas);
-  }
+  const searching = extra.some(([k]) => k === "search");
+  const cache = searching ? searches : catalogs;
+  const cached = cache.get(path);
+  if (cached && nowMs() - cached.at < (searching ? SEARCH_TTL_MS : CATALOG_TTL_MS)) return allowedOnly(cached.metas);
   const value = await getJson(path);
   const rawMetas =
     typeof value === "object" && value !== null && Array.isArray((value as { metas?: unknown }).metas)
       ? ((value as { metas: unknown[] }).metas)
       : [];
   const metas = rawMetas.map(parseMeta).filter((m): m is AddonMeta => m !== null);
-  if (cacheable) {
-    if (catalogs.size > MAX_CATALOG_CACHE) catalogs.clear();
-    catalogs.set(path, { at: nowMs(), metas });
-  }
+  if (cache.size > MAX_CATALOG_CACHE) cache.clear();
+  cache.set(path, { at: nowMs(), metas });
   return allowedOnly(metas);
 }
 
