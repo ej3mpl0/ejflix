@@ -169,6 +169,36 @@ export function nextVideoOf(meta: AddonMetaFull, videoId: string): AddonVideo | 
   return index >= 0 ? list[index + 1] ?? null : null;
 }
 
+/**
+ * Episode the Play button of an online series starts, like Jellyfin's next up: an unfinished
+ * one past the furthest watched episode, else the first aired one after it not ticked off,
+ * else the first episode. Finished episodes leave the progress list, so the watched marks
+ * carry the position. `videos` comes sorted (`sortedVideos`); `progress` is this series'.
+ */
+export function seriesStartVideo(
+  videos: AddonVideo[],
+  progress: ResumeEntry[],
+  played: (video: AddonVideo) => boolean,
+  now = Date.now(),
+): AddonVideo | null {
+  let furthest = -1;
+  videos.forEach((v, i) => {
+    if ((v.season ?? 0) !== 0 && played(v)) furthest = i;
+  });
+  const unfinished = progress
+    .filter((p) => p.durationSeconds > 0 && p.positionSeconds / p.durationSeconds < 0.95)
+    .sort((a, b) => b.updatedMs - a.updatedMs)
+    .map((p) => videos.findIndex((v) => v.id === p.key))
+    .find((i) => i > furthest && !played(videos[i]));
+  if (unfinished != null) return videos[unfinished];
+  const next = videos.find((v, i) => {
+    if (i <= furthest || (v.season ?? 0) === 0 || played(v)) return false;
+    const aired = v.released ? Date.parse(v.released) : NaN;
+    return !Number.isFinite(aired) || aired <= now;
+  });
+  return next ?? videos.find((v) => (v.season ?? 0) !== 0) ?? videos[0] ?? null;
+}
+
 /** Locally remembered progress → "Continue watching (online)" card. */
 /** Identity of an online title in the local list (flags and date added by the store). */
 export function libraryEntryOf(movie: Movie): Omit<LibraryEntry, "saved" | "watched" | "updatedMs"> | null {

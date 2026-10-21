@@ -5,7 +5,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import Animated, { useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from "react-native-reanimated";
 import { CheckCheck, Clapperboard, Globe, Play, RotateCcw, ShieldAlert } from "lucide-react-native";
 import { api } from "../lib/api";
-import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
+import { metaFullToMovie, seriesStartVideo, sortedVideos, videoToMovie } from "../lib/addons";
 import { episodeCode } from "../lib/format";
 import { useDominantColor } from "../lib/tint";
 import { useI18n } from "../lib/locale-context";
@@ -34,8 +34,6 @@ import { DownloadButton } from "../components/media/DownloadButton";
 /** Height of the tint → base gradient under the backdrop (desktop 720 px). */
 const BODY_TINT_H = 720;
 const OVERVIEW_TOGGLE_AT = 240;
-/** Anything past this share of the runtime counts as finished. */
-const FINISHED_AT = 0.95;
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
@@ -62,7 +60,7 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   const [blocked, setBlocked] = useState(false);
   const [reload, setReload] = useState(0);
   const [markingSeason, setMarkingSeason] = useState(false);
-  const { setPlayed } = useUserData();
+  const { setPlayed, flags } = useUserData();
   const scrollY = useSharedValue(0);
 
   const movie = meta ? metaFullToMovie(meta) : seed;
@@ -124,20 +122,19 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
   }, [videos]);
   const isSeries = ext?.type === "series" && videos.length > 0;
 
-  // Resume target: the most recent unfinished episode, else the first one.
-  const resumeEntry = useMemo(() => {
-    if (!ext) return null;
-    return (
-      progress
-        .filter((p) => p.metaId === ext.metaId && p.durationSeconds > 0 && p.positionSeconds / p.durationSeconds < FINISHED_AT)
-        .sort((a, b) => b.updatedMs - a.updatedMs)[0] ?? null
+  const startVideo = useMemo(() => {
+    if (!ext || !meta) return null;
+    return seriesStartVideo(
+      videos,
+      progress.filter((p) => p.metaId === ext.metaId),
+      (video) => flags(videoToMovie(meta, video)).played,
     );
-  }, [progress, ext]);
+  }, [ext, meta, videos, progress, flags]);
 
   useEffect(() => {
     if (season != null || !seasonNumbers.length) return;
-    setSeason(resumeEntry?.season ?? seasonNumbers.find((n) => n !== 0) ?? seasonNumbers[0]);
-  }, [seasonNumbers, season, resumeEntry]);
+    setSeason(startVideo?.season ?? seasonNumbers.find((n) => n !== 0) ?? seasonNumbers[0]);
+  }, [seasonNumbers, season, startVideo]);
 
   const withPosition = useCallback(
     (item: Movie): Movie => {
@@ -174,11 +171,8 @@ export function ExternalDetailsScreen({ route, navigation }: MainScreenProps<"Ex
 
   const startItem = useMemo<Movie | null>(() => {
     if (!isSeries || !meta) return withPosition(movie);
-    const target = resumeEntry
-      ? videos.find((video) => video.id === resumeEntry.key)
-      : (videos.find((video) => (video.season ?? 0) !== 0) ?? videos[0]);
-    return target ? withPosition(videoToMovie(meta, target)) : null;
-  }, [isSeries, meta, movie, resumeEntry, videos, withPosition]);
+    return startVideo ? withPosition(videoToMovie(meta, startVideo)) : null;
+  }, [isSeries, meta, movie, startVideo, withPosition]);
 
   if (!ext) return null;
 

@@ -4,7 +4,7 @@ import type { AddonMetaFull, Movie, ResumeEntry } from "../lib/types";
 import type { DetailsRoute } from "../lib/view-stack";
 import { api } from "../lib/api";
 import { cn, episodeCode, isNewlyAired } from "../lib/format";
-import { metaFullToMovie, sortedVideos, videoToMovie } from "../lib/addons";
+import { metaFullToMovie, seriesStartVideo, sortedVideos, videoToMovie } from "../lib/addons";
 import { useDominantColor } from "../lib/dominant-color";
 import { useBackNavigation } from "../lib/use-back";
 import { useI18n } from "../lib/locale-context";
@@ -121,19 +121,20 @@ export function ExternalDetailsPage({
   }, [videos]);
   const isSeries = ext?.type === "series" && videos.length > 0;
 
-  // Resume target: the most recent unfinished episode, else the first episode.
-  const resumeEntry = useMemo(() => {
-    if (!ext) return null;
-    return progress
-      .filter((p) => p.metaId === ext.metaId && p.durationSeconds > 0 && p.positionSeconds / p.durationSeconds < 0.95)
-      .sort((a, b) => b.updatedMs - a.updatedMs)[0] ?? null;
-  }, [progress, ext]);
+  const startVideo = useMemo(() => {
+    if (!ext || !meta) return null;
+    return seriesStartVideo(
+      videos,
+      progress.filter((p) => p.metaId === ext.metaId),
+      (v) => flags(videoToMovie(meta, v)).played,
+    );
+  }, [ext, meta, videos, progress, flags]);
 
   useEffect(() => {
     if (season != null || !seasons.length) return;
-    const preferred = resumeEntry?.season ?? seasons.find((s) => s !== 0) ?? seasons[0];
+    const preferred = startVideo?.season ?? seasons.find((s) => s !== 0) ?? seasons[0];
     setSeason(preferred);
-  }, [seasons, season, resumeEntry]);
+  }, [seasons, season, startVideo]);
 
   const retryBar = error ? (
     <div className="flex flex-wrap items-center gap-4 rounded-btn bg-surface px-5 py-4">
@@ -195,12 +196,9 @@ export function ExternalDetailsPage({
   };
 
   const startItem: Movie | null = isSeries && meta
-    ? (() => {
-        const target = resumeEntry
-          ? videos.find((v) => v.id === resumeEntry.key)
-          : videos.find((v) => (v.season ?? 0) !== 0) ?? videos[0];
-        return target ? withPosition(videoToMovie(meta, target)) : null;
-      })()
+    ? startVideo
+      ? withPosition(videoToMovie(meta, startVideo))
+      : null
     : withPosition(movie);
   const startCode = startItem?.kind === "Episode" ? episodeCode(startItem, t("episodeCode")) : "";
   const playLabel = startItem?.kind === "Episode" && startCode

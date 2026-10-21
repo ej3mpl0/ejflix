@@ -412,7 +412,9 @@ export function Settings({
   ];
 
   return (
-    <div className="page-enter mx-auto max-w-[1180px] px-page pt-28 pb-16">
+    // Centred on the window, not on the scroller: when a section is tall enough for the
+    // scrollbar, it covers the padding instead of shifting the page.
+    <div className="page-enter ml-[max(0px,calc((100vw-1180px)/2))] w-[min(1180px,100vw)] px-page pt-28 pb-16">
       <div className="mb-8 flex items-center gap-3">
         <button
           type="button"
