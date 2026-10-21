@@ -1,18 +1,19 @@
 <div align="center">
 
-<img src="ejflixLogo.png" alt="" width="104">
+<img src="assets/brand/ejflix-mark.svg" alt="" width="104">
 
 # ejFlix
 
-**A Jellyfin client for Windows 11 that also works without a server.**
-Video plays natively in mpv — 4K, HDR, original codec, no transcoding.
+**A player for Windows 11 that keeps all your films and series in one place.**
+From your Jellyfin server, Stremio addons or IPTV lists, played natively in mpv — 4K,
+HDR, original codec, no transcoding.
 
 [![Latest release](https://img.shields.io/github/v/release/ej3mpl0/ejflix?label=download&style=flat-square)](../../releases/latest)
 [![Build](https://img.shields.io/github/actions/workflow/status/ej3mpl0/ejflix/release.yml?style=flat-square)](../../actions/workflows/release.yml)
 [![License](https://img.shields.io/github/license/ej3mpl0/ejflix?style=flat-square)](LICENSE)
 ![Windows 11](https://img.shields.io/badge/Windows-11-0078d4?style=flat-square)
 
-<img src="docs/screenshots/home.png" alt="Home" width="820">
+<img src="docs/screenshots/home.jpg" alt="Home" width="820">
 
 </div>
 
@@ -73,15 +74,16 @@ favourites and zapping from inside the player.
 addons, IPTV lists, My list, watched titles and progress follow you from one PC to the
 next. The website manages all of it, plus your devices. Local profiles work without it.
 
-**The rest** — Twelve accent themes plus AMOLED black, Discord Rich Presence, and
-updates that install themselves in one click.
+**The rest** — An AMOLED black mode, Discord Rich Presence, and updates that install
+themselves in one click.
 
 <div align="center">
 
 | | |
 | :---: | :---: |
-| <img src="docs/screenshots/details.png" width="400"><br>Details | <img src="docs/screenshots/player.jpg" width="400"><br>Player, skipping the intro |
-| <img src="docs/screenshots/sources.png" width="400"><br>Online sources | <img src="docs/screenshots/continue.png" width="400"><br>Continue watching |
+| <img src="docs/screenshots/details.jpg" width="400"><br>Details | <img src="docs/screenshots/player.jpg" width="400"><br>Player |
+| <img src="docs/screenshots/sources.jpg" width="400"><br>Online sources, by quality | <img src="docs/screenshots/search.jpg" width="400"><br>Search |
+| <img src="docs/screenshots/discover.jpg" width="400"><br>Discover | <img src="docs/screenshots/livetv.jpg" width="400"><br>Live TV with its guide |
 
 </div>
 
@@ -303,8 +305,8 @@ these:
   [serde](https://serde.rs/) and [rustls](https://github.com/rustls/rustls) behind it.
 - **[React](https://react.dev/)**, **[TypeScript](https://www.typescriptlang.org/)**,
   **[Vite](https://vite.dev/)** and **[Tailwind CSS](https://tailwindcss.com/)**, with
-  **[Lucide](https://lucide.dev/)** icons and the **[Inter](https://rsms.me/inter/)** and
-  **[Bebas Neue](https://fonts.google.com/specimen/Bebas+Neue)** typefaces.
+  **[Lucide](https://lucide.dev/)** icons and the **[Rubik](https://fonts.google.com/specimen/Rubik)**
+  and **[Figtree](https://fonts.google.com/specimen/Figtree)** typefaces.
 - **[Jellyfin](https://jellyfin.org/)**, whose HTTP API is what makes the library, the
   playback reporting and the trickplay previews possible.
 - The **[Stremio addon protocol](https://github.com/Stremio/stremio-addon-sdk)** and
