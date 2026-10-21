@@ -20,10 +20,12 @@ env:
   # mpv is not in this repository (the executable is 118 MB), so it is fetched here.
   # Pinned to one build and checked against its hash: what ships has to be the binary
   # this line names and nothing else. The plain x86_64 build, not -v3, because -v3
-  # needs AVX2 and would not start on older processors.
-  MPV_RELEASE: "20260903"
-  MPV_ASSET: "mpv-x86_64-20260903-git-69e63f425a.7z"
-  MPV_SHA256: "418dbfb5feb851cbed33d6c05d8481ba71802621bfd6efe8974522b28d42ac97"
+  # needs AVX2 and would not start on older processors. shinchiro keeps only its last
+  # 30 daily builds: when "Fetch mpv" gets a 404, move these three lines to a current
+  # one (`gh release view <date> -R shinchiro/mpv-winbuild-cmake` shows its sha256).
+  MPV_RELEASE: "20261021"
+  MPV_ASSET: "mpv-x86_64-20261021-git-e471496c56.7z"
+  MPV_SHA256: "4a355f3e89c83fabc730d33fb4e759dfec747806ed2287b61a90d1681b83e8d3"
 
 jobs:
   windows:
