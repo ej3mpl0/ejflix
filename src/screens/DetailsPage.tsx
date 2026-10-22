@@ -23,7 +23,6 @@ import { SeasonChips } from "../components/SeasonChips";
 import { EpisodeList } from "../components/EpisodeList";
 import { SimilarRail } from "../components/SimilarRail";
 import { ProductionInfo } from "../components/ProductionInfo";
-import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { ScrollRow } from "../components/ScrollRow";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
@@ -43,6 +42,7 @@ export function DetailsPage({
   route,
   top,
   refreshToken = 0,
+  onScrolled,
   onBack,
   onPush,
   onPlay,
@@ -53,6 +53,8 @@ export function DetailsPage({
   top: boolean;
   /** Bumped after playback: the resume point and the next episode moved. */
   refreshToken?: number;
+  /** Past the top of the page (the header turns to glass). */
+  onScrolled?: (scrolled: boolean) => void;
   onBack: () => void;
   onPush: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
@@ -230,7 +232,11 @@ export function DetailsPage({
     >
       <div
         className="absolute inset-0 overflow-y-auto"
-        onScroll={(e) => root.current?.style.setProperty("--scroll-y", String(e.currentTarget.scrollTop))}
+        onScroll={(e) => {
+          const y = e.currentTarget.scrollTop;
+          root.current?.style.setProperty("--scroll-y", String(y));
+          onScrolled?.(y > 24);
+        }}
       >
         {!movie && !error ? (
           <DetailsSkeleton />
@@ -469,7 +475,6 @@ export function DetailsPage({
           </>
         )}
       </div>
-      <FloatingTitleBar title={heading} onBack={onBack} />
       {person ? <PersonDialog person={person} onClose={() => setPerson(null)} onOpen={onPush} onPlay={onPlay} /> : null}
       {showTrailer && trailer ? <TrailerDialog url={trailer} title={heading} onClose={() => setShowTrailer(false)} /> : null}
     </div>

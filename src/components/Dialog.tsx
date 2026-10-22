@@ -1,5 +1,12 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "../lib/format";
+
+/**
+ * Where dialogs mount when a screen provides it (Home). A page animates with a transform,
+ * which traps a dialog inside it under the header; the layer sits outside every page.
+ */
+export const DialogLayer = createContext<HTMLElement | null>(null);
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -31,6 +38,7 @@ export function Dialog({
   side?: boolean;
   children: ReactNode;
 }) {
+  const layer = useContext(DialogLayer);
   const panel = useRef<HTMLDivElement>(null);
   const onEscapeRef = useRef(onEscape);
   onEscapeRef.current = onEscape;
@@ -80,7 +88,7 @@ export function Dialog({
     };
   }, []);
 
-  return (
+  const shell = (
     <div
       className={cn(
         "fixed inset-0",
@@ -102,4 +110,5 @@ export function Dialog({
       </div>
     </div>
   );
+  return layer ? createPortal(shell, layer) : shell;
 }

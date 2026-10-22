@@ -8,7 +8,6 @@ import { useCustomLists } from "../lib/lists-context";
 import { fieldClass } from "../lib/ui";
 import { cn } from "../lib/format";
 import { PosterCard } from "../components/PosterCard";
-import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { LoadMoreButton } from "../components/LoadMoreButton";
 import { ListActions } from "../components/ListActions";
 import { ConfirmButton } from "../components/ConfirmButton";
@@ -22,6 +21,7 @@ export function SeeAllPage({
   request,
   top,
   hasServer,
+  onScrolled,
   onBack,
   onOpen,
   onPlay,
@@ -31,6 +31,8 @@ export function SeeAllPage({
   top: boolean;
   /** Without a server its items of a custom list cannot open: they are left out. */
   hasServer: boolean;
+  /** Past the top of the page (the header turns to glass). */
+  onScrolled?: (scrolled: boolean) => void;
   onBack: () => void;
   onOpen: (movie: Movie) => void;
   onPlay: (movie: Movie) => void;
@@ -81,7 +83,12 @@ export function SeeAllPage({
 
   return (
     <div className="page-enter absolute inset-0 z-30 overflow-hidden bg-base text-text" aria-hidden={!top}>
-      <div ref={scroller} className="absolute inset-0 overflow-y-auto" onKeyDown={(e) => handlePosterArrows(e, scroller.current)}>
+      <div
+        ref={scroller}
+        className="absolute inset-0 overflow-y-auto"
+        onKeyDown={(e) => handlePosterArrows(e, scroller.current)}
+        onScroll={(e) => onScrolled?.(e.currentTarget.scrollTop > 24)}
+      >
         <div className="px-page pt-24 pb-16">
           {list && editing ? (
             <form
@@ -174,7 +181,6 @@ export function SeeAllPage({
           {!done && !list ? <LoadMoreButton loading={loading} onLoad={() => void more()} /> : null}
         </div>
       </div>
-      <FloatingTitleBar title={title} onBack={onBack} />
     </div>
   );
 }

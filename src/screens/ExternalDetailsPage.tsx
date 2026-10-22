@@ -19,7 +19,6 @@ import { FavoriteButton } from "../components/FavoriteButton";
 import { WatchedButton } from "../components/WatchedButton";
 import { OnlineSimilarRail } from "../components/OnlineSimilarRail";
 import { ProductionInfo } from "../components/ProductionInfo";
-import { FloatingTitleBar } from "../components/FloatingTitleBar";
 import { DetailsSkeleton, EpisodeListSkeleton } from "../components/Skeletons";
 import { SeasonChips } from "../components/SeasonChips";
 import { TrailerDialog, playableTrailer } from "../components/TrailerDialog";
@@ -40,6 +39,7 @@ export function ExternalDetailsPage({
   route,
   top,
   refreshToken = 0,
+  onScrolled,
   onBack,
   onOpen,
   onPlay,
@@ -48,6 +48,8 @@ export function ExternalDetailsPage({
   top: boolean;
   /** Bumped after playback: the remembered positions moved. */
   refreshToken?: number;
+  /** Past the top of the page (the header turns to glass). */
+  onScrolled?: (scrolled: boolean) => void;
   onBack: () => void;
   /** Opening another title from the "more like this" rail. */
   onOpen: (movie: Movie) => void;
@@ -149,8 +151,8 @@ export function ExternalDetailsPage({
 
   if (blocked) return <RestrictedNotice leaving={route.leaving} top={top} onBack={onBack} />;
 
-  // Without a seed there is nothing to draw until the addon answers; keep the title bar so
-  // the page can always be left.
+  // Without a seed there is nothing to draw until the addon answers; the header's back
+  // arrow still leaves the page.
   if (!ext || !movie) {
     return (
       <div className={cn("absolute inset-0 z-30 overflow-hidden bg-base text-text", route.leaving ? "page-exit" : "page-enter")} aria-hidden={!top}>
@@ -176,7 +178,6 @@ export function ExternalDetailsPage({
             </div>
           </div>
         )}
-        <FloatingTitleBar title={seed?.name ?? ""} onBack={onBack} />
       </div>
     );
   }
@@ -249,7 +250,11 @@ export function ExternalDetailsPage({
     >
       <div
         className="absolute inset-0 overflow-y-auto"
-        onScroll={(e) => root.current?.style.setProperty("--scroll-y", String(e.currentTarget.scrollTop))}
+        onScroll={(e) => {
+          const y = e.currentTarget.scrollTop;
+          root.current?.style.setProperty("--scroll-y", String(y));
+          onScrolled?.(y > 24);
+        }}
       >
         {(
           <>
@@ -470,7 +475,6 @@ export function ExternalDetailsPage({
           </>
         )}
       </div>
-      <FloatingTitleBar title={movie.name} onBack={onBack} />
       {showTrailer && trailer ? <TrailerDialog url={trailer} title={movie.name} onClose={() => setShowTrailer(false)} /> : null}
     </div>
   );

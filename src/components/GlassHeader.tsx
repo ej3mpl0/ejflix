@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ChevronDown, LogOut, Search, Settings as SettingsIcon, Users, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, LogOut, Search, Settings as SettingsIcon, Users, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Logo } from "./Logo";
 import { WindowControls } from "./WindowControls";
@@ -71,7 +71,8 @@ function Tab({
 
 /**
  * Fixed glass header: brand, tabs with a springy indicator, library pinning, search,
- * settings, account menu and the window controls. Doubles as the window drag region.
+ * settings, account menu and the window controls. Doubles as the window drag region and
+ * stays up over the details and "see all" pages, with a back arrow before the logo.
  */
 export function GlassHeader({
   userName,
@@ -88,7 +89,7 @@ export function GlassHeader({
   onSearch,
   onSearchFocus,
   scrolled,
-  hidden = false,
+  onBack,
   onSwitchProfile,
   onLogout,
   onPlayFile,
@@ -114,8 +115,8 @@ export function GlassHeader({
   onSearch: (query: string) => void;
   onSearchFocus: () => void;
   scrolled: boolean;
-  /** Slide the header away (a details page has its own bar). */
-  hidden?: boolean;
+  /** A page (details, see all) is open over the view: an arrow before the logo goes back. */
+  onBack?: () => void;
   onSwitchProfile: () => void;
   onLogout: () => void;
   /** Plays a finished download in the local player. */
@@ -156,7 +157,6 @@ export function GlassHeader({
   // "/" jumps to the search box from anywhere in the app (not while typing); Ctrl+K opens
   // the command palette instead (Home).
   useEffect(() => {
-    if (hidden) return;
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable);
@@ -169,7 +169,7 @@ export function GlassHeader({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [hidden]);
+  }, []);
 
   // Fold the tabs that do not fit the bar into a "More" menu (narrow windows, many libraries).
   useLayoutEffect(() => {
@@ -204,10 +204,12 @@ export function GlassHeader({
       setFit(Math.max(1, count));
     };
     compute();
-    // The ruler changes width when the web font arrives, the bar when the window resizes.
+    // The ruler changes width when the web font arrives, the bar when the window resizes,
+    // the logo block when the back arrow slides in.
     const observer = new ResizeObserver(compute);
     observer.observe(bar);
     observer.observe(ruler);
+    if (logoRef.current) observer.observe(logoRef.current);
     void document.fonts?.ready.then(compute);
     return () => observer.disconnect();
   }, [entriesKey]);
@@ -285,10 +287,7 @@ export function GlassHeader({
 
   return (
     <header
-      className={cn(
-        "glass-header fixed inset-x-0 top-0 z-40 flex h-[64px] items-center transition-transform duration-[var(--duration-sheet)] ease-std",
-        hidden && "-translate-y-full",
-      )}
+      className="glass-header fixed inset-x-0 top-0 z-40 flex h-[64px] items-center"
       data-scrolled={scrolled ? "" : undefined}
       style={{ ["--glass-line" as string]: scrolled ? 0.9 : 0 }}
     >
@@ -296,9 +295,31 @@ export function GlassHeader({
         ref={barRef}
         className="relative flex h-full min-w-0 flex-1 items-center gap-9 px-[var(--spacing-page)]"
         data-tauri-drag-region
-        onDoubleClick={() => getCurrentWindow().toggleMaximize().catch(() => undefined)}
+        onDoubleClick={(e) => {
+          // A quick double back (or tab) click is not a request to maximize.
+          if ((e.target as HTMLElement).closest("button")) return;
+          getCurrentWindow().toggleMaximize().catch(() => undefined);
+        }}
       >
-        <div ref={logoRef} data-tauri-drag-region>
+        <div ref={logoRef} className="flex items-center" data-tauri-drag-region>
+          {/* Slides open while a page is up; inert while closed so Tab skips it. */}
+          <div
+            className={cn(
+              "overflow-hidden transition-[width,opacity] duration-[var(--duration-normal)] ease-std",
+              onBack ? "w-12 opacity-100" : "w-0 opacity-0",
+            )}
+            inert={!onBack}
+          >
+            <button
+              type="button"
+              onClick={onBack}
+              aria-label={t("back")}
+              title={t("back")}
+              className="icon-hit grid h-9 w-9 place-items-center rounded-full bg-white/8 text-text hover:bg-white/14"
+            >
+              <ArrowLeft size={18} />
+            </button>
+          </div>
           <Logo />
         </div>
         {/* Invisible copy of every tab, only to measure how many fit. */}

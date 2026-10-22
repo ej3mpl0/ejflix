@@ -47,6 +47,7 @@ import { useCalendar } from "../lib/calendar";
 import { usePartyGuest } from "../hooks/usePartyGuest";
 import { PartyDialog } from "../components/PartyDialog";
 import { PartyButton } from "../components/PartyButton";
+import { DialogLayer } from "../components/Dialog";
 
 const PAGE_EXIT_MS = 250;
 
@@ -115,6 +116,10 @@ export function Home({
   const [onlineResume, setOnlineResume] = useState<Movie[]>([]);
   const [scrolled, setScrolled] = useState(false);
   const scrolledRef = useRef(false);
+  /** Scrolled past the top, per page over the view (route key, or "seeAll"): the header follows the top one. */
+  const [pageScrolled, setPageScrolled] = useState<Record<string, boolean>>({});
+  /** Dialogs mount here, above the header and out of the pages. */
+  const [dialogLayer, setDialogLayer] = useState<HTMLDivElement | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const scrollOf = useRef(new Map<NavView, number>());
   /** A row opened as a full grid, over the current view. */
@@ -353,8 +358,10 @@ export function Home({
 
   /** Switching to the search view without wiping what is being typed. */
   const openSearch = () => {
+    // The header stays up over the pages: searching from one leaves it.
+    setStack((current) => (current.length ? [] : current));
+    setSeeAll(null);
     if (view === "search") return;
-    setStack([]);
     setSettingsSection(undefined);
     clearSettingsIntent();
     remember();
@@ -401,6 +408,18 @@ export function Home({
 
   const hasStack = stack.length > 0;
   const topIndex = topIndexOf(stack);
+  const topPage = topIndex >= 0 ? String(stack[topIndex].key) : seeAll ? "seeAll" : null;
+  const reportScroll = (page: string) => (value: boolean) =>
+    setPageScrolled((current) => (current[page] === value ? current : { ...current, [page]: value }));
+  // Forget closed pages: the next "see all" opens at the top again.
+  useEffect(() => {
+    const open = new Set(stack.map((route) => String(route.key)));
+    if (seeAll) open.add("seeAll");
+    setPageScrolled((current) => {
+      const kept = Object.entries(current).filter(([page]) => open.has(page));
+      return kept.length === Object.keys(current).length ? current : Object.fromEntries(kept);
+    });
+  }, [stack, seeAll]);
   useBackNavigation(hasStack || picker || seeAll || view === "home" ? null : back);
 
   // Arrow keys / gamepad across the whole window, and the accent that follows the artwork,
@@ -537,6 +556,7 @@ export function Home({
 
   return (
     <div className={`h-full bg-base text-text ${hidden ? "invisible" : ""}`} aria-hidden={hidden}>
+      <DialogLayer.Provider value={dialogLayer}>
       <GlassHeader
         userName={session.userName}
         avatarUrl={sessionAvatar(session)}
@@ -551,11 +571,11 @@ export function Home({
         search={search}
         onSearch={(query) => {
           setSearch(query);
-          if (query && view !== "search") openSearch();
+          if (query) openSearch();
         }}
         onSearchFocus={openSearch}
-        scrolled={scrolled}
-        hidden={hasStack || seeAll != null}
+        scrolled={topPage ? pageScrolled[topPage] ?? false : scrolled}
+        onBack={topIndex >= 0 ? popDetails : seeAll ? () => setSeeAll(null) : undefined}
         onSwitchProfile={onSwitchProfile}
         onLogout={onLogout}
         onPlayFile={(path, title) => play(localMovie(path, title))}
@@ -675,6 +695,7 @@ export function Home({
           request={seeAll}
           top={!hasStack && !picker}
           hasServer={hasServer}
+          onScrolled={reportScroll("seeAll")}
           onBack={() => setSeeAll(null)}
           onOpen={openDetails}
           onPlay={play}
@@ -687,6 +708,7 @@ export function Home({
             route={route}
             top={i === topIndex && !picker}
             refreshToken={refreshToken}
+            onScrolled={reportScroll(String(route.key))}
             onBack={popDetails}
             onOpen={openDetails}
             onPlay={play}
@@ -697,6 +719,7 @@ export function Home({
             route={route}
             top={i === topIndex && !picker}
             refreshToken={refreshToken}
+            onScrolled={reportScroll(String(route.key))}
             onBack={popDetails}
             onPush={openDetails}
             onPlay={play}
@@ -740,6 +763,8 @@ export function Home({
       {partyOpen && !hidden ? (
         <PartyDialog status={party.status} onClose={() => setPartyOpen(false)} onOpenTitle={party.openTitle} />
       ) : null}
+      </DialogLayer.Provider>
+      <div ref={setDialogLayer} />
     </div>
   );
 }
